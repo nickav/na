@@ -174,6 +174,7 @@ public:
 //
 // Types
 //
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -1164,10 +1165,6 @@ inline f64 Abs(f64 a) { return ABS(a); }
 #define ClampBot Min
 
 //
-// Math
-//
-
-//
 // OS
 //
 
@@ -1250,6 +1247,7 @@ File_Lister os_file_list_begin(Arena *arena, String path);
 bool os_file_list_next(File_Lister *iter, File_Info *info);
 void os_file_list_end(File_Lister *iter);
 File_Info os_get_file_info(Arena *arena, String path);
+File_Info os_get_file_info(String path);
 
 Thread os_create_thread(u64 stack_size, Thread_Proc *proc, void *data);
 void os_detatch_thread(Thread thread);
@@ -1828,8 +1826,15 @@ String os_clipboard_get_text() {
 #include <time.h>
 #include <unistd.h> // unlink, usleep, getcwd
 
+#include <pthread.h>
+#include <stdlib.h> // realpath
+
+#define PATH_MAX 1024 // #include <sys/syslimits.h>
+
 static f64 macos_perf_frequency = 0;
 static f64 macos_perf_counter = 0;
+
+static pthread_key_t macos_thread_local_key;
 
 bool os_init() {
   mach_timebase_info_data_t rate_nsec;
@@ -1838,16 +1843,21 @@ bool os_init() {
   macos_perf_frequency = 1000000LL * rate_nsec.numer / rate_nsec.denom;
   macos_perf_counter = mach_absolute_time();
 
+  pthread_key_create(&macos_thread_local_key, NULL);
+
+  init_thread_context(megabytes(32));
+
   return true;
 }
 
 void os_thread_set_context(void *ptr) {
-  // @Incomplete
+  int result = pthread_setspecific(macos_thread_local_key, ptr);
+  assert(result == 0);
 }
 
 void *os_thread_get_context() {
-  // @Incomplete
-  return NULL;
+  void *result = pthread_getspecific(macos_thread_local_key);
+  return result;
 }
 
 f64 os_time_in_miliseconds() {
@@ -1855,6 +1865,8 @@ f64 os_time_in_miliseconds() {
   return (now - macos_perf_counter) / macos_perf_frequency;
 }
 
+// @Incomplete: is this correct?
+#if 0
 f64 os_time_utc_now() {
   struct timespec t;
 
@@ -1866,8 +1878,9 @@ f64 os_time_utc_now() {
   t.tv_sec = mts.tv_sec;
   t.tv_nsec = mts.tv_nsec;
 
-  return cast(u64)t.tv_sec * 1000000ull + t.tv_nsec/1000 + 11644473600000000ull;
+  return (u64)t.tv_sec * 1000000ull + t.tv_nsec/1000 + 11644473600000000ull;
 }
+#endif
 
 void os_sleep(f64 miliseconds) {
   u32 ms = (u32)miliseconds;
@@ -1880,11 +1893,34 @@ String os_get_executable_path() {
   u32 length = 0;
   _NSGetExecutablePath(0, &length);
 
-  char *buffer = (char *)talloc(sizeof(char) * length);
+  char *buffer = (char *)talloc(length);
 
-  if (_NSGetExecutablePath(buffer, &length) < 0) { return {}; }
+  if (_NSGetExecutablePath(buffer, &length) < 0) {
+    return {};
+  }
+
+  u32 alloc_size = Max((u32)length, (u32)PATH_MAX);
+
+  char *normalized = (char *)talloc(alloc_size);
+  if (realpath(buffer, normalized) != NULL)
+  {
+    auto result = make_string(normalized, length);
+    u32 unused_size = alloc_size - result.count;
+    tpop(unused_size);
+    return result;
+  }
 
   return make_string(buffer, length);
+}
+
+String os_get_current_directory() {
+  char *buffer = (char *)talloc(PATH_MAX);
+  getcwd(buffer, PATH_MAX);
+
+  auto result = string_from_cstr(buffer);
+  u32 unused_size = PATH_MAX - result.count;
+  tpop(unused_size);
+  return result;
 }
 
 #include <objc/objc.h>
@@ -1897,7 +1933,6 @@ typedef NSString * NSPasteboardType;
 EXTERN NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
 
 #define objc_msgSend_id ((id (*)(id, SEL))objc_msgSend)
-
 #define objc_method(ReturnType, ...) ((ReturnType (*)(__VA_ARGS__))objc_msgSend)
 
 String os_clipboard_get_text() {
@@ -1930,6 +1965,8 @@ bool os_clipboard_set_text(String text) {
 #if OS_MACOS || OS_LINUX
 
 #include <stdlib.h>   // calloc, free, fseek, ftell, fread, fclose
+#include <dirent.h> // opendir, readdir, closedir
+#include <sys/stat.h> // stat
 
 void *os_alloc(u64 size) {
   return calloc(size, 1);
@@ -1941,9 +1978,6 @@ void os_free(void *memory) {
     memory = 0;
   }
 }
-
-#include <stdio.h> // fopen, fseek, ftell, fread, fclose
-#include <sys/stat.h> // stat
 
 String os_read_entire_file(Arena *arena, String path) {
   String result = {};
@@ -1995,6 +2029,82 @@ bool os_atomic_replace_file(String path, u64 size, void *data) {
   }
 
   return success;
+}
+
+File_Info os_get_file_info(Arena *arena, String path) {
+  struct stat64 stat_info;
+
+  auto mark = arena_get_position(arena);
+
+  char *cpath = string_to_cstr(arena, path);
+  bool file_exists = stat64(cpath, &stat_info) == 0;
+
+  File_Info result = {};
+
+  if (file_exists) {
+    result.name         = path_filename(path);
+    result.date         = stat_info.st_mtime;
+    result.size         = stat_info.st_size;
+    result.is_directory = S_ISDIR(stat_info.st_mode);
+  }
+
+  arena_set_position(arena, mark);
+
+  return result;
+}
+
+struct File_Lister {
+  char *find_path;
+
+  DIR *handle;
+};
+
+File_Lister os_file_list_begin(Arena *arena, String path) {
+  File_Lister result = {};
+
+  char *cpath = string_to_cstr(arena, path);
+  DIR *handle = opendir(cpath);
+
+  result.find_path = cpath;
+  result.handle = handle;
+
+  return result;
+}
+
+bool os_file_list_next(File_Lister *iter, File_Info *info) {
+  if (!iter->handle) {
+    return false;
+  }
+
+  struct dirent *data = readdir(iter->handle);
+
+  if (data != NULL) {
+    struct stat64 stat_info;
+    stat64(iter->find_path, &stat_info);
+
+    String name = string_from_cstr(data->d_name);
+
+    // Ignore . and .. "directories"
+    while (data && (string_equals(name, S(".")) || string_equals(name, S("..")))) {
+      data = readdir(iter->handle);
+      name = string_from_cstr(data->d_name);
+    }
+
+    *info = {};
+    info->name         = name;
+    info->date         = stat_info.st_mtime;
+    info->size         = data->d_reclen;
+    info->is_directory = data->d_type == DT_DIR;
+  }
+
+  return data != NULL;
+}
+
+void os_file_list_end(File_Lister *iter) {
+  if (iter->handle) {
+    closedir(iter->handle);
+    iter->handle = 0;
+  }
 }
 
 bool os_file_exists(String path) {
@@ -2069,6 +2179,11 @@ String os_read_entire_file(String path) {
   return os_read_entire_file(arena, path);
 }
 
+File_Info os_get_file_info(String path) {
+  Arena *arena = thread_get_temporary_arena();
+  return os_get_file_info(arena, path);
+}
+
 String os_get_executable_directory() {
   String result = os_get_executable_path();
   return path_dirname(result);
@@ -2084,15 +2199,22 @@ struct OS_Library {
 
 typedef void (*OS_Library_Proc)(void);
 
-OS_Library os_lib_load(char *path);
+OS_Library os_lib_load(String path);
 void os_lib_unload(OS_Library lib);
 OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name);
 
 #if OS_WINDOWS
 
-OS_Library os_lib_load(char *path) {
+OS_Library os_lib_load(String path) {
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+
+  char *cpath = string_to_cstr(arena, path);
   OS_Library result = {};
-  result.handle = LoadLibraryA(path);
+  result.handle = LoadLibraryA(cpath);
+
+  arena_set_position(arena, mark);
+
   return result;
 }
 
@@ -2111,10 +2233,17 @@ inline OS_Library_Proc gb_dll_proc_address(OS_Library lib, char *proc_name) {
 
 #include <dlfcn.h>
 
-OS_Library os_lib_load(char *path) {
+OS_Library os_lib_load(String path) {
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+
+  char *cpath = string_to_cstr(arena, path);
   OS_Library result = {};
   // TODO(bill): Should this be RTLD_LOCAL?
-  result.handle = dlopen(path, RTLD_LAZY|RTLD_GLOBAL);
+  result.handle = dlopen(cpath, RTLD_LAZY | RTLD_GLOBAL);
+
+  arena_set_position(arena, mark);
+
   return result;
 }
 
