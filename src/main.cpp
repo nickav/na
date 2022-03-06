@@ -1,5 +1,7 @@
 #include "../nja.h"
 
+#include <stdlib.h>
+
 int main() {
   os_init();
 
@@ -34,6 +36,33 @@ int main() {
 
   os_file_list_end(&iter);
 
+  Array<i32> my_array = {};
+  array_push(my_array, 1);
+  array_push(my_array, 2);
+  array_push(my_array, 3);
+
+  For (my_array) {
+    print("%d\n", it);
+  }
+
+  Hash_Table<i32, i32> my_table = {};
+
+  table_add(my_table, 42, 42);
+  table_add(my_table, 3, 3);
+  table_add(my_table, 23, 23);
+  table_add(my_table, 11, 11);
+
+  #if 0
+  For (my_table) {
+    if (it.hash < TABLE_FIRST_VALID_HASH) continue;
+
+    print("key: %d, value: %d\n", it.key, it.value);
+  }
+  #endif
+
+  For_Table (it, my_table) {
+    print("key: %d, value: %d\n", it->key, it->value);
+  }
 
   return 0;
 }

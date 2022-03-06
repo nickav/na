@@ -17,9 +17,6 @@ pushd %build_folder%
 
   IF %errorlevel% NEQ 0 (popd && goto end)
 
-  rmdir /s /q bin
-  mkdir bin
-  mkdir bin\r
   .\%exe_name%
 popd
 

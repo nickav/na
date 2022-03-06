@@ -95,7 +95,7 @@
 #define offset_of(Type, member) ((uint64_t) & (((Type *)0)->member))
 
 #define size_of(type) ((isize)sizeof(type))
-  
+
 #define CONCAT_HELPER(x, y) x##y
 #define CONCAT(x, y) CONCAT_HELPER(x, y)
 
@@ -272,10 +272,10 @@ void memory_zero(void *ptr, u64 size) {
 //
 
 bool nja_is_power_of_two(isize x) {
-  return x > 0 && !(x & (x - 1));
+  return !(x & (x - 1));
 }
 
-u32 nja_next_power_of_two(u32 x) {
+u64 nja_next_power_of_two(u64 x) {
   assert(x != 0);
 
   --x;
@@ -284,16 +284,18 @@ u32 nja_next_power_of_two(u32 x) {
   x |= x >> 4;
   x |= x >> 8;
   x |= x >> 16;
+  x |= x >> 32;
 
   return ++x;
 }
 
-u32 nja_previous_power_of_two(u32 x) {
+u64 nja_previous_power_of_two(u64 x) {
   x |= x >> 1;
   x |= x >> 2;
   x |= x >> 4;
   x |= x >> 8;
   x |= x >> 16;
+  x |= x >> 32;
   return x - (x >> 1);
 }
 
@@ -1130,8 +1132,9 @@ String string_from_string16(Arena *arena, String16 str) {
 
 #define PI       3.14159265359f
 #define TAU      6.28318530717958647692f
-#define EPSILON  0.00001f
-#define EPSILON2 (EPSILON * EPSILON)
+
+#define EPSILON_F32 (1.1920929e-7f)
+#define EPSILON_F64 (2.220446e-16)
 
 #define SQRT_2 0.70710678118
 
@@ -1142,38 +1145,31 @@ String string_from_string16(Arena *arena, String16 str) {
 #define SIGN(x) ((x > 0) - (x < 0))
 #define ABS(x) ((x < 0) ? -(x) : (x))
 
-inline i32 Min(i32 a, i32 b) { return MIN(a, b); }
-inline u32 Min(u32 a, u32 b) { return MIN(a, b); }
-inline u64 Min(u64 a, u64 b) { return MIN(a, b); }
-inline f32 Min(f32 a, f32 b) { return MIN(a, b); }
-inline f64 Min(f64 a, f64 b) { return MIN(a, b); }
+inline i32 min_i32(i32 a, i32 b) { return MIN(a, b); }
+inline u32 min_u32(u32 a, u32 b) { return MIN(a, b); }
+inline u64 min_u64(u64 a, u64 b) { return MIN(a, b); }
+inline f32 min_f32(f32 a, f32 b) { return MIN(a, b); }
+inline f64 min_f64(f64 a, f64 b) { return MIN(a, b); }
 
-inline i32 Max(i32 a, i32 b) { return MAX(a, b); }
-inline u32 Max(u32 a, u32 b) { return MAX(a, b); }
-inline u64 Max(u64 a, u64 b) { return MAX(a, b); }
-inline f32 Max(f32 a, f32 b) { return MAX(a, b); }
-inline f64 Max(f64 a, f64 b) { return MAX(a, b); }
+inline i32 max_i32(i32 a, i32 b) { return MAX(a, b); }
+inline u32 max_u32(u32 a, u32 b) { return MAX(a, b); }
+inline u64 max_u64(u64 a, u64 b) { return MAX(a, b); }
+inline f32 max_f32(f32 a, f32 b) { return MAX(a, b); }
+inline f64 max_f64(f64 a, f64 b) { return MAX(a, b); }
 
-inline i32 Clamp(i32 value, i32 lower, i32 upper) { return CLAMP(value, lower, upper); }
-inline u32 Clamp(u32 value, u32 lower, u32 upper) { return CLAMP(value, lower, upper); }
-inline u64 Clamp(u64 value, u64 lower, u64 upper) { return CLAMP(value, lower, upper); } 
-inline f32 Clamp(f32 value, f32 lower, f32 upper) { return CLAMP(value, lower, upper); }
-inline f64 Clamp(f64 value, f64 lower, f64 upper) { return CLAMP(value, lower, upper); }
+inline i32 clamp_i32(i32 value, i32 lower, i32 upper) { return CLAMP(value, lower, upper); }
+inline u32 clamp_u32(u32 value, u32 lower, u32 upper) { return CLAMP(value, lower, upper); }
+inline u64 clamp_u64(u64 value, u64 lower, u64 upper) { return CLAMP(value, lower, upper); } 
+inline f32 clamp_f32(f32 value, f32 lower, f32 upper) { return CLAMP(value, lower, upper); }
+inline f64 clamp_f64(f64 value, f64 lower, f64 upper) { return CLAMP(value, lower, upper); }
 
-inline i32 Sign(i32 a) { return SIGN(a); }
-inline u32 Sign(u32 a) { return SIGN(a); }
-inline u64 Sign(u64 a) { return SIGN(a); }
-inline f32 Sign(f32 a) { return SIGN(a); }
-inline f64 Sign(f64 a) { return SIGN(a); }
+inline i32 sign_i32(i32 a) { return SIGN(a); }
+inline f32 sign_f32(f32 a) { return SIGN(a); }
+inline f64 sign_f64(f64 a) { return SIGN(a); }
 
-inline i32 Abs(i32 a) { return ABS(a); }
-inline u32 Abs(u32 a) { return ABS(a); }
-inline u64 Abs(u64 a) { return ABS(a); }
-inline f32 Abs(f32 a) { return ABS(a); }
-inline f64 Abs(f64 a) { return ABS(a); }
-
-#define ClampTop Max
-#define ClampBot Min
+inline i32 abs_i32(i32 a) { return ABS(a); }
+inline f32 abs_f32(f32 a) { return ABS(a); }
+inline f64 abs_f64(f64 a) { return ABS(a); }
 
 //
 // OS
@@ -1919,7 +1915,7 @@ String os_get_executable_path() {
     return {};
   }
 
-  u32 alloc_size = Max((u32)length, (u32)PATH_MAX);
+  u32 alloc_size = MAX(length, PATH_MAX);
 
   char *normalized = (char *)talloc(alloc_size);
   if (realpath(buffer, normalized) != NULL)
@@ -1958,7 +1954,7 @@ EXTERN NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
 String os_clipboard_get_text() {
   // NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
   id pasteboard = objc_msgSend_id((id)objc_getClass("NSPasteboard"), sel_registerName("generalPasteboard"));
-  // NSString *string = pasteboard.string;
+  // NSString *string = [pasteboard stringForType:NSPasteboardTypeString];
   id string = objc_method(id, id, SEL, id)(pasteboard, sel_registerName("stringForType:"), (id)NSPasteboardTypeString);
   // char *text = [string UTF8String];
   char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
@@ -2335,7 +2331,7 @@ void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, v
 
       if (result && old_memory_pointer && mode == ALLOCATOR_MODE_RESIZE) {
         // @Incomplete: provide os-level realloc function
-        memory_copy(old_memory_pointer, result, Min(requested_size, old_size));
+        memory_copy(old_memory_pointer, result, MIN(requested_size, old_size));
         os_free(old_memory_pointer);
       }
 
@@ -2354,57 +2350,31 @@ Allocator os_allocator() {
 
 #define For(array) for (auto it : array)
 
-#define Forv(it, array) for (auto it : array)
+#define For_Array(it, array) for (auto it : array)
 
-#define Forp(array)   \
-  auto CONCAT(__array, __LINE__) = (array);   \
-  for (auto it = CONCAT(__array, __LINE__).begin_ptr(); it < CONCAT(__array, __LINE__).end_ptr(); it++)
+#define Forp(array) \
+  auto CONCAT(__array, __LINE__) = (array); \
+  for (auto it = CONCAT(__array, __LINE__).begin(); it < CONCAT(__array, __LINE__).end(); it++)
 
 #define For_Index(array) for (i64 index = 0; index < cast(i64)(array).count; index++)
 
-#define For_Index_Reverse(array)                                               \
+#define For_Index_Reverse(array) \
   for (i64 index = cast(i64)(array).count - 1; index >= 0; index--)
-
-template <typename T> struct Array;
-
-template <typename T>
-struct Array_Iterator {
-  const Array<T> *array;
-  u64 index;
-
-  Array_Iterator(const Array<T> *_array, u64 _index) : array(_array), index(_index) {};
-
-  bool operator != (const Array_Iterator<T> &other) const {
-    return index != other.index;
-  }
-
-  T &operator *() const {
-    return array->data[index];
-  }
-
-  const Array_Iterator &operator++ () {
-    index++;
-    return *this;
-  }
-};
 
 template <typename T>
 struct Array {
   Allocator allocator = os_allocator();
-  u64 capacity = 0;
-  u64 count = 0;
-  T *data = NULL;
+  u64       capacity = 0;
+  u64       count = 0;
+  T *       data = NULL;
 
   T &operator[](u64 i) {
-    assert(i >= 0 && i < capacity);
+    assert(i >= 0 && i < count);
     return data[i];
   }
 
-  Array_Iterator<T> begin() const { return Array_Iterator<T>(this, 0); }
-  Array_Iterator<T> end() const   { return Array_Iterator<T>(this, count); }
-
-  T *begin_ptr() { return data ? &data[0] : NULL; }
-  T *end_ptr()   { return data ? &data[count] : NULL; }
+  T *begin() { return data ? &data[0] : NULL; }
+  T *end()   { return data ? &data[count] : NULL; }
 };
 
 template <typename T>
@@ -2598,46 +2568,61 @@ u64 murmur64_seed(void const *data_, isize len, u64 seed) {
 u32 murmur32(void const *data, isize len) { return murmur32_seed(data, len, 0x9747b28c); }
 u64 murmur64(void const *data, isize len) { return murmur64_seed(data, len, 0x9747b28c); }
 
+u32 fnv32a(void const *data, isize len) {
+  u8 const *bytes = cast(u8 const *)data;
+  u32 h = 0x811c9dc5;
+  
+  for (; len >= 8; len -= 8, bytes += 8) {
+    h = (h ^ bytes[0]) * 0x01000193;
+    h = (h ^ bytes[1]) * 0x01000193;
+    h = (h ^ bytes[2]) * 0x01000193;
+    h = (h ^ bytes[3]) * 0x01000193;
+    h = (h ^ bytes[4]) * 0x01000193;
+    h = (h ^ bytes[5]) * 0x01000193;
+    h = (h ^ bytes[6]) * 0x01000193;
+    h = (h ^ bytes[7]) * 0x01000193;
+  }
+
+  while (len--) {
+    h = (h ^ *bytes++) * 0x01000193;
+  }
+  return h;
+}
+
+u64 fnv64a(void const *data, isize len) {
+  u8 const *bytes = cast(u8 const *)data;
+  u64 h = 0xcbf29ce484222325ull;
+  
+  for (; len >= 8; len -= 8, bytes += 8) {
+    h = (h ^ bytes[0]) * 0x100000001b3ull;
+    h = (h ^ bytes[1]) * 0x100000001b3ull;
+    h = (h ^ bytes[2]) * 0x100000001b3ull;
+    h = (h ^ bytes[3]) * 0x100000001b3ull;
+    h = (h ^ bytes[4]) * 0x100000001b3ull;
+    h = (h ^ bytes[5]) * 0x100000001b3ull;
+    h = (h ^ bytes[6]) * 0x100000001b3ull;
+    h = (h ^ bytes[7]) * 0x100000001b3ull;
+  }
+
+  while (len--) {
+    h = (h ^ *bytes++) * 0x100000001b3ull;
+  }
+  return h;
+}
+
 //
 // Hash Table
 //
 
-#define For_Table(table)                                    \
-  for (auto it = (table).begin_ptr(); it < (table).end_ptr(); it++) \
+#define For_Table(it, table) \
+  for (auto it = (table).begin(); it < (table).end(); it++) \
     if (it->hash < TABLE_FIRST_VALID_HASH) continue; else
 
 const int TABLE_NEVER_OCCUPIED_HASH = 0;
 const int TABLE_REMOVED_HASH = 1;
 const int TABLE_FIRST_VALID_HASH = 2;
 
-template <typename K, typename V> struct Hash_Table;
-template <typename K, typename V> struct Hash_Table_Entry;
-
-template <typename K, typename V>
-struct Hash_Table_Iterator {
-  const Hash_Table<K, V> *table;
-  u64 index;
-
-  Hash_Table_Iterator(const Hash_Table<K, V> *_table, u64 _index) : table(_table), index(_index) {};
-
-  bool operator != (const Hash_Table_Iterator<K, V> &other) const {
-    return index != other.index;
-  }
-
-  Hash_Table_Entry<K, V> &operator *() const {
-    return table->data[index];
-  }
-
-  const Hash_Table_Iterator &operator++ () {
-    index ++;
-
-    while ((index < table->capacity) && (table->data[index].hash < TABLE_FIRST_VALID_HASH)) {
-      index ++;
-    }
-
-    return *this;
-  }
-};
+const int TABLE_SIZE_MIN = 32;
 
 template <typename K>
 bool table_key_equals(const K &a, const K &b) {
@@ -2654,62 +2639,60 @@ bool table_key_equals(const String &a, const String &b) {
 
 template <typename K>
 u32 table_key_hash(K key) {
-  return murmur64(&key, sizeof(K));
+  return murmur32(&key, sizeof(K));
 }
 
 u32 table_key_hash(char *key) {
-  return murmur64(&key, cstr_length(key));
+  return fnv32a(&key, cstr_length(key));
 }
 
 u32 table_key_hash(String key) {
-  return murmur64(key.data, key.count);
+  return fnv32a(key.data, key.count);
 }
 
 template <typename K, typename V>
-struct Hash_Table_Entry {
-  u32 hash;
-  K key;
-  V value;
-};
-
-template <typename K, typename V>
 struct Hash_Table {
-  Allocator allocator = os_allocator();
-  u32 capacity = 0;
-  u32 count = 0;
-  u32 slots_filled = 0;
-  Hash_Table_Entry<K, V> *data = 0;
+  struct Entry {
+    u32 hash;
+    K key;
+    V value;
+  };
 
-  Hash_Table_Entry<K, V> &operator[](u64 i) {
+  Allocator allocator = os_allocator();
+  u32       capacity = 0;
+  u32       count = 0;
+  u32       slots_filled = 0;
+  Entry *   data = 0;
+
+  #if DEBUG
+  u32 add_collisions = 0;
+  u32 find_collisions = 0;
+  #endif
+
+  Entry &operator[](u64 i) {
     assert(i >= 0 && i < capacity);
     return data[i];
   }
 
-  Hash_Table_Iterator<K, V> begin() const {
-    u64 index = 0;
-
-    while ((index < this->capacity) && (this->data[index].hash < TABLE_FIRST_VALID_HASH)) {
-      index ++;
-    }
-
-    return Hash_Table_Iterator<K, V>(this, index); 
-  }
-  Hash_Table_Iterator<K, V> end() const   { return Hash_Table_Iterator<K, V>(this, capacity); }
-
-  Hash_Table_Entry<K, V> *begin_ptr() { return data ? &data[0] : NULL; }
-  Hash_Table_Entry<K, V> *end_ptr()   { return data ? &data[capacity] : NULL; }
+  Entry *begin() { return data ? &data[0] : NULL; }
+  Entry *end()   { return data ? &data[capacity] : NULL; }
 };
 
 template <typename K, typename V>
 void table_init(Hash_Table<K, V> &it, u32 table_size) {
-  it.capacity = nja_next_power_of_two(table_size);
+  it.capacity = max_u32(nja_next_power_of_two(table_size), TABLE_SIZE_MIN);
   it.count = 0;
   it.slots_filled = 0;
 
-  assert((it.capacity & (it.capacity - 1)) == 0); // Must be a power of two!
+  #if DEBUG
+  it.add_collisions = 0;
+  it.find_collisions = 0;
+  #endif
 
-  it.data = (Hash_Table_Entry<K, V> *)Alloc(it.capacity * sizeof(Hash_Table_Entry<K, V>), it.allocator);
-  table_reset(it);
+  assert(nja_is_power_of_two(it.capacity)); // Must be a power of two!
+
+  it.data = (Hash_Table<K, V>::Entry *)Alloc(it.capacity * sizeof(Hash_Table<K, V>::Entry), it.allocator);
+  table_reset(it); // @Speed: Can be removed if data is initialized to zero!
 }
 
 template <typename K, typename V>
@@ -2718,7 +2701,9 @@ void table_reset(Hash_Table<K, V> &it) {
   it.slots_filled = 0;
 
   if (it.data) {
-    for (u32 i = 0; i < it.capacity; i++) { it.data[i].hash = 0; }
+    for (u32 i = 0; i < it.capacity; i++) {
+      it.data[i].hash = 0;
+    }
   }
 }
 
@@ -2735,9 +2720,9 @@ void table_free(Hash_Table<K, V> &it) {
 
 template <typename K, typename V>
 void table_expand(Hash_Table<K, V> &it) {
-  u32 next_capacity = it.capacity ? it.capacity * 2 : 32;
+  u32 next_capacity = it.capacity ? it.capacity * 2 : TABLE_SIZE_MIN;
 
-  assert((next_capacity & (next_capacity - 1)) == 0); // Must be a power of two!
+  assert(nja_is_power_of_two(it.capacity)); // Must be a power of two!
 
   auto *old_data = it.data;
   u32 old_capacity = it.capacity;
@@ -2751,9 +2736,9 @@ void table_expand(Hash_Table<K, V> &it) {
   for (u32 i = 0; i < old_capacity; i++) {
     auto *entry = &old_data[i];
 
-    // Note that if we removed some stuff we will over-allocate the new table.
-    // Maybe we should count the number of clobbers and subtract that? I dunno.
-    if (entry->hash >= TABLE_FIRST_VALID_HASH) table_add(it, entry->key, entry->value);
+    if (entry->hash >= TABLE_FIRST_VALID_HASH) {
+      table_add(it, entry->key, entry->value);
+    }
   }
 
   Free(old_data, it.allocator);
@@ -2762,13 +2747,15 @@ void table_expand(Hash_Table<K, V> &it) {
 // Sets the key-value pair, replacing it if it already exists.
 template <typename K, typename V>
 V *table_set(Hash_Table<K, V> &it, K key, V value) {
-  auto result = table_find_pointer(key);
-  if (result) {
-    *result = value;
-    return result;
-  } else {
-    return table_add(key, value);
+  if (it.data) {
+    auto result = table_find_pointer(key);
+    if (result) {
+      *result = value;
+      return result;
+    }
   }
+
+  return table_add(key, value);
 }
 
 // Adds the given key-value pair to the table, returns a pointer to the inserted item.
@@ -2778,14 +2765,21 @@ V *table_add(Hash_Table<K, V> &it, K key, V value) {
   // slots_filled / capacity >= 7 / 10 ...therefore:
   // slots_filled * 10 >= capacity * 7
   if ((it.slots_filled + 1) * 10 >= it.capacity * 7) table_expand(it);
+
   assert(it.slots_filled <= it.capacity);
 
   u32 hash = table_key_hash(key);
   if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
+
   u32 index = hash & (it.capacity - 1);
 
   while (it.data[index].hash) {
-    index = (index + 1) & (it.capacity - 1);
+    #if DEBUG
+    it.add_collisions += 1;
+    #endif
+
+    index += 1;
+    index &= (it.capacity - 1);
   }
 
   it.count ++;
@@ -2797,22 +2791,21 @@ V *table_add(Hash_Table<K, V> &it, K key, V value) {
 
 template <typename K, typename V>
 V *table_find_pointer(Hash_Table<K, V> &it, K key) {
-  if (!it.data) return NULL; // @Incomplete: do we want this extra branch hit here?
+  if (it.data) {
+    u32 hash = table_key_hash(key);
+    if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
+    u32 index = hash & (it.capacity - 1);
 
-  assert(it.data); // Must be initialized!
+    while (it.data[index].hash) {
+      auto entry = &it.data[index];
 
-  u32 hash = table_key_hash(key);
-  if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
-  u32 index = hash & (it.capacity - 1);
+      if (entry->hash == hash && table_key_equals(&entry->key, &key)) {
+        return &entry->value;
+      }
 
-  while (it.data[index].hash) {
-    auto entry = &it.data[index];
-
-    if (entry->hash == hash && table_key_equals(&entry->key, &key)) {
-      return &entry->value;
+      index += 1;
+      index &= (it.capacity - 1);
     }
-
-    index = (index + 1) & (it.capacity - 1);
   }
 
   return NULL;
@@ -2833,7 +2826,8 @@ bool table_remove(Hash_Table<K, V> &it, K key) {
       return true;
     }
 
-    index = (index + 1) & (it.capacity - 1);
+    index += 1;
+    index &= (it.capacity - 1);
   }
 
   return false;
