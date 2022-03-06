@@ -174,6 +174,10 @@ public:
   #define COMPILER_CLANG 0
 #endif
 
+#if OS_WINDOWS
+#include <intrin.h>
+#endif
+
 //
 // Types
 //
@@ -236,15 +240,27 @@ STATIC_ASSERT(sizeof(u64) == 8);
 #define terabytes(value) (value * 1024LL * 1024LL * 1024LL * 1024LL)
 
 void *memory_copy(void *from, void *to, u64 size) {
+  if (to == NULL) {
+    return NULL;
+  }
+
+#if OS_WINDOWS
+  // @Incomplete: is this good enough?
+  __movsb((u8 *)to, (u8 *)from, size);
+#else
+  // @Speed: make this way faster!
+
   u8 *src = cast(u8 *)from;
   u8 *dest = cast(u8 *)to;
 
   while (size--) { *dest++ = *src++; }
+#endif
 
   return to;
 }
 
 bool memory_equals(void *a_in, void *b_in, u64 size) {
+  // @Speed: make this faster!
   u8 *a = cast(u8 *)a_in;
   u8 *b = cast(u8 *)b_in;
 
@@ -258,13 +274,34 @@ bool memory_equals(void *a_in, void *b_in, u64 size) {
 }
 
 void memory_set(void *ptr, u8 value, u64 size) {
+  // @Speed: heavily optimize!
   u8 *at = cast(u8 *)ptr;
   while (size--) { *at++ = value; }
 }
 
 void memory_zero(void *ptr, u64 size) {
-  u8 *at = cast(u8 *)ptr;
-  while (size--) { *at++ = 0; }
+  memory_set(ptr, 0, size);
+}
+
+void *memory_move(void *from, void *to, u64 size) {
+  // @Speed: heavily optimize!
+  char *d = (char *)to;
+  char *s = (char *)from;
+
+  if (d < s) {
+    while (size--) {
+      *d++ = *s++;
+    }
+  } else {
+    char *lasts = s + (size - 1);
+    char *lastd = d + (size - 1);
+
+    while (size--) {
+      *lastd-- = *lasts--;
+    }
+  }
+
+  return to;
 }
 
 //
@@ -419,9 +456,7 @@ void os_thread_set_context(void *ptr);
 void *os_alloc(u64 size);
 void os_free(void *ptr);
 
-#if OS_WINDOWS
-#include <intrin.h>
-#else
+#if !OS_WINDOWS
 #include <pthread.h>
 #endif
 
@@ -2407,14 +2442,14 @@ void array_remove_unordered(Array<T> &it, u64 index) {
 }
 
 template <typename T>
-void array_remove_while_keeping_order(Array<T> &it, u64 index, u64 num_to_remove = 1) {
+void array_remove_ordered(Array<T> &it, u64 index, u64 num_to_remove = 1) {
   assert(index >= 0 && index < it.count);
   assert(num_to_remove > 0 && index + num_to_remove <= it.count);
 
-  // @Speed: this could be replaced with memory_move, the problem is overlapping memory
-  for (u64 i = index + num_to_remove; i < it.count; i++) {
-    memory_copy(&it.data[i], &it.data[i - num_to_remove], sizeof(T));
-  }
+  u64 i = index + num_to_remove;
+  u64 remaining_count = it.count - i;
+
+  memory_move(&it.data[i], &it.data[index], sizeof(T) * remaining_count);
 
   it.count -= num_to_remove;
 }
@@ -2473,6 +2508,15 @@ T *array_push(Array<T> &it, T item) {
 
   it.data[it.count] = item;
   return &it.data[it.count ++];
+}
+
+template <typename T>
+void array_concat(Array<T> &it, T *data, u64 count) {
+  if (!count|| !data) return;
+
+  array_reserve(it, it.count + count);
+  memory_copy(data, &it.data[it.count], count * sizeof(T));
+  it.count += count;
 }
 
 //

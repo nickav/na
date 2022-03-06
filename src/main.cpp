@@ -37,9 +37,17 @@ int main() {
   os_file_list_end(&iter);
 
   Array<i32> my_array = {};
+  array_push(my_array, 0);
   array_push(my_array, 1);
   array_push(my_array, 2);
   array_push(my_array, 3);
+  array_push(my_array, 4);
+  array_push(my_array, 5);
+
+  array_remove_ordered(my_array, 2, 3);
+
+  i32 stuff[] = {42, 41, 40, 39};
+  array_concat(my_array, stuff, count_of(stuff));
 
   For (my_array) {
     print("%d\n", it);
