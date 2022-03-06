@@ -95,6 +95,9 @@
 #define offset_of(Type, member) ((uint64_t) & (((Type *)0)->member))
 
 #define size_of(type) ((isize)sizeof(type))
+  
+#define CONCAT_HELPER(x, y) x##y
+#define CONCAT(x, y) CONCAT_HELPER(x, y)
 
 #define SWAP(Type, a, b) do { Type tmp = (a); (a) = (b); (b) = tmp; } while (0)
 
@@ -414,24 +417,28 @@ void os_thread_set_context(void *ptr);
 void *os_alloc(u64 size);
 void os_free(void *ptr);
 
-#if !OS_WINDOWS
+#if OS_WINDOWS
+#include <intrin.h>
+#else
 #include <pthread.h>
 #endif
 
 inline u32 thread_get_id() {
-  u32 thread_id;
+  u32 result;
 
 #if OS_WINDOWS
-  thread_id = GetCurrentThreadId();
+
+  u8 *ThreadLocalStorage = (u8 *)__readgsqword(0x30);
+  result = *(u32 *)(ThreadLocalStorage + 0x48);
 #elif OS_MACOS
-  thread_id = pthread_mach_thread_np(pthread_self());
+  result = pthread_mach_thread_np(pthread_self());
 #elif OS_LINUX
-  thread_id = gettid();
+  result = gettid();
 #else
   #error Unsupported architecture for thread_get_id()
 #endif
 
-  return thread_id;
+  return result;
 }
 
 inline u64 rdtsc(void) {
@@ -900,6 +907,10 @@ struct String_Decode {
   u32 codepoint;
   u8 size; // 1 - 4
 };
+
+String16 make_string16(void *data, u64 count) {
+  return String16{count, (u16 *)data};
+}
 
 String_Decode string_decode_utf8(u8 *str, u32 capacity) {
   static u8 high_bits_to_count[] = {
@@ -1435,22 +1446,25 @@ bool os_atomic_replace_file(String path, u64 size, void *data) {
   HANDLE file = CreateFileA(temp_filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 
   if (file == INVALID_HANDLE_VALUE) {
-    log("file", "Failed to open temporary file: %s\n", temp_filename);
+    print("[file] Failed to open temporary file: %s\n", temp_filename);
   }
 
   if (file != INVALID_HANDLE_VALUE) {
     bool write_success = false;
     DWORD bytes_written = 0;
-    if (WriteFile(file, data, safe_truncate_to_u32(size), &bytes_written, 0)) {
+    
+    // @Incomplete: support sizes > u32
+    assert(size <= U32_MAX);
+    if (WriteFile(file, data, (u32)size, &bytes_written, 0)) {
       write_success = bytes_written == size;
     }
 
     CloseHandle(file);
 
     if (write_success) {
-      success = MoveFileExA(temp_filename, path.c_str(), MOVEFILE_REPLACE_EXISTING);
+      success = MoveFileExA(temp_filename, string_to_cstr(path), MOVEFILE_REPLACE_EXISTING);
     } else {
-      log("file", "Failed to atomically replace file: %s -> %s\n", temp_filename, path.c_str());
+      print("[file] Failed to atomically replace file: %s -> %s\n", temp_filename, string_to_cstr(path));
     }
   }
 
@@ -1745,7 +1759,11 @@ bool os_clipboard_set_text(String str) {
   HANDLE handle;
   WCHAR* buffer;
 
-  char *cstr = str.c_str();
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+  char *cstr = string_to_cstr(arena, str);
+
+  defer { arena_set_position(arena, mark); };
 
   count = MultiByteToWideChar(CP_UTF8, 0, cstr, -1, NULL, 0);
 
@@ -1805,7 +1823,9 @@ String os_clipboard_get_text() {
   }
 
   u32 buffer_size = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
-  String result = utf8_from_utf16(buffer, buffer_size);
+  String16 str16 = make_string16(buffer, buffer_size);
+
+  String result = string_from_string16(thread_get_temporary_arena(), str16);
 
   GlobalUnlock(handle);
   CloseClipboard();
