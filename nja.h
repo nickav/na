@@ -231,6 +231,72 @@ STATIC_ASSERT(sizeof(u32) == 4);
 STATIC_ASSERT(sizeof(u64) == 8);
 
 //
+// Helpers
+//
+
+bool nja_is_power_of_two(isize x) {
+  return !(x & (x - 1));
+}
+
+u64 nja_next_power_of_two(u64 x) {
+  assert(x != 0);
+
+  --x;
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  x |= x >> 32;
+
+  return ++x;
+}
+
+u64 nja_previous_power_of_two(u64 x) {
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  x |= x >> 32;
+  return x - (x >> 1);
+}
+
+void *nja_align_forward(void *ptr, isize alignment) {
+  usize p;
+
+  assert(alignment >= 1);
+  assert(nja_is_power_of_two(alignment));
+
+  p = cast(usize)ptr;
+  return cast(void *)((p + (alignment - 1)) & ~(alignment - 1));
+}
+
+u64 nja_align_offset(void *ptr, isize alignment) {
+  usize base_address = (usize)ptr;
+
+  assert(alignment >= 1);
+  assert(nja_is_power_of_two(alignment));
+
+  u64 align_offset = alignment - (base_address & (alignment - 1));
+  align_offset &= (alignment - 1);
+
+  return align_offset;
+}
+
+inline void *nja_pointer_add(void *ptr, isize bytes) {
+  return cast(void *)(cast(u8 *)ptr + bytes);
+}
+
+inline void *nja_pointer_sub(void *ptr, isize bytes) {
+  return cast(void *)(cast(u8 *)ptr - bytes);
+}
+
+inline isize nja_pointer_diff(void *begin, void *end) {
+  return cast(isize)(cast(u8 *)end - cast(u8 *)begin);
+}
+
+//
 // Memory
 //
 
@@ -304,59 +370,43 @@ void *memory_move(void *from, void *to, u64 size) {
   return to;
 }
 
+void memory_swap(void *i, void *j, isize size) {
+  if (i == j) return;
+
+  if (size == 4) {
+    SWAP(u32, *cast(u32 *)i, *cast(u32 *)j);
+  } else if (size == 8) {
+    SWAP(u64, *cast(u64 *)i, *cast(u64 *)j);
+  } else if (size < 8) {
+    u8 *a = cast(u8 *)i;
+    u8 *b = cast(u8 *)j;
+
+    if (a != b) {
+      while (size--) {
+        SWAP(u8, *a, *b);
+        a++, b++;
+      }
+    }
+  } else {
+    char buffer[256];
+
+    // TODO(bill): Is the recursion ever a problem?
+    while (size > size_of(buffer)) {
+      memory_swap(i, j, size_of(buffer));
+      i = nja_pointer_add(i, size_of(buffer));
+      j = nja_pointer_add(j, size_of(buffer));
+      size -= size_of(buffer);
+    }
+
+    memory_copy(i, buffer, size);
+    memory_copy(j, i, size);
+    memory_copy(buffer, j, size);
+  }
+}
+
 //
 // Arenas
 //
-
-bool nja_is_power_of_two(isize x) {
-  return !(x & (x - 1));
-}
-
-u64 nja_next_power_of_two(u64 x) {
-  assert(x != 0);
-
-  --x;
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  x |= x >> 32;
-
-  return ++x;
-}
-
-u64 nja_previous_power_of_two(u64 x) {
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  x |= x >> 32;
-  return x - (x >> 1);
-}
-
-void *nja_align_forward(void *ptr, isize alignment) {
-  usize p;
-
-  assert(alignment >= 1);
-  assert(nja_is_power_of_two(alignment));
-
-  p = cast(usize)ptr;
-  return cast(void *)((p + (alignment - 1)) & ~(alignment - 1));
-}
-
-u64 nja_align_offset(void *ptr, isize alignment) {
-  usize base_address = (usize)ptr;
-
-  assert(alignment >= 1);
-  assert(nja_is_power_of_two(alignment));
-
-  u64 align_offset = alignment - (base_address & (alignment - 1));
-  align_offset &= (alignment - 1);
-
-  return align_offset;
-}
 
 struct Arena {
   u8 *data;
@@ -440,6 +490,105 @@ Arena_Mark arena_get_position(Arena *arena) {
 
 void arena_set_position(Arena *arena, Arena_Mark mark) {
   arena->offset = mark.offset;
+}
+
+//
+// Sorting
+//
+
+#define COMPARE_PROC(name) int name(void *a, void *b)
+typedef COMPARE_PROC(Compare_Proc);
+
+// TODO(bill): Make user definable?
+#define GB__SORT_STACK_SIZE            64
+#define GB__SORT_INSERT_SORT_THRESHOLD  8
+
+#define GB__SORT_PUSH(_base, _limit) do { \
+  stack_ptr[0] = (_base); \
+  stack_ptr[1] = (_limit); \
+  stack_ptr += 2; \
+} while (0)
+
+
+#define GB__SORT_POP(_base, _limit) do { \
+  stack_ptr -= 2; \
+  (_base)  = stack_ptr[0]; \
+  (_limit) = stack_ptr[1]; \
+} while (0)
+
+void nja_sort(void *base_, isize count, isize size, Compare_Proc cmp) {
+  u8 *i, *j;
+  u8 *base = cast(u8 *)base_;
+  u8 *limit = base + count*size;
+  isize threshold = GB__SORT_INSERT_SORT_THRESHOLD * size;
+
+  // NOTE(bill): Prepare the stack
+  u8 *stack[GB__SORT_STACK_SIZE] = {0};
+  u8 **stack_ptr = stack;
+
+  for (;;) {
+    if ((limit-base) > threshold) {
+      // NOTE(bill): Quick sort
+      i = base + size;
+      j = limit - size;
+
+      memory_swap(((limit-base)/size/2) * size + base, base, size);
+      if (cmp(i, j) > 0)    memory_swap(i, j, size);
+      if (cmp(base, j) > 0) memory_swap(base, j, size);
+      if (cmp(i, base) > 0) memory_swap(i, base, size);
+
+      for (;;) {
+        do i += size; while (cmp(i, base) < 0);
+        do j -= size; while (cmp(j, base) > 0);
+        if (i > j) break;
+        memory_swap(i, j, size);
+      }
+
+      memory_swap(base, j, size);
+
+      if (j - base > limit - i) {
+        GB__SORT_PUSH(base, j);
+        base = i;
+      } else {
+        GB__SORT_PUSH(i, limit);
+        limit = j;
+      }
+    } else {
+      // NOTE(bill): Insertion sort
+      for (j = base, i = j+size;
+           i < limit;
+           j = i, i += size) {
+        for (; cmp(j, j+size) > 0; j -= size) {
+          memory_swap(j, j+size, size);
+          if (j == base) break;
+        }
+      }
+
+      if (stack_ptr == stack) break; // NOTE(bill): Sorting is done!
+      GB__SORT_POP(base, limit);
+    }
+  }
+}
+
+#undef GB__SORT_PUSH
+#undef GB__SORT_POP
+
+isize nja_binary_search(void *base, isize count, isize size, void *key, Compare_Proc cmp) {
+  isize start = 0;
+  isize end = count;
+
+  while (start < end) {
+    isize mid = start + (end-start)/2;
+    isize result = cmp(key, cast(u8 *)base + mid*size);
+    if (result < 0)
+      end = mid;
+    else if (result > 0)
+      start = mid+1;
+    else
+      return mid;
+  }
+
+  return -1;
 }
 
 //
@@ -2517,6 +2666,16 @@ void array_concat(Array<T> &it, T *data, u64 count) {
   array_reserve(it, it.count + count);
   memory_copy(data, &it.data[it.count], count * sizeof(T));
   it.count += count;
+}
+
+template <typename T>
+void array_sort(Array<T> &it) {
+  auto compare = [](void *a, void *b) -> i32 {
+    if (*(T *)a == *(T *)b) return 0;
+    return (*(T *)a < *(T *)b) ? -1 : 1;
+  };
+
+  nja_sort(it.data, it.count, sizeof(T), compare);
 }
 
 //

@@ -53,6 +53,11 @@ int main() {
     print("%d\n", it);
   }
 
+  print("sort array:\n");
+  array_sort(my_array);
+
+  For (my_array) { print("%d\n", it); }
+
   Hash_Table<i32, i32> my_table = {};
 
   table_add(my_table, 42, 42);
