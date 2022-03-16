@@ -21,10 +21,10 @@ int main() {
 
   auto cwd = os_get_current_directory();
 
-  File_Info it = {};
-  auto iter = os_file_list_begin(thread_get_temporary_arena(), dir);
+  auto files = os_scan_directory(thread_get_temporary_arena(), cwd);
 
-  while (os_file_list_next(&iter, &it)) {
+  #if 0
+  For (files) {
     auto path = path_join(dir, it.name);
 
     print("%.*s\n", LIT(path));
@@ -33,10 +33,27 @@ int main() {
     print("  date:         %llu\n", it.date);
     print("  is_directory: %d\n", it.is_directory);
   }
+  #endif
 
-  os_file_list_end(&iter);
+  dump(sizeof(File_Info));
+
+  For (files) {
+    auto path = path_join(dir, it->name);
+
+    print("%.*s\n", LIT(path));
+    print("  name:         %.*s\n", LIT(it->name));
+    print("  size:         %llu\n", it->size);
+    print("  date:         %llu\n", it->date);
+    print("  is_directory: %d\n", it->is_directory);
+  }
+
+  print("\n");
+  print("Array:\n");
 
   Array<i32> my_array = {};
+
+  dump(sizeof(Array<i32>));
+
   array_push(my_array, 0);
   array_push(my_array, 1);
   array_push(my_array, 2);
@@ -58,7 +75,12 @@ int main() {
 
   For (my_array) { print("%d\n", it); }
 
+  print("\n");
+  print("Hash_Table:\n");
+
   Hash_Table<i32, i32> my_table = {};
+
+  dump(sizeof(Hash_Table<i32, i32>));
 
   table_add(my_table, 42, 42);
   table_add(my_table, 3, 3);

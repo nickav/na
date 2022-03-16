@@ -509,7 +509,6 @@ typedef COMPARE_PROC(Compare_Proc);
   stack_ptr += 2; \
 } while (0)
 
-
 #define GB__SORT_POP(_base, _limit) do { \
   stack_ptr -= 2; \
   (_base)  = stack_ptr[0]; \
@@ -685,10 +684,10 @@ void reset_temporary_storage() {
 //
 
 struct String {
-  u64 count;
+  i64 count;
   u8 *data;
 
-  u8 &operator[](u64 i) {
+  u8 &operator[](i64 i) {
     assert(i >= 0 && i < count);
     return data[i];
   }
@@ -698,7 +697,7 @@ struct String {
 
 #define LIT(str) (int)str.count, (char *)str.data
 
-String make_string(void *data, u64 count) {
+String make_string(void *data, i64 count) {
   return String{count, (u8 *)data};
 }
 
@@ -745,8 +744,7 @@ String string_from_cstr(char *data) {
   i64 length = cstr_length(data);
 
   if (length > 0) {
-    assert(length <= I64_MAX);
-    result = {(u64)length, (u8 *)data};
+    result = {(i64)length, (u8 *)data};
   }
 
   return result;
@@ -767,7 +765,7 @@ bool string_ends_with(String str, String postfix) {
 String string_slice(String str, i64 start_index, i64 end_index) {
   assert(start_index >= 0 && start_index <= str.count);
   assert(end_index >= 0 && end_index <= str.count);
-  return make_string(str.data + start_index, cast(u64)(end_index - start_index));
+  return make_string(str.data + start_index, end_index - start_index);
 }
 
 String string_slice(String str, i64 start_index) {
@@ -829,7 +827,7 @@ String string_join(String a, String b, String c) {
   return string_join(arena, a, b, c);
 }
 
-void string_advance(String *str, u64 amount) {
+void string_advance(String *str, i64 amount) {
   assert(str->count >= amount);
 
   str->count -= amount;
@@ -860,11 +858,11 @@ String string_printv(Arena *arena, const char *format, va_list args) {
   va_list args2;
   va_copy(args2, args);
 
-  u64 buffer_size = 1024;
+  i64 buffer_size = 1024;
   u8 *buffer = push_array(arena, u8, buffer_size);
 
   String result = {};
-  u64 actual_size = print_to_buffer((char *)buffer, buffer_size, format, args);
+  i64 actual_size = print_to_buffer((char *)buffer, buffer_size, format, args);
 
   if (actual_size > 0) {
     if (actual_size < buffer_size) {
@@ -873,7 +871,7 @@ String string_printv(Arena *arena, const char *format, va_list args) {
     } else {
       arena_pop(arena, buffer_size);
       u8 *fixed_buffer = push_array(arena, u8, actual_size + 1);
-      u64 final_size = print_to_buffer((char *)fixed_buffer, actual_size + 1, format, args2);
+      i64 final_size = print_to_buffer((char *)fixed_buffer, actual_size + 1, format, args2);
       result = make_string(fixed_buffer, final_size);
     }
   }
@@ -993,7 +991,7 @@ struct String_List {
   String_Node *first;
   String_Node *last;
 
-  u64 count;
+  i64 count;
   u64 size_in_bytes;
 };
 
@@ -1080,12 +1078,12 @@ void string_list_print(Arena *arena, String_List *list, const char *format, ...)
 //
 
 struct String16 {
-  u64 count;
+  i64 count;
   u16 *data;
 };
 
 struct String32 {
-  u64 count;
+  i64 count;
   u32 *data;
 };
 
@@ -1094,7 +1092,7 @@ struct String_Decode {
   u8 size; // 1 - 4
 };
 
-String16 make_string16(void *data, u64 count) {
+String16 make_string16(void *data, i64 count) {
   return String16{count, (u16 *)data};
 }
 
@@ -1212,7 +1210,7 @@ String32 string32_from_string(Arena *arena, String str) {
   u8 *p0 = str.data;
   u8 *p1 = str.data + str.count;
   u32 *at = memory;
-  u64 remaining = str.count;
+  i64 remaining = str.count;
 
   while (p0 < p1) {
     auto decode = string_decode_utf8(p0, remaining);
@@ -1223,9 +1221,9 @@ String32 string32_from_string(Arena *arena, String str) {
     remaining -= decode.size;
   }
 
-  u64 alloc_count = str.count;
-  u64 string_count = cast(u64)(at - memory);
-  u64 unused_count = string_count - alloc_count;
+  i64 alloc_count = str.count;
+  i64 string_count = cast(u64)(at - memory);
+  i64 unused_count = string_count - alloc_count;
 
   arena_pop(arena, unused_count * sizeof(u32));
 
@@ -1247,9 +1245,9 @@ String string_from_string32(Arena *arena, String32 str) {
     at += size;
   }
 
-  u64 alloc_count = str.count * 4;
-  u64 string_count = cast(u64)(at - memory);
-  u64 unused_count = alloc_count - string_count;
+  i64 alloc_count = str.count * 4;
+  i64 string_count = cast(u64)(at - memory);
+  i64 unused_count = alloc_count - string_count;
 
   arena_pop(arena, unused_count);
 
@@ -1263,7 +1261,7 @@ String16 string16_from_string(Arena *arena, String str) {
   u8 *p0 = str.data;
   u8 *p1 = str.data + str.count;
   u16 *at = memory;
-  u64 remaining = str.count;
+  i64 remaining = str.count;
 
   while (p0 < p1) {
     auto decode = string_decode_utf8(p0, remaining);
@@ -1276,9 +1274,9 @@ String16 string16_from_string(Arena *arena, String str) {
 
   *at = 0;
 
-  u64 alloc_count = str.count + 1;
-  u64 string_count = cast(u64)(at - memory);
-  u64 unused_count = alloc_count - string_count - 1;
+  i64 alloc_count = str.count + 1;
+  i64 string_count = cast(u64)(at - memory);
+  i64 unused_count = alloc_count - string_count - 1;
 
   arena_pop(arena, unused_count * sizeof(u16));
 
@@ -1380,11 +1378,6 @@ enum File_Mode {
 
 struct File_Lister;
 
-struct Scan_Result {
-  File_Info *files;
-  u32 count;
-};
-
 #define THREAD_PROC(name) u32 name(void *data)
 typedef THREAD_PROC(Thread_Proc);
 
@@ -1406,6 +1399,8 @@ struct OS_Memory {
 };
 
 bool os_init();
+
+//template <typename T> struct Array;
 
 void *os_alloc(u64 size);
 void os_free(void *ptr);
@@ -1429,14 +1424,15 @@ bool os_write_entire_file(String path, String contents);
 bool os_atomic_replace_file(String path, u64 size, void *data);
 bool os_delete_file(String path);
 bool os_file_exists(String path);
+
 bool os_make_directory(String path);
 bool os_delete_directory(String path);
 bool os_delete_entire_directory(String path);
-Scan_Result os_scan_directory(Arena *arena, String path);
 
 File_Lister os_file_list_begin(Arena *arena, String path);
 bool os_file_list_next(File_Lister *iter, File_Info *info);
 void os_file_list_end(File_Lister *iter);
+
 File_Info os_get_file_info(Arena *arena, String path);
 File_Info os_get_file_info(String path);
 
@@ -1725,56 +1721,6 @@ bool os_delete_entire_directory(String path) {
   return success;
 }
 
-Scan_Result os_scan_directory(Arena *arena, String path) {
-  Scan_Result result = {};
-
-  // :ScratchMemory
-  char *find_path = cstr_print(arena, "%.*s\\*.*", LIT(path));
-
-  // @Speed: we could avoid doing this twice by assuming a small-ish number to start and only re-scanning if we're wrong
-  // but then that wastes a bunch of memory
-  // and is this block actually slow?
-  u32 count = 0; 
-  {
-    WIN32_FIND_DATA data;
-    HANDLE handle = FindFirstFile(find_path, &data);
-
-    if (handle != INVALID_HANDLE_VALUE) {
-      do {
-        count += 1;
-      } while (FindNextFile(handle, &data));
-    }
-
-    FindClose(handle);
-  }
-
-  result.files = push_array(arena, File_Info, count);
-
-  WIN32_FIND_DATA data;
-  HANDLE handle = FindFirstFile(find_path, &data);
-
-  if (handle != INVALID_HANDLE_VALUE) {
-    do {
-      String name = string_from_cstr(data.cFileName);
-      // Ignore . and .. "directories"
-      if (string_equals(name, S(".")) || string_equals(name, S(".."))) continue;
-
-      File_Info *info = &result.files[result.count];
-      result.count += 1;
-
-      *info = {};
-      info->name         = string_copy(arena, name);
-      info->date         = ((u64)data.ftLastWriteTime.dwHighDateTime << (u64)32) | (u64)data.ftLastWriteTime.dwLowDateTime;
-      info->size         = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
-      info->is_directory = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
-
-    } while (FindNextFile(handle, &data));
-  }
-
-  FindClose(handle);
-
-  return result;
-}
 
 struct File_Lister {
   char *find_path;
@@ -2549,10 +2495,10 @@ template <typename T>
 struct Array {
   Allocator allocator = os_allocator();
   u64       capacity = 0;
-  u64       count = 0;
+  i64       count = 0;
   T *       data = NULL;
 
-  T &operator[](u64 i) {
+  T &operator[](i64 i) {
     assert(i >= 0 && i < count);
     return data[i];
   }
@@ -2562,8 +2508,27 @@ struct Array {
 };
 
 template <typename T>
+void array_init(Array<T> &it, u64 initial_capacity = 16) {
+  it.count = 0;
+  it.data = NULL;
+  array_resize(it, initial_capacity);
+}
+
+template <typename T>
 void array_reset(Array<T> &it) {
   it.count = 0;
+}
+
+template <typename T>
+void array_resize(Array<T> &it, u64 next_capacity) {
+  if (it.data && it.capacity == next_capacity) return;
+
+  u64 prev_size = it.capacity * sizeof(T);
+  u64 next_size = next_capacity * sizeof(T);
+
+  it.data = (T *)Realloc(it.data, next_size, prev_size, it.allocator);
+  assert(it.data);
+  it.capacity = next_capacity;
 }
 
 template <typename T>
@@ -2584,14 +2549,14 @@ void *array_pop(Array<T> &it) {
 }
 
 template <typename T>
-void array_remove_unordered(Array<T> &it, u64 index) {
+void array_remove_unordered(Array<T> &it, i64 index) {
   assert(index >= 0 && index < it.count);
   memory_copy(&it.data[it.count - 1], &it.data[index], sizeof(T));
   it.count--;
 }
 
 template <typename T>
-void array_remove_ordered(Array<T> &it, u64 index, u64 num_to_remove = 1) {
+void array_remove_ordered(Array<T> &it, i64 index, i64 num_to_remove = 1) {
   assert(index >= 0 && index < it.count);
   assert(num_to_remove > 0 && index + num_to_remove <= it.count);
 
@@ -2601,25 +2566,6 @@ void array_remove_ordered(Array<T> &it, u64 index, u64 num_to_remove = 1) {
   memory_move(&it.data[i], &it.data[index], sizeof(T) * remaining_count);
 
   it.count -= num_to_remove;
-}
-
-template <typename T>
-void array_resize(Array<T> &it, u64 next_capacity) {
-  if (it.data && it.capacity == next_capacity) return;
-
-  u64 prev_size = it.capacity * sizeof(T);
-  u64 next_size = next_capacity * sizeof(T);
-
-  it.data = (T *)Realloc(it.data, next_size, prev_size, it.allocator);
-  assert(it.data);
-  it.capacity = next_capacity;
-}
-
-template <typename T>
-void array_init(Array<T> &it, u64 initial_capacity = 16) {
-  it.count = 0;
-  it.data = NULL;
-  array_resize(it, initial_capacity);
 }
 
 template <typename T>
@@ -2863,16 +2809,16 @@ struct Hash_Table {
 
   Allocator allocator = os_allocator();
   u32       capacity = 0;
-  u32       count = 0;
+  i32       count = 0;
   u32       slots_filled = 0;
   Entry *   data = 0;
 
-  #if DEBUG
+  #if 0
   u32 add_collisions = 0;
   u32 find_collisions = 0;
   #endif
 
-  Entry &operator[](u64 i) {
+  Entry &operator[](i64 i) {
     assert(i >= 0 && i < capacity);
     return data[i];
   }
@@ -2887,7 +2833,7 @@ void table_init(Hash_Table<K, V> &it, u32 table_size) {
   it.count = 0;
   it.slots_filled = 0;
 
-  #if DEBUG
+  #if 0
   it.add_collisions = 0;
   it.find_collisions = 0;
   #endif
@@ -2977,7 +2923,7 @@ V *table_add(Hash_Table<K, V> &it, K key, V value) {
   u32 index = hash & (it.capacity - 1);
 
   while (it.data[index].hash) {
-    #if DEBUG
+    #if 0
     it.add_collisions += 1;
     #endif
 
@@ -3050,6 +2996,108 @@ V table_find(Hash_Table<K, V> &it, K key) {
 template <typename K, typename V>
 V table_contains(Hash_Table<K, V> &it, K key) {
   return table_find_pointer(it, key) != NULL;
+}
+
+//
+// Extended OS Functions
+//
+
+Array<File_Info *> os_scan_directory(Arena *arena, String path) {
+  #if 0
+  Array<File_Info> result = {};
+  // @Incomplete @Memory
+  result.allocator = os_allocator(); // arena_allocator(arena);
+
+  i64 count = 0;
+  {
+    auto mark = arena_get_position(arena);
+    defer { arena_set_position(arena, mark); };
+
+    auto handle = os_file_list_begin(arena, path);
+
+    File_Info info = {};
+    while (os_file_list_next(&handle, &info)) {
+      count += 1;
+    }
+
+    os_file_list_end(&handle);
+  }
+
+  array_init(result, count);
+
+  auto handle = os_file_list_begin(arena, path);
+
+  File_Info info = {};
+  while (os_file_list_next(&handle, &info)) {
+    auto it = array_push(result, info);
+    it->name = string_copy(arena, info.name);
+  }
+
+  os_file_list_end(&handle);
+  #endif
+
+  Array<File_Info *> result = {};
+  // @Incomplete @Memory
+  result.allocator = os_allocator(); // arena_allocator(arena);
+
+  array_init(result, 32); // 32 should be enough for anybody.
+
+  auto handle = os_file_list_begin(arena, path);
+
+  File_Info info = {};
+  while (os_file_list_next(&handle, &info)) {
+    auto ptr = array_push(result);
+
+    auto it = push_struct(arena, File_Info);
+    memory_copy(&info, it, sizeof(File_Info));
+    it->name = string_copy(arena, info.name);
+
+    *ptr = it;
+  }
+
+  os_file_list_end(&handle);
+
+  return result;
+}
+
+Array<File_Info *> os_scan_directory(String path) {
+  return os_scan_directory(thread_get_temporary_arena(), path);
+}
+
+Array<File_Info *> os_scan_directory_recursive(Arena *arena, String path, u32 max_depth) {
+  Array<File_Info *> results = {};
+  Array<String> dirs = {};
+
+  // @Incomplete @Memory
+  //results.allocator = __temporary_allocator;
+  //dirs.allocator = __temporary_allocator;
+
+  array_push(dirs, path);
+
+  for (u32 i = 0; i < max_depth + 1; i++) {
+    u32 n = dirs.count;
+
+    for (u32 dir_index = 0; dir_index < n; dir_index++) {
+      auto infos = os_scan_directory(arena, dirs[dir_index]);
+
+      For (infos) {
+        if (it->is_directory) {
+          auto path = path_join(dirs[dir_index], it->name);
+          array_push(dirs, path);
+        } else {
+          array_push(results, it);
+        }
+      }
+    }
+
+    array_remove_ordered(dirs, 0, n);
+  }
+
+  return results;
+}
+
+Array<File_Info *> os_scan_directory_recursive(String path, u32 max_depth) {
+  return os_scan_directory_recursive(thread_get_temporary_arena(), path, max_depth);
 }
 
 
