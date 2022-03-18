@@ -3475,5 +3475,288 @@ Array<File_Info *> os_scan_files_recursive(String path, u32 max_depth = 1024) {
   return os_scan_files_recursive(thread_get_temporary_arena(), path, max_depth);
 }
 
+//
+// Threading Primitives
+//
+
+struct Semaphore {
+  void *handle;
+};
+
+Semaphore create_semaphore(u32 max_count);
+void signal(Semaphore *sem);
+void wait_for(Semaphore *sem, bool infinite);
+void destroy_semaphore(Semaphore *sem);
+
+struct Mutex {
+  void *handle;
+};
+
+Mutex create_mutex(u32 spin_count = 0);
+void aquire_lock(Mutex *mutex);
+bool try_aquire_lock(Mutex *mutex);
+void release_lock(Mutex *mutex);
+void destroy_mutex(Mutex *mutex);
+
+#define WORKER_PROC(name) void name(void *data)
+typedef WORKER_PROC(Worker_Proc);
+
+struct Work_Entry {
+  Worker_Proc *callback;
+  void *data;
+};
+
+struct Work_Queue {
+  u32 volatile completion_goal;
+  u32 volatile completion_count;
+
+  u32 volatile next_entry_to_write;
+  u32 volatile next_entry_to_read;
+  Semaphore semaphore;
+
+  Work_Entry entries[256];
+};
+
+struct Worker_Params {
+  Work_Queue *queue;
+};
+
+void create_work_queue(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params);
+void add_entry(Work_Queue *queue, Worker_Proc *callback, void *data);
+void complete_all_work(Work_Queue *queue);
+
+#if OS_WINDOWS
+
+Semaphore create_semaphore(u32 max_count) {
+  Semaphore result = {};
+  result.handle = CreateSemaphoreEx(0, 0, max_count, 0, 0, SEMAPHORE_ALL_ACCESS);
+  return result;
+}
+
+void signal(Semaphore *sem) {
+  BOOL ok = ReleaseSemaphore(sem->handle, 1, 0);
+  assert(ok);
+}
+
+void wait_for(Semaphore *sem, bool infinite) {
+  DWORD res;
+
+  if (infinite) {
+    res = WaitForSingleObject(sem->handle, INFINITE);
+  } else {
+    res = WaitForSingleObject(sem->handle, 50);
+  }
+
+  assert(res != WAIT_FAILED);
+}
+
+void destroy_semaphore(Semaphore *sem) {
+  CloseHandle(sem->handle);
+  sem->handle = 0;
+}
+
+Mutex create_mutex(u32 spin_count) {
+  Mutex result = {};
+
+  result.handle = os_alloc(sizeof(CRITICAL_SECTION));
+  assert(result.handle);
+
+  InitializeCriticalSection(cast(LPCRITICAL_SECTION)result.handle);
+
+  if (spin_count) {
+    SetCriticalSectionSpinCount(cast(LPCRITICAL_SECTION)result.handle, spin_count);
+  }
+
+  return result;
+}
+
+void aquire_lock(Mutex *mutex) {
+  EnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
+}
+
+bool try_aquire_lock(Mutex *mutex) {
+  return TryEnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle) != 0;
+}
+
+void release_lock(Mutex *mutex) {
+  LeaveCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
+}
+
+void destroy_mutex(Mutex *mutex) {
+  // @Robustness: track if it's been released before deleting?
+  DeleteCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
+  os_free(mutex->handle);
+  mutex->handle = 0;
+}
+
+#endif // OS_WINDOWS
+
+#if OS_MACOS
+
+#undef internal
+#include <mach/mach.h>
+#include <mach/semaphore.h>
+#include <mach/task.h>
+#define SYNC_POLICY_PREPOST 0x4
+#define internal static
+
+// Make sure this fits into the handle pointer!
+Static_Assert(sizeof(semaphore_t) <= sizeof(void *));
+
+Semaphore create_semaphore(u32 max_count) {
+  Semaphore result = {};
+
+  mach_port_t self = mach_task_self();
+
+  semaphore_t *handle = New(semaphore_t);
+  result.handle = handle;
+
+  kern_return_t ret = semaphore_create(self, handle, SYNC_POLICY_PREPOST, 1);
+  assert(ret == KERN_SUCCESS);
+
+  return result;
+}
+
+void signal(Semaphore *sem) {
+  auto handle = cast(semaphore_t *)sem->handle;
+  kern_return_t ret = semaphore_signal(*handle);
+  assert(ret == KERN_SUCCESS);
+}
+
+void wait_for(Semaphore *sem, bool infinite) {
+  kern_return_t ret;
+  auto handle = cast(semaphore_t *)sem->handle;
+
+  if (infinite) {
+    ret = semaphore_wait(*handle);
+  } else {
+    // @Incomplete
+    invalid_code_path;
+  }
+
+  assert(ret == KERN_SUCCESS);
+}
+
+void destroy_semaphore(Semaphore *sem) {
+  mach_port_t self = mach_task_self();
+  auto handle = cast(semaphore_t *)sem->handle;
+  semaphore_destroy(self, *handle);
+  Free(handle);
+  handle = 0;
+}
+
+Mutex create_mutex(u32 spin_count) {
+  Mutex result = {};
+
+  result.handle = os_alloc(sizeof(pthread_mutex_t));
+  pthread_mutex_init(cast(pthread_mutex_t *)result.handle, NULL);
+
+  // @Incomplete: should spin_count do anything?
+
+  return result;
+}
+
+void aquire_lock(Mutex *mutex) {
+  pthread_mutex_lock(cast(pthread_mutex_t *)mutex->handle);
+}
+
+bool try_aquire_lock(Mutex *mutex) {
+  return pthread_mutex_trylock(cast(pthread_mutex_t *)mutex->handle) != 0;
+}
+
+void release_lock(Mutex *mutex) {
+  pthread_mutex_unlock(cast(pthread_mutex_t *)mutex->handle);
+}
+
+void destroy_mutex(Mutex *mutex) {
+  // @Robustness: track if it's been released before deleting?
+  pthread_mutex_destroy(cast(pthread_mutex_t *)mutex->handle);
+  os_free(mutex->handle);
+  mutex->handle = 0;
+}
+
+#endif // OS_MACOS
+
+
+nja_internal bool do_next_work_queue_entry(Work_Queue *queue) {
+  bool we_should_sleep = false;
+
+  u32 original_next_entry_to_read = queue->next_entry_to_read;
+  u32 new_next_entry_to_read = (original_next_entry_to_read + 1) % count_of(queue->entries);
+
+  if (original_next_entry_to_read != queue->next_entry_to_write) {
+    u32 index = atomic_compare_exchange_u32(&queue->next_entry_to_read, new_next_entry_to_read, original_next_entry_to_read);
+
+    if (index == original_next_entry_to_read) {
+      Work_Entry entry = queue->entries[index];
+      assert(entry.callback);
+      entry.callback(entry.data);
+      atomic_add_u64((u64 volatile *)&queue->completion_count, 1);
+    }
+  } else {
+    we_should_sleep = true;
+  }
+
+  return we_should_sleep;
+}
+
+nja_internal u32 worker_thread_proc(void *data) {
+  Worker_Params *params = (Worker_Params *)data;
+  Work_Queue *queue = params->queue;
+
+  for (;;) {
+    bool we_should_sleep = do_next_work_queue_entry(queue);
+
+    if (we_should_sleep) {
+      wait_for(&queue->semaphore, true);
+    }
+  }
+}
+
+void create_work_queue(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params) {
+  queue->completion_goal = 0;
+  queue->completion_count = 0;
+
+  queue->next_entry_to_write = 0;
+  queue->next_entry_to_read = 0;
+
+  queue->semaphore = create_semaphore(thread_count);
+
+  for (u32 i = 0; i < thread_count; i++) {
+    Worker_Params *params = thread_params + i;
+    params->queue = queue;
+
+    Thread thread = os_create_thread(megabytes(1), worker_thread_proc, params);
+    os_detatch_thread(thread);
+  }
+}
+
+void add_entry(Work_Queue *queue, Worker_Proc *callback, void *data) {
+  // TODO(casey): Switch to InterlockedCompareExchange eventually
+  // so that any thread can add?
+  u32 new_next_entry_to_write = (queue->next_entry_to_write + 1) % count_of(queue->entries);
+  assert(new_next_entry_to_write != queue->next_entry_to_read);
+
+  Work_Entry *entry = queue->entries + queue->next_entry_to_write;
+  entry->callback = callback;
+  entry->data = data;
+  queue->completion_goal ++;
+
+  write_barrier();
+
+  queue->next_entry_to_write = new_next_entry_to_write;
+
+  signal(&queue->semaphore);
+}
+
+void complete_all_work(Work_Queue *queue) {
+  while (queue->completion_goal != queue->completion_count) {
+    do_next_work_queue_entry(queue);
+  }
+
+  queue->completion_goal = 0;
+  queue->completion_count = 0;
+}
+
 
 #endif // NJA_H
