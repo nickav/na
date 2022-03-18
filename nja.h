@@ -439,6 +439,8 @@ void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
 
   if (arena->offset + size < arena->size) {
     result = arena->data + arena->offset + align_offset;
+    memory_zero(arena->data + arena->offset, size);
+
     arena->offset += size;
 
     // NOTE(nick): make sure our data is aligned properly
@@ -462,7 +464,6 @@ void arena_pop(Arena *arena, u64 size) {
 
 void arena_reset(Arena *arena) {
   arena->offset = 0;
-  memory_zero(arena->data, arena->size);
 }
 
 void *arena_push(Arena *arena, u64 size) {
@@ -2443,7 +2444,6 @@ void *Realloc(void *data, u64 new_size, u64 old_size, Allocator allocator) {
 
 void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data) {
   switch (mode) {
-    default:
     case ALLOCATOR_MODE_FREE: {
       os_free(old_memory_pointer);
       return NULL;
@@ -2452,10 +2452,7 @@ void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, v
     case ALLOCATOR_MODE_RESIZE:
     case ALLOCATOR_MODE_ALLOC: {
       u64 alignment = 8;
-      u64 extra = alignment - (requested_size & (alignment - 1));
-      extra &= (alignment - 1);
-
-      u64 actual_size = requested_size + extra;
+      u64 actual_size = requested_size + nja_align_offset(0, alignment);
 
       void *result = os_alloc(actual_size);
 
@@ -2467,11 +2464,51 @@ void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, v
 
       return result;
     }
+
+    default: {
+      return NULL;
+    }
   }
 }
 
 Allocator os_allocator() {
   return Allocator{os_allocator_proc, 0};
+}
+
+void *arena_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data) {
+  Arena *arena = cast(Arena *)allocator_data; 
+
+  switch (mode) {
+    case ALLOCATOR_MODE_ALLOC: {
+      u64 alignment = 8;
+      return arena_alloc_aligned(arena, requested_size, alignment);
+    }
+
+    case ALLOCATOR_MODE_RESIZE: {
+      u64 alignment = 8;
+      void *result = arena_alloc_aligned(arena, requested_size, alignment);
+
+      if (result) {
+        memory_copy(old_memory_pointer, result, old_size);
+        return result;
+      }
+
+      return NULL;
+    }
+
+    case ALLOCATOR_MODE_FREE: {
+      return NULL;
+    }
+
+    case ALLOCATOR_MODE_FREE_ALL: {
+      arena_reset(arena);
+      return NULL;
+    }
+  }
+}
+
+Allocator arena_allocator(Arena *arena) {
+  return Allocator{arena_allocator_proc, arena};
 }
 
 //
@@ -2571,7 +2608,7 @@ void array_remove_ordered(Array<T> &it, i64 index, i64 num_to_remove = 1) {
 template <typename T>
 void array_free(Array<T> &it) {
   if (it.data) {
-    os_free(it.data);
+    Free(it.data, it.allocator);
     it.data = NULL;
     it.capacity = 0;
     it.count = 0;
@@ -2622,6 +2659,54 @@ void array_sort(Array<T> &it) {
   };
 
   nja_sort(it.data, it.count, sizeof(T), compare);
+}
+
+//
+// Slice
+//
+
+template <typename T>
+struct Slice {
+  i64 count = 0;
+  T * data = NULL;
+
+  T &operator[](i64 i) {
+    assert(i >= 0 && i < count);
+    return data[i];
+  }
+
+  T *begin() { return data ? &data[0] : NULL; }
+  T *end()   { return data ? &data[count] : NULL; }
+};
+
+template <typename T>
+Slice<T> make_slice(T *data, i64 count) {
+  Slice<T> result = {};
+
+  result.data = data;
+  result.count = count;
+
+  return result;
+}
+
+template <typename T>
+Slice<T> slice_array(Array<T> &array, i64 start_index, i64 end_index) {
+  assert(start_index >= 0 && start_index <= end_index && end_index <= array.count);
+
+  Slice<T> result = {};
+
+  result.data = array.data + start_index;
+  result.count = end_index - start_index;
+
+  return result;
+}
+
+template <typename T>
+Slice<T> slice_from_array(Array<T> &array) {
+  Slice<T> result = {};
+  result.data = array.data;
+  result.count = array.count;
+  return result;
 }
 
 //
@@ -3003,42 +3088,8 @@ V table_contains(Hash_Table<K, V> &it, K key) {
 //
 
 Array<File_Info *> os_scan_directory(Arena *arena, String path) {
-  #if 0
-  Array<File_Info> result = {};
-  // @Incomplete @Memory
-  result.allocator = os_allocator(); // arena_allocator(arena);
-
-  i64 count = 0;
-  {
-    auto mark = arena_get_position(arena);
-    defer { arena_set_position(arena, mark); };
-
-    auto handle = os_file_list_begin(arena, path);
-
-    File_Info info = {};
-    while (os_file_list_next(&handle, &info)) {
-      count += 1;
-    }
-
-    os_file_list_end(&handle);
-  }
-
-  array_init(result, count);
-
-  auto handle = os_file_list_begin(arena, path);
-
-  File_Info info = {};
-  while (os_file_list_next(&handle, &info)) {
-    auto it = array_push(result, info);
-    it->name = string_copy(arena, info.name);
-  }
-
-  os_file_list_end(&handle);
-  #endif
-
   Array<File_Info *> result = {};
-  // @Incomplete @Memory
-  result.allocator = os_allocator(); // arena_allocator(arena);
+  result.allocator = arena_allocator(arena);
 
   array_init(result, 32); // 32 should be enough for anybody.
 
@@ -3064,39 +3115,38 @@ Array<File_Info *> os_scan_directory(String path) {
   return os_scan_directory(thread_get_temporary_arena(), path);
 }
 
-Array<File_Info *> os_scan_directory_recursive(Arena *arena, String path, u32 max_depth) {
+Array<File_Info *> os_scan_directory_recursive(Arena *arena, String path, u32 max_depth = 1024) {
   Array<File_Info *> results = {};
-  Array<String> dirs = {};
+  Array<String> stack = {};
 
-  // @Incomplete @Memory
-  //results.allocator = __temporary_allocator;
-  //dirs.allocator = __temporary_allocator;
+  results.allocator = arena_allocator(arena);
+  stack.allocator   = arena_allocator(arena);
 
-  array_push(dirs, path);
+  array_push(stack, path);
 
   for (u32 i = 0; i < max_depth + 1; i++) {
-    u32 n = dirs.count;
+    u32 n = stack.count;
 
     for (u32 dir_index = 0; dir_index < n; dir_index++) {
-      auto infos = os_scan_directory(arena, dirs[dir_index]);
+      auto infos = os_scan_directory(arena, stack[dir_index]);
 
       For (infos) {
         if (it->is_directory) {
-          auto path = path_join(dirs[dir_index], it->name);
-          array_push(dirs, path);
+          auto path = path_join(stack[dir_index], it->name);
+          array_push(stack, path);
         } else {
           array_push(results, it);
         }
       }
     }
 
-    array_remove_ordered(dirs, 0, n);
+    array_remove_ordered(stack, 0, n);
   }
 
   return results;
 }
 
-Array<File_Info *> os_scan_directory_recursive(String path, u32 max_depth) {
+Array<File_Info *> os_scan_directory_recursive(String path, u32 max_depth = 1024) {
   return os_scan_directory_recursive(thread_get_temporary_arena(), path, max_depth);
 }
 

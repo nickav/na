@@ -70,10 +70,19 @@ int main() {
     print("%d\n", it);
   }
 
+  print("\n");
   print("sort array:\n");
   array_sort(my_array);
 
   For (my_array) { print("%d\n", it); }
+
+  print("\n");
+  print("Slice:\n");
+
+  auto my_slice = slice_array(my_array, 2, 5);
+
+  dump(my_slice.count);
+  For (my_slice) { print("%d\n", it); }
 
   print("\n");
   print("Hash_Table:\n");
