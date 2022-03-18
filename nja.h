@@ -1708,11 +1708,14 @@ struct Thread_Params {
   void *data;
 };
 
-struct OS_Memory {
+struct Virtual_Memory {
+  void *(*alloc)(u64 size);
+  void  (*free)(void *ptr);
+
   void *(*reserve)(u64 size);
-  void *(commit)(void *ptr, u64 size);
-  void *(decommit)(void *ptr, u64 size);
-  void *(release)(void *ptr);
+  void  (*commit)(void *ptr, u64 size);
+  void  (*decommit)(void *ptr, u64 size);
+  void  (*release)(void *ptr);
 };
 
 bool os_init();
@@ -1739,6 +1742,13 @@ bool os_write_entire_file(String path, String contents);
 bool os_atomic_replace_file(String path, u64 size, void *data);
 bool os_delete_file(String path);
 bool os_file_exists(String path);
+
+File os_open_file(String path, u32 mode_flags);
+void os_read_file(File *file, u64 offset, u64 size, void *dest);
+void os_write_file(File *file, u64 offset, u64 size, void *data);
+void os_append_file(File *file, u64 size, void *data);
+void os_append_file(File *file, String str);
+void os_close_file(File *file);
 
 bool os_make_directory(String path);
 bool os_delete_directory(String path);
@@ -1777,6 +1787,13 @@ static LARGE_INTEGER win32_perf_counter;
 static DWORD win32_thread_context_index = 0;
 
 static bool did_init_os = false;
+
+struct File_Lister {
+  char *find_path;
+
+  HANDLE handle;
+  WIN32_FIND_DATA data;
+};
 
 bool os_init() {
   if (did_init_os) return false;
@@ -1965,6 +1982,110 @@ bool os_atomic_replace_file(String path, u64 size, void *data) {
   return success;
 }
 
+void win32_file_error(File *file, char *message, String file_name = {}) {
+#if DEBUG
+  if (file_name.data) {
+    print("[file] %s: %.*s\n", message, LIT(file_name));
+  } else {
+    print("[file] %s\n", message);
+  }
+#endif
+
+  file->has_errors = true;
+}
+
+File os_open_file(String path, u32 mode_flags) {
+  File result = {};
+
+  DWORD permissions = 0;
+  DWORD creation = 0;
+
+  if (mode_flags & FILE_MODE_READ) {
+    permissions |= GENERIC_READ;
+    creation = OPEN_EXISTING;
+  }
+
+  if (mode_flags & FILE_MODE_APPEND) {
+    permissions |= GENERIC_WRITE;
+    creation = OPEN_ALWAYS;
+  }
+
+  if (mode_flags & FILE_MODE_WRITE) {
+    permissions |= GENERIC_WRITE;
+    creation = CREATE_ALWAYS;
+  }
+
+  // @Incomplete: CreateFileW
+
+  HANDLE handle = CreateFileA(string_to_cstr(thread_get_temporary_arena(), path), permissions, FILE_SHARE_READ, 0, creation, 0, 0);
+  result.handle = (void *)handle;
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    win32_file_error(&result, "Failed to open file", path);
+  }
+
+  if ((mode_flags & FILE_MODE_APPEND) && !(mode_flags & FILE_MODE_WRITE)) {
+    u32 size = GetFileSize(handle, NULL);
+    result.offset = size;
+  }
+
+  return result;
+}
+
+void os_read_file(File *file, u64 offset, u64 size, void *dest) {
+  if (file->has_errors) { return; }
+
+  HANDLE handle = (HANDLE)file->handle;
+
+  // @Incomplete: CreateFileW
+  assert(size <= U32_MAX);
+  u32 size32 = cast(u32)size;
+
+  OVERLAPPED overlapped = {};
+  overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
+  overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
+
+  DWORD bytes_read;
+  if (ReadFile(handle, dest, size32, &bytes_read, &overlapped) && (size32 == bytes_read)) {
+    // Success!
+  } else {
+    win32_file_error(file, "Failed to read file");
+  }
+}
+
+void os_write_file(File *file, u64 offset, u64 size, void *data) {
+  if (file->has_errors) { return; }
+
+  HANDLE handle = (HANDLE)file->handle;
+
+  // @Incomplete: CreateFileW
+  assert(size <= U32_MAX);
+  u32 size32 = cast(u32)(size);
+
+  OVERLAPPED overlapped = {};
+  overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
+  overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
+
+  DWORD bytes_written;
+  if (WriteFile(handle, data, size32, &bytes_written, &overlapped) && (size32 == bytes_written)) {
+    // Success!
+  } else {
+    win32_file_error(file, "Failed to write file");
+  }
+}
+
+void os_close_file(File *file) {
+  if (file->handle) {
+    HANDLE handle = (HANDLE)file->handle;
+    BOOL success = CloseHandle(handle);
+    file->handle = NULL;
+
+    if (!success) {
+      win32_file_error(file, "Failed to close file");
+    }
+  }
+}
+
 bool os_delete_file(String path) {
   Arena *arena = thread_get_temporary_arena();
 
@@ -2034,14 +2155,6 @@ bool os_delete_entire_directory(String path) {
 
   return success;
 }
-
-
-struct File_Lister {
-  char *find_path;
-
-  HANDLE handle;
-  WIN32_FIND_DATA data;
-};
 
 File_Lister os_file_list_begin(Arena *arena, String path) {
   File_Lister result = {};
@@ -2428,6 +2541,12 @@ bool os_clipboard_set_text(String text) {
 #include <dirent.h>   // opendir, readdir, closedir
 #include <sys/stat.h> // stat
 
+struct File_Lister {
+  char *find_path;
+
+  DIR *handle;
+};
+
 void *os_alloc(u64 size) {
   return calloc(size, 1);
 }
@@ -2513,11 +2632,106 @@ File_Info os_get_file_info(Arena *arena, String path) {
   return result;
 }
 
-struct File_Lister {
-  char *find_path;
+void unix_file_error(File *file, char *message, String file_name = {}) {
+#if DEBUG
+  if (file_name.data) {
+    print("[file] %s: %.*s\n", message, LIT(file_name));
+  } else {
+    print("[file] %s\n", message);
+  }
+#endif
 
-  DIR *handle;
-};
+  file->has_errors = true;
+}
+
+File os_open_file(String path, u32 mode_flags) {
+  File result = {};
+
+  char mode[4] = {};
+  if ((mode_flags & FILE_MODE_READ) && (mode_flags & FILE_MODE_WRITE)) {
+    mode[0] = 'r';
+    mode[1] = 'b';
+    mode[2] = '+';
+  } else if (mode_flags & FILE_MODE_APPEND) {
+    if (mode_flags & FILE_MODE_WRITE) {
+      mode[0] = 'w';
+      mode[1] = 'b';
+      mode[2] = '+';
+    } else {
+      mode[0] = 'a';
+      mode[1] = 'b';
+      if (mode_flags & FILE_MODE_READ) {
+        mode[2] = '+';
+      }
+    }
+  } else if (mode_flags & FILE_MODE_WRITE) {
+    mode[0] = 'w';
+    mode[1] = 'b';
+  } else {
+    mode[0] = 'r';
+    mode[1] = 'b';
+  }
+
+  FILE *f = fopen(path.c_str(), mode);
+  result.handle = f;
+
+  if (!f) {
+    unix_file_error(&result, "Failed to open file", path);
+    return result;
+  }
+
+  if ((mode_flags & FILE_MODE_APPEND) && !(mode_flags & FILE_MODE_WRITE)) {
+    fseek(f, 0, SEEK_END);
+    i32 size = ftell(f);
+    if (size != -1) {
+      result.offset = size;
+    }
+  }
+
+  return result;
+}
+
+void os_read_file(File *file, u64 offset, u64 size, void *dest) {
+  if (file->has_errors) { return; }
+
+  FILE *f = (FILE *)file->handle;
+
+  if (offset != ftell(f)) {
+    int seek_result = fseek(f, offset, SEEK_SET);
+    if (seek_result != 0) { unix_file_error(file, "Failed to seek file"); }
+  }
+
+  size_t bytes_read = fread(dest, sizeof(char), size, f);
+  if (bytes_read != sizeof(char) * size) {
+    unix_file_error(file, "Failed to read file");
+  }
+}
+
+void os_write_file(File *file, u64 offset, u64 size, void *data) {
+  if (file->has_errors) { return; }
+
+  FILE *f = (FILE *)file->handle;
+
+  if (offset != ftell(f)) {
+    int seek_result = fseek(f, offset, SEEK_SET);
+    if (seek_result != 0) { unix_file_error(file, "Failed to seek file"); }
+  }
+
+  size_t bytes_written = fwrite(data, sizeof(char), size, f);
+  if (bytes_written != sizeof(char) * size) {
+    unix_file_error(file, "Failed to write to file");
+  }
+}
+
+void os_close_file(File *file) {
+  if (file->handle) {
+    FILE *f = (FILE *)file->handle;
+    file->handle = NULL;
+
+    int close_result = fclose(f);
+    if (close_result != 0) { unix_file_error(file, "Failed to close file"); }
+  }
+}
 
 File_Lister os_file_list_begin(Arena *arena, String path) {
   File_Lister result = {};
@@ -3401,6 +3615,20 @@ File_Info os_get_file_info(String path) {
   return os_get_file_info(thread_get_temporary_arena(), path);
 }
 
+void os_write_file(File *file, u64 offset, String str) {
+  os_write_file(file, offset, str.count, str.data);
+}
+
+void os_append_file(File *file, u64 size, void *data) {
+  os_write_file(file, file->offset, size, data);
+  file->offset += size;
+}
+
+void os_append_file(File *file, String str) {
+  os_write_file(file, file->offset, str.count, str.data);
+  file->offset += str.count;
+}
+
 String os_get_executable_directory() {
   String result = os_get_executable_path();
   return path_dirname(result);
@@ -3474,6 +3702,20 @@ Array<File_Info *> os_scan_files_recursive(Arena *arena, String path, i32 max_de
 Array<File_Info *> os_scan_files_recursive(String path, u32 max_depth = 1024) {
   return os_scan_files_recursive(thread_get_temporary_arena(), path, max_depth);
 }
+
+Virtual_Memory os_virtual_memory() {
+  Virtual_Memory result = {};
+
+  result.alloc    = &os_alloc;
+  result.free     = &os_free;
+  result.reserve  = &os_memory_reserve;
+  result.commit   = &os_memory_commit;
+  result.decommit = &os_memory_decommit;
+  result.release  = &os_memory_release;
+
+  return result;
+}
+
 
 //
 // Threading Primitives
