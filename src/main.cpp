@@ -54,6 +54,8 @@ int main() {
     assert(os_make_directory(path_join(cwd, S("foo/bar"))));
     assert(os_write_entire_file(path_join(cwd, S("foo/bar/hello_sailor.txt")), S("This is a test file!")));
 
+    assert(os_make_directory_recursive(path_join(cwd, S("this/is/a/recursive/test"))));
+
     auto files = os_scan_files_recursive(cwd);
 
     For (files) {

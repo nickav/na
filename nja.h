@@ -1770,7 +1770,6 @@ void os_close_file(File *file);
 
 bool os_make_directory(String path);
 bool os_delete_directory(String path);
-bool os_delete_entire_directory(String path);
 
 File_Lister os_file_list_begin(Arena *arena, String path);
 bool os_file_list_next(File_Lister *iter, File_Info *info);
@@ -2142,6 +2141,17 @@ bool os_delete_file(String path) {
   return success;
 }
 
+bool os_file_exists(String path) {
+  Arena *arena = thread_get_temporary_arena();
+
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
+  String16 path_w = string16_from_string(arena, path);
+  DWORD attrib = GetFileAttributesW(cast(WCHAR *)path_w.data);
+  return attrib != INVALID_FILE_ATTRIBUTES;
+}
+
 bool os_make_directory(String path) {
   Arena *arena = thread_get_temporary_arena();
 
@@ -2169,47 +2179,6 @@ bool os_delete_directory(String path) {
 String string_from_wstr(Arena *arena, WCHAR *wstr) {
   String16 str16 = make_string16(wstr, wcslen(wstr));
   return string_from_string16(arena, str16);
-}
-
-bool os_delete_entire_directory(String path) {
-  Arena *arena = thread_get_temporary_arena();
-
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
-
-  auto find_path = string16_from_string(arena, string_join(arena, path, S("\\*.*"))); // @Incomplete: use \\?\ prefix?
-
-  bool success = true;
-
-  WIN32_FIND_DATAW data;
-  HANDLE handle = FindFirstFileW(cast(WCHAR *)find_path.data, &data);
-
-  if (handle != INVALID_HANDLE_VALUE) {
-    do {
-      auto mark = arena_get_position(arena);
-
-      String file_name = string_from_wstr(arena, data.cFileName);
-
-      if (string_equals(file_name, S(".")) || string_equals(file_name, S(".."))) continue;
-
-      String file_path = path_join(path, file_name);
-
-      if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-        // @Speed: is the recursive ever a problem?
-        success |= os_delete_entire_directory(file_path);
-      } else {
-        success |= os_delete_file(file_path);
-      }
-
-      arena_set_position(arena, mark);
-    } while(FindNextFileW(handle, &data));
-  }
-
-  FindClose(handle);
-
-  success |= os_delete_directory(path);
-
-  return success;
 }
 
 File_Lister os_file_list_begin(Arena *arena, String path) {
@@ -3686,6 +3655,58 @@ void os_append_file(File *file, String str) {
 String os_get_executable_directory() {
   String result = os_get_executable_path();
   return path_dirname(result);
+}
+
+bool os_delete_entire_directory(String path) {
+  Arena *arena = thread_get_temporary_arena();
+
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
+  bool success = true;
+
+  auto handle = os_file_list_begin(arena, path);
+
+  File_Info info = {};
+  while (os_file_list_next(&handle, &info)) {
+    auto file_path = path_join(path, info.name);
+
+    if (info.is_directory) {
+      // @Speed: is the recursive ever a problem?
+      success |= os_delete_entire_directory(file_path);
+    } else {
+      success |= os_delete_file(file_path);
+    }
+  }
+
+  os_file_list_end(&handle);
+
+  success |= os_delete_directory(path);
+
+  return success;
+}
+
+bool os_make_directory_recursive(String path) {
+  i64 index = string_index(path, S("/"));
+
+  while (true) {
+    index = string_index(path, S("/"), index + 1);
+    if (index < 0) break;
+
+    auto slice = string_slice(path, 0, index);
+
+    if (!os_file_exists(slice)) {
+      bool success = os_make_directory(slice);
+      if (!success) return false;
+    }
+  }
+
+  if (!os_file_exists(path)) {
+    bool success = os_make_directory(path);
+    if (!success) return false;
+  }
+
+  return true;
 }
 
 Array<File_Info *> os_scan_directory(Arena *arena, String path) {
