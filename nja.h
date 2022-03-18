@@ -379,6 +379,67 @@ inline isize nja_pointer_diff(void *begin, void *end) {
 }
 
 //
+// Functions
+//
+
+#define PI  3.14159265359f
+#define TAU 6.28318530717958647692f
+
+#define EPSILON_F32 (1.1920929e-7f)
+#define EPSILON_F64 (2.220446e-16)
+
+#define SQRT_2 0.70710678118
+
+#ifndef MIN
+#define MIN(a, b) ((a < b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a, b) ((a > b) ? (a) : (b))
+#endif
+#ifndef CLAMP
+#define CLAMP(value, lower, upper) (MAX(MIN(value, upper), lower))
+#endif
+
+#ifndef SIGN
+#define SIGN(x) ((x > 0) - (x < 0))
+#endif
+#ifndef ABS
+#define ABS(x) ((x < 0) ? -(x) : (x))
+#endif
+
+inline i32 min_i32(i32 a, i32 b) { return MIN(a, b); }
+inline u32 min_u32(u32 a, u32 b) { return MIN(a, b); }
+inline i64 min_i64(i64 a, i64 b) { return MIN(a, b); }
+inline u64 min_u64(u64 a, u64 b) { return MIN(a, b); }
+inline f32 min_f32(f32 a, f32 b) { return MIN(a, b); }
+inline f64 min_f64(f64 a, f64 b) { return MIN(a, b); }
+
+inline i32 max_i32(i32 a, i32 b) { return MAX(a, b); }
+inline u32 max_u32(u32 a, u32 b) { return MAX(a, b); }
+inline i64 max_i64(i64 a, i64 b) { return MAX(a, b); }
+inline u64 max_u64(u64 a, u64 b) { return MAX(a, b); }
+inline f32 max_f32(f32 a, f32 b) { return MAX(a, b); }
+inline f64 max_f64(f64 a, f64 b) { return MAX(a, b); }
+
+inline i32 clamp_i32(i32 value, i32 lower, i32 upper) { return CLAMP(value, lower, upper); }
+inline u32 clamp_u32(u32 value, u32 lower, u32 upper) { return CLAMP(value, lower, upper); }
+inline u64 clamp_u64(u64 value, u64 lower, u64 upper) { return CLAMP(value, lower, upper); } 
+inline f32 clamp_f32(f32 value, f32 lower, f32 upper) { return CLAMP(value, lower, upper); }
+inline f64 clamp_f64(f64 value, f64 lower, f64 upper) { return CLAMP(value, lower, upper); }
+
+inline i32 sign_i32(i32 a) { return SIGN(a); }
+inline f32 sign_f32(f32 a) { return SIGN(a); }
+inline f64 sign_f64(f64 a) { return SIGN(a); }
+
+inline i32 abs_i32(i32 a) { return ABS(a); }
+inline f32 abs_f32(f32 a) { return ABS(a); }
+inline f64 abs_f64(f64 a) { return ABS(a); }
+
+inline f32 lerp(f32 a, f32 b, f32 t) {
+  return (1 - t) * a + b * t;
+}
+
+//
 // Memory
 //
 
@@ -490,10 +551,15 @@ void memory_swap(void *i, void *j, isize size) {
 // Arenas
 //
 
+#ifndef DEFAULT_MEMORY_ALIGNMENT
+#define DEFAULT_MEMORY_ALIGNMENT 16
+#endif
+
 struct Arena {
   u8 *data;
   u64 offset;
   u64 size;
+  u64 prev_offset;
 };
 
 struct Arena_Mark {
@@ -513,6 +579,10 @@ void arena_init(Arena *arena, u8 *data, u64 size) {
   arena->size = size;
 }
 
+bool arena_contains_pointer(Arena *arena, void *ptr) {
+  return ptr >= arena->data && ptr < arena->data + arena->size;
+}
+
 void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
   void *result = NULL;
 
@@ -520,10 +590,13 @@ void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
   size += align_offset;
 
   if (arena->offset + size < arena->size) {
-    result = arena->data + arena->offset + align_offset;
-    memory_zero(arena->data + arena->offset, size);
+    u64 prev_offset = arena->offset + align_offset;
 
+    result = &arena->data[prev_offset];
+    arena->prev_offset = prev_offset;
     arena->offset += size;
+    
+    memory_zero(arena->data + prev_offset, size);
 
     // NOTE(nick): make sure our data is aligned properly
     assert((u64)result % alignment == 0);
@@ -533,19 +606,66 @@ void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
 }
 
 void *arena_alloc(Arena *arena, u64 size) {
-  return arena_alloc_aligned(arena, size, 8);
+  return arena_alloc_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
+}
+
+void *arena_realloc_aligned(Arena *arena, u64 size, u64 old_size, void *old_memory, u16 alignment) {
+  if (old_memory == NULL || old_size == 0 || arena->offset < arena->prev_offset) {
+    return arena_alloc_aligned(arena, size, alignment);
+  }
+
+  if (!arena_contains_pointer(arena, old_memory)) {
+    assert(!"Memory is out of bounds in this arena");
+    return NULL;
+  }
+
+  if (arena->data + arena->prev_offset == old_memory) {
+    arena->offset = arena->prev_offset + size;
+    assert(arena_contains_pointer(arena, arena->data + arena->offset));
+
+    i64 delta_size = cast(i64)(size - old_size);
+    if (delta_size > 0) memory_zero(cast(u8 *)old_memory + old_size, delta_size);
+
+    // The assumption is that the alignment will not change between allocations.
+    assert(nja_align_offset(old_memory, alignment) == 0);
+
+    return old_memory;
+  }
+
+  void *new_memory = arena_alloc_aligned(arena, size, alignment);
+
+  i64 delta_size = cast(i64)(size - old_size);
+  memory_copy(old_memory, new_memory, min_i64(old_size, size));
+  memory_zero(cast(u8 *)new_memory + old_size, max_i64(delta_size, 0));
+
+  return new_memory;
+}
+
+void *arena_realloc(Arena *arena, u64 size, u64 old_size, void *old_memory) {
+  return arena_realloc_aligned(arena, size, old_size, old_memory, DEFAULT_MEMORY_ALIGNMENT);
+}
+
+void arena_free(Arena *arena, void *ptr) {
+  if (arena->data + arena->prev_offset == ptr) {
+    arena->offset = arena->prev_offset;
+  }
+
+  // NO-OP
 }
 
 void arena_pop(Arena *arena, u64 size) {
   if (size > arena->offset) {
     arena->offset = 0;
+    arena->prev_offset = 0;
   } else {
+    arena->prev_offset = arena->offset; // @Robustness: test this with realloc!
     arena->offset -= size;
   }
 }
 
 void arena_reset(Arena *arena) {
   arena->offset = 0;
+  arena->prev_offset = 0;
 }
 
 void *arena_push(Arena *arena, u64 size) {
@@ -553,6 +673,7 @@ void *arena_push(Arena *arena, u64 size) {
 
   if (arena->offset + size < arena->size) {
     result = arena->data + arena->offset;
+    arena->prev_offset = arena->offset;
     arena->offset += size;
   }
 
@@ -1479,55 +1600,6 @@ String string_from_string16(Arena *arena, String16 str) {
   arena_pop(arena, unused_size);
 
   return result;
-}
-
-//
-// Functions
-//
-
-#define PI  3.14159265359f
-#define TAU 6.28318530717958647692f
-
-#define EPSILON_F32 (1.1920929e-7f)
-#define EPSILON_F64 (2.220446e-16)
-
-#define SQRT_2 0.70710678118
-
-#define MIN(a, b) ((a < b) ? (a) : (b))
-#define MAX(a, b) ((a > b) ? (a) : (b))
-#define CLAMP(value, lower, upper) (MAX(MIN(value, upper), lower))
-
-#define SIGN(x) ((x > 0) - (x < 0))
-#define ABS(x) ((x < 0) ? -(x) : (x))
-
-inline i32 min_i32(i32 a, i32 b) { return MIN(a, b); }
-inline u32 min_u32(u32 a, u32 b) { return MIN(a, b); }
-inline u64 min_u64(u64 a, u64 b) { return MIN(a, b); }
-inline f32 min_f32(f32 a, f32 b) { return MIN(a, b); }
-inline f64 min_f64(f64 a, f64 b) { return MIN(a, b); }
-
-inline i32 max_i32(i32 a, i32 b) { return MAX(a, b); }
-inline u32 max_u32(u32 a, u32 b) { return MAX(a, b); }
-inline u64 max_u64(u64 a, u64 b) { return MAX(a, b); }
-inline f32 max_f32(f32 a, f32 b) { return MAX(a, b); }
-inline f64 max_f64(f64 a, f64 b) { return MAX(a, b); }
-
-inline i32 clamp_i32(i32 value, i32 lower, i32 upper) { return CLAMP(value, lower, upper); }
-inline u32 clamp_u32(u32 value, u32 lower, u32 upper) { return CLAMP(value, lower, upper); }
-inline u64 clamp_u64(u64 value, u64 lower, u64 upper) { return CLAMP(value, lower, upper); } 
-inline f32 clamp_f32(f32 value, f32 lower, f32 upper) { return CLAMP(value, lower, upper); }
-inline f64 clamp_f64(f64 value, f64 lower, f64 upper) { return CLAMP(value, lower, upper); }
-
-inline i32 sign_i32(i32 a) { return SIGN(a); }
-inline f32 sign_f32(f32 a) { return SIGN(a); }
-inline f64 sign_f64(f64 a) { return SIGN(a); }
-
-inline i32 abs_i32(i32 a) { return ABS(a); }
-inline f32 abs_f32(f32 a) { return ABS(a); }
-inline f64 abs_f64(f64 a) { return ABS(a); }
-
-inline f32 lerp(f32 a, f32 b, f32 t) {
-  return (1 - t) * a + b * t;
 }
 
 //
@@ -2644,6 +2716,7 @@ enum Allocator_Mode {
   ALLOCATOR_MODE_FREE_ALL = 3,
 };
 
+// @Incomplete: should alignment be an argument for these functions?
 #define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data);
 typedef ALLOCATOR_PROC(Allocator_Proc);
 
@@ -2679,8 +2752,7 @@ void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, v
 
     case ALLOCATOR_MODE_RESIZE:
     case ALLOCATOR_MODE_ALLOC: {
-      u64 alignment = 8;
-      u64 actual_size = requested_size + nja_align_offset(0, alignment);
+      u64 actual_size = requested_size + nja_align_offset(0, DEFAULT_MEMORY_ALIGNMENT);
 
       void *result = os_alloc(actual_size);
 
@@ -2708,23 +2780,15 @@ void *arena_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size
 
   switch (mode) {
     case ALLOCATOR_MODE_ALLOC: {
-      u64 alignment = 8;
-      return arena_alloc_aligned(arena, requested_size, alignment);
+      return arena_alloc_aligned(arena, requested_size, DEFAULT_MEMORY_ALIGNMENT);
     }
 
     case ALLOCATOR_MODE_RESIZE: {
-      u64 alignment = 8;
-      void *result = arena_alloc_aligned(arena, requested_size, alignment);
-
-      if (result) {
-        memory_copy(old_memory_pointer, result, old_size);
-        return result;
-      }
-
-      return NULL;
+      return arena_realloc_aligned(arena, requested_size, old_size, old_memory_pointer, DEFAULT_MEMORY_ALIGNMENT);
     }
 
     case ALLOCATOR_MODE_FREE: {
+      arena_free(arena, old_memory_pointer);
       return NULL;
     }
 
@@ -2741,6 +2805,13 @@ void *arena_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size
 
 Allocator arena_allocator(Arena *arena) {
   return Allocator{arena_allocator_proc, arena};
+}
+
+Arena arena_create_from_allocator(Allocator allocator, u64 size) {
+  Arena result = {};
+  result.data = cast(u8 *)Alloc(size, allocator);
+  result.size = size;
+  return result;
 }
 
 //
@@ -3363,27 +3434,30 @@ Array<File_Info *> os_scan_directory(String path) {
   return os_scan_directory(thread_get_temporary_arena(), path);
 }
 
-Array<File_Info *> os_scan_directory_recursive(Arena *arena, String path, u32 max_depth = 1024) {
+Array<File_Info *> os_scan_files_recursive(Arena *arena, String path, i32 max_depth = 2048) {
   Array<File_Info *> results = {};
   Array<String> stack = {};
 
   results.allocator = arena_allocator(arena);
-  stack.allocator   = arena_allocator(arena);
+  stack.allocator   = arena_allocator(arena); // @Memory: these can be freed after the function ends
 
   array_push(stack, S(""));
 
-  for (u32 i = 0; i < max_depth + 1; i++) {
+  while (max_depth >= 0) {
+    max_depth -= 1;
+
     u32 n = stack.count;
 
-    for (u32 dir_index = 0; dir_index < n; dir_index++) {
-      auto dir = stack[dir_index];
+    for (u32 i = 0; i < n; i++) {
+      auto dir = stack[i];
       auto infos = os_scan_directory(arena, path_join(path, dir));
 
       For (infos) {
+        it->name = path_join(dir, it->name);
+
         if (it->is_directory) {
-          array_push(stack, path_join(dir, it->name));
+          array_push(stack, it->name);
         } else {
-          it->name = path_join(stack[dir_index], it->name);
           array_push(results, it);
         }
       }
@@ -3397,8 +3471,8 @@ Array<File_Info *> os_scan_directory_recursive(Arena *arena, String path, u32 ma
   return results;
 }
 
-Array<File_Info *> os_scan_directory_recursive(String path, u32 max_depth = 1024) {
-  return os_scan_directory_recursive(thread_get_temporary_arena(), path, max_depth);
+Array<File_Info *> os_scan_files_recursive(String path, u32 max_depth = 1024) {
+  return os_scan_files_recursive(thread_get_temporary_arena(), path, max_depth);
 }
 
 
