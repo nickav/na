@@ -1273,101 +1273,6 @@ String to_string(f64 x)    { return sprint("%.4f", x); }
 String to_string(String x) { return x; }
 
 //
-// String list
-//
-
-struct String_Node {
-  String str;
-  String_Node *next;
-};
-
-struct String_List {
-  String_Node *first;
-  String_Node *last;
-
-  i64 count;
-  u64 size_in_bytes;
-};
-
-String_List make_string_list() {
-  String_List result = {};
-  return result;
-}
-
-void string_list_push_explicit(String_List *list, String str, String_Node *node) {
-  node->str = str;
-  node->next = NULL;
-
-  if (!list->first) list->first = node;
-  if (list->last) list->last->next = node;
-  list->last = node;
-
-  list->count += 1;
-  list->size_in_bytes += str.count;
-}
-
-void string_list_push(Arena *arena, String_List *list, String str) {
-  String_Node *node = push_struct(arena, String_Node);
-  string_list_push_explicit(list, str, node);
-}
-
-String_List string_list_split(Arena *arena, String str, String split) {
-  String_List result = {};
-
-  u8 *at = str.data;
-  u8 *word_first = at;
-  u8 *str_end = str.data + str.count;
-
-  for (; at < str_end; at += 1) {
-    if (*at == split.data[0])
-    {
-      if (string_starts_with(string_range(at, str_end), split)) {
-        String slice = string_range(word_first, at);
-        string_list_push(arena, &result, slice);
-
-        at += split.count - 1;
-        word_first = at + 1;
-        continue;
-      }
-    }
-  }
-
-  String slice = string_range(word_first, str_end);
-  string_list_push(arena, &result, slice);
-
-  return result;
-}
-
-String string_list_join(Arena *arena, String_List *list, String join) {
-  u64 size = join.count * (list->count - 1) + list->size_in_bytes;
-  u8 *data = push_array(arena, u8, size);
-
-  bool is_mid = false;
-  u8 *at = data;
-  for (String_Node *it = list->first; it != NULL; it = it->next) {
-    if (is_mid) {
-      memory_copy(join.data, at, join.count);
-      at += join.count;
-    }
-
-    memory_copy(it->str.data, at, it->str.count);
-    at += it->str.count;
-    is_mid = it->next != NULL;
-  }
-
-  return make_string(data, size);
-}
-
-void string_list_print(Arena *arena, String_List *list, const char *format, ...) {
-  va_list args;
-  va_start(args, format);
-  String result = string_printv(arena, format, args);
-  va_end(args);
-
-  string_list_push(arena, list, result);
-}
-
-//
 // String conversions
 //
 
@@ -1977,7 +1882,7 @@ bool os_atomic_replace_file(String path, u64 size, void *data) {
   auto mark = arena_get_position(arena);
   defer { arena_set_position(arena, mark); };
 
-  String temp_filepath = string_join(arena, path, S(".tmp"));
+  String temp_filepath = string_concat(arena, path, S(".tmp"));
 
   String16 str = string16_from_string(arena, temp_filepath);
   WCHAR *filename = cast(WCHAR *)str.data;
@@ -2184,7 +2089,7 @@ String string_from_wstr(Arena *arena, WCHAR *wstr) {
 File_Lister os_file_list_begin(Arena *arena, String path) {
   File_Lister result = {};
 
-  String16 find_path = string16_from_string(arena, string_join(path, S("\\*.*"))); // @Incomplete: use \\?\ prefix?
+  String16 find_path = string16_from_string(arena, string_concat(path, S("\\*.*"))); // @Incomplete: use \\?\ prefix?
 
   result.find_path = cast(WCHAR *)find_path.data;
   result.arena     = arena;
@@ -3791,6 +3696,67 @@ Virtual_Memory os_virtual_memory() {
   return result;
 }
 
+//
+// Extended Strings
+//
+
+Array<String> string_split(Allocator allocator, String str, String split) {
+  Array<String> result = {};
+  result.allocator = allocator;
+
+  u8 *at = str.data;
+  u8 *word_first = at;
+  u8 *str_end = str.data + str.count;
+
+  for (; at < str_end; at += 1) {
+    if (*at == split.data[0])
+    {
+      if (string_starts_with(string_range(at, str_end), split)) {
+        array_push(result, string_range(word_first, at));
+        at += split.count - 1;
+        word_first = at + 1;
+        continue;
+      }
+    }
+  }
+
+  array_push(result, string_range(word_first, str_end));
+
+  return result;
+}
+
+Array<String> string_split(String str, String split) {
+  return string_split(arena_allocator(thread_get_temporary_arena()), str, split);
+}
+
+String string_join(Allocator allocator, Array<String> list, String join) {
+  u64 size = join.count * (list.count - 1);
+  For (list) size += it.count;
+
+  u8 *data = cast(u8 *)allocator_alloc(allocator, size);
+
+  bool is_mid = false;
+  u8 *at = data;
+
+  For_Index (list) {
+    auto it = list[index];
+
+    if (is_mid) {
+      memory_copy(join.data, at, join.count);
+      at += join.count;
+    }
+
+    memory_copy(it.data, at, it.count);
+    at += it.count;
+    is_mid = index + 1 < list.count;
+  }
+
+  return make_string(data, size);
+}
+
+String string_join(Array<String> list, String join) {
+  return string_join(arena_allocator(thread_get_temporary_arena()), list, join);
+}
 
 //
 // Threading Primitives

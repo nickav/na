@@ -134,5 +134,15 @@ int main() {
     print("\n");
   }
 
+  print("\n");
+  print("String Extensions:\n");
+  {
+    auto parts = string_split(S("This is a cool little test!"), S(" "));
+    For (parts) { print("%.*s\n", LIT(it)); }
+
+    auto result = string_join(parts, S("__"));
+    print("%.*s\n", LIT(result));
+  }
+
   return 0;
 }
