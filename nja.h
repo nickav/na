@@ -1718,6 +1718,24 @@ struct Virtual_Memory {
   void  (*release)(void *ptr);
 };
 
+enum Allocator_Mode {
+  ALLOCATOR_MODE_ALLOC    = 0,
+  ALLOCATOR_MODE_RESIZE   = 1,
+  ALLOCATOR_MODE_FREE     = 2,
+  ALLOCATOR_MODE_FREE_ALL = 3,
+};
+
+// @Incomplete: should alignment be an argument for these functions?
+#define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data);
+typedef ALLOCATOR_PROC(Allocator_Proc);
+
+struct Allocator {
+  Allocator_Proc *proc;
+  void *data;
+};
+
+void *allocator_alloc(Allocator allocator, u64 size);
+
 bool os_init();
 
 void *os_alloc(u64 size);
@@ -1736,7 +1754,7 @@ void os_sleep(f64 miliseconds);
 
 void os_set_high_process_priority(bool enable);
 
-String os_read_entire_file(Arena *arena, String path);
+String os_read_entire_file(Allocator allocator, String path);
 String os_read_entire_file(String path);
 bool os_write_entire_file(String path, String contents);
 bool os_atomic_replace_file(String path, u64 size, void *data);
@@ -1879,12 +1897,17 @@ void os_free(void *ptr) {
   }
 }
 
-String os_read_entire_file(Arena *arena, String path) {
+String os_read_entire_file(Allocator allocator, String path) {
   String result = {};
 
   // @Cleanup: do we always want to null-terminate String16 s?
+  auto arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+
   String16 str = string16_from_string(arena, path);
   HANDLE handle = CreateFileW(cast(WCHAR *)str.data, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+
+  arena_set_position(arena, mark);
 
   if (handle == INVALID_HANDLE_VALUE) {
     print("[file] Error reading entire file: (error code: %d) for %.*s\n", GetLastError(), LIT(path));
@@ -1896,7 +1919,7 @@ String os_read_entire_file(Arena *arena, String path) {
 
   u64 size = ((cast(u64)hi_size) << 32) | cast(u64)lo_size;
 
-  result.data  = cast(u8 *)arena_alloc(arena, size);
+  result.data  = cast(u8 *)allocator_alloc(allocator, size);
   result.count = size;
 
   DWORD bytes_read = 0;
@@ -2206,7 +2229,9 @@ void os_file_list_end(File_Lister *iter) {
 File_Info os_get_file_info(Arena *arena, String path) {
   File_Info result = {};
 
-  // :ScratchMemory
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
   char *cpath = string_to_cstr(arena, path);
 
   WIN32_FILE_ATTRIBUTE_DATA data;
@@ -2558,7 +2583,7 @@ void os_free(void *memory) {
   }
 }
 
-String os_read_entire_file(Arena *arena, String path) {
+String os_read_entire_file(Allocator allocator, String path) {
   String result = {};
   FILE *f = fopen(string_to_cstr(arena, path), "rb");
 
@@ -2614,6 +2639,7 @@ File_Info os_get_file_info(Arena *arena, String path) {
   struct stat64 stat_info;
 
   auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
 
   char *cpath = string_to_cstr(arena, path);
   bool file_exists = stat64(cpath, &stat_info) == 0;
@@ -2626,8 +2652,6 @@ File_Info os_get_file_info(Arena *arena, String path) {
     result.size         = stat_info.st_size;
     result.is_directory = S_ISDIR(stat_info.st_mode);
   }
-
-  arena_set_position(arena, mark);
 
   return result;
 }
@@ -2923,39 +2947,29 @@ inline OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name) {
 // Allocator
 //
 
-enum Allocator_Mode {
-  ALLOCATOR_MODE_ALLOC    = 0,
-  ALLOCATOR_MODE_RESIZE   = 1,
-  ALLOCATOR_MODE_FREE     = 2,
-  ALLOCATOR_MODE_FREE_ALL = 3,
-};
-
-// @Incomplete: should alignment be an argument for these functions?
-#define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data);
-typedef ALLOCATOR_PROC(Allocator_Proc);
-
-struct Allocator {
-  Allocator_Proc *proc;
-  void *data;
-};
-
-void *Alloc(u64 size, Allocator allocator) {
+void *allocator_alloc(Allocator allocator, u64 size) {
   assert(allocator.proc);
   void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data);
   return result;
 }
 
-void Free(void *data, Allocator allocator) {
+void allocator_free(Allocator allocator, void *data) {
   assert(allocator.proc);
   if (data != NULL) {
     allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data);
   }
 }
 
-void *Realloc(void *data, u64 new_size, u64 old_size, Allocator allocator) {
+void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size) {
   assert(allocator.proc);
   return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data);
 }
+
+/*
+#define Alloc  (size, allocator) allocator_alloc(allocator, size)
+#define Free   (data, allocator) allocator_free(allocator, data)
+#define Realloc(data, new_size, old_size, allocator) allocator_realloc(allocator, data, new_size, old_size)
+*/
 
 void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data) {
   switch (mode) {
@@ -3023,7 +3037,7 @@ Allocator arena_allocator(Arena *arena) {
 
 Arena arena_create_from_allocator(Allocator allocator, u64 size) {
   Arena result = {};
-  result.data = cast(u8 *)Alloc(size, allocator);
+  result.data = cast(u8 *)allocator_alloc(allocator, size);
   result.size = size;
   return result;
 }
@@ -3080,7 +3094,7 @@ void array_resize(Array<T> &it, u64 next_capacity) {
   u64 prev_size = it.capacity * sizeof(T);
   u64 next_size = next_capacity * sizeof(T);
 
-  it.data = (T *)Realloc(it.data, next_size, prev_size, it.allocator);
+  it.data = (T *)allocator_realloc(it.allocator, it.data, next_size, prev_size);
   assert(it.data);
   it.capacity = next_capacity;
 }
@@ -3125,7 +3139,7 @@ void array_remove_ordered(Array<T> &it, i64 index, i64 num_to_remove = 1) {
 template <typename T>
 void array_free(Array<T> &it) {
   if (it.data) {
-    Free(it.data, it.allocator);
+    allocator_free(it.allocator, it.data);
     it.data = NULL;
   }
 
@@ -3445,7 +3459,7 @@ void table_init(Hash_Table<K, V> &it, u32 table_size) {
 
   assert(nja_is_power_of_two(it.capacity)); // Must be a power of two!
 
-  it.data = (Hash_Table<K, V>::Entry *)Alloc(it.capacity * sizeof(Hash_Table<K, V>::Entry), it.allocator);
+  it.data = (Hash_Table<K, V>::Entry *)allocator_alloc(it.allocator, it.capacity * sizeof(Hash_Table<K, V>::Entry));
   table_reset(it); // @Speed: Can be removed if data is initialized to zero!
 }
 
@@ -3464,7 +3478,7 @@ void table_reset(Hash_Table<K, V> &it) {
 template <typename K, typename V>
 void table_free(Hash_Table<K, V> &it) {
   if (it.data) {
-    Free(it.data, it.allocator);
+    allocator_free(it.allocator, it.data);
     it.data = NULL;
     it.capacity = 0;
     it.count = 0;
@@ -3495,7 +3509,7 @@ void table_expand(Hash_Table<K, V> &it) {
     }
   }
 
-  Free(old_data, it.allocator);
+  allocator_free(it.allocator, old_data);
 }
 
 // Sets the key-value pair, replacing it if it already exists.
@@ -3608,11 +3622,15 @@ V table_contains(Hash_Table<K, V> &it, K key) {
 //
 
 String os_read_entire_file(String path) {
-  return os_read_entire_file(thread_get_temporary_arena(), path);
+  return os_read_entire_file(arena_allocator(thread_get_temporary_arena()), path);
 }
 
 File_Info os_get_file_info(String path) {
   return os_get_file_info(thread_get_temporary_arena(), path);
+}
+
+File_Lister os_file_list_begin(String path) {
+  return os_file_list_begin(thread_get_temporary_arena(), path);
 }
 
 void os_write_file(File *file, u64 offset, String str) {
@@ -3850,7 +3868,7 @@ Semaphore create_semaphore(u32 max_count) {
 
   mach_port_t self = mach_task_self();
 
-  semaphore_t *handle = New(semaphore_t);
+  semaphore_t *handle = os_alloc(sizeof(semaphore_t)); // @Memory @Cleanup
   result.handle = handle;
 
   kern_return_t ret = semaphore_create(self, handle, SYNC_POLICY_PREPOST, 1);
@@ -3883,7 +3901,7 @@ void destroy_semaphore(Semaphore *sem) {
   mach_port_t self = mach_task_self();
   auto handle = cast(semaphore_t *)sem->handle;
   semaphore_destroy(self, *handle);
-  Free(handle);
+  os_free(handle); // @Memory @Cleanup
   handle = 0;
 }
 
