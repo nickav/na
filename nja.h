@@ -1807,10 +1807,11 @@ static DWORD win32_thread_context_index = 0;
 static bool did_init_os = false;
 
 struct File_Lister {
-  char *find_path;
+  Arena *arena;
+  WCHAR *find_path;
 
   HANDLE handle;
-  WIN32_FIND_DATA data;
+  WIN32_FIND_DATAW data;
 };
 
 bool os_init() {
@@ -1900,7 +1901,6 @@ void os_free(void *ptr) {
 String os_read_entire_file(Allocator allocator, String path) {
   String result = {};
 
-  // @Cleanup: do we always want to null-terminate String16 s?
   auto arena = thread_get_temporary_arena();
   auto mark = arena_get_position(arena);
 
@@ -1914,10 +1914,9 @@ String os_read_entire_file(Allocator allocator, String path) {
     return result;
   }
 
-  DWORD hi_size = 0;
-  DWORD lo_size = GetFileSize(handle, &hi_size);
-
-  u64 size = ((cast(u64)hi_size) << 32) | cast(u64)lo_size;
+  LARGE_INTEGER file_size;
+  GetFileSizeEx(handle, &file_size);
+  u64 size = cast(u64)file_size.QuadPart;
 
   result.data  = cast(u8 *)allocator_alloc(allocator, size);
   result.count = size;
@@ -1939,18 +1938,21 @@ String os_read_entire_file(Allocator allocator, String path) {
 
 bool os_write_entire_file(String path, String contents) {
   Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
 
-  // :ScratchMemory
   String16 str = string16_from_string(arena, path);
   HANDLE handle = CreateFileW(cast(WCHAR *)str.data, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
+
+  arena_set_position(arena, mark);
 
   if (handle == INVALID_HANDLE_VALUE) {
     print("[file] Error writing entire file: (error code: %d) for %.*s\n", GetLastError(), LIT(path));
     return false;
   }
 
-  // @Robustness: handle > 32 byte content size
-  assert(contents.count < U32_MAX);
+  // @Incomplete @Robustness: support sizes > u32
+  // :Win32_64BitFileIO
+  assert(contents.count <= U32_MAX);
 
   DWORD bytes_written;
   BOOL success = WriteFile(handle, contents.data, contents.count, &bytes_written, 0);
@@ -1972,19 +1974,31 @@ bool os_write_entire_file(String path, String contents) {
 bool os_atomic_replace_file(String path, u64 size, void *data) {
   bool success = false;
 
-  char *temp_filename = cprint("%.*s.tmp", LIT(path));
-  HANDLE file = CreateFileA(temp_filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
+  String temp_filepath = string_join(arena, path, S(".tmp"));
+
+  String16 str = string16_from_string(arena, temp_filepath);
+  WCHAR *filename = cast(WCHAR *)str.data;
+
+  String16 path_w = string16_from_string(arena, path);
+
+  HANDLE file = CreateFileW(filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 
   if (file == INVALID_HANDLE_VALUE) {
-    print("[file] Failed to open temporary file: %s\n", temp_filename);
+    print("[file] Failed to open temporary file: %.*s\n", LIT(temp_filepath));
   }
 
   if (file != INVALID_HANDLE_VALUE) {
     bool write_success = false;
     DWORD bytes_written = 0;
     
-    // @Incomplete: support sizes > u32
+    // @Incomplete @Robustness: support sizes > u32
+    // :Win32_64BitFileIO
     assert(size <= U32_MAX);
+
     if (WriteFile(file, data, (u32)size, &bytes_written, 0)) {
       write_success = bytes_written == size;
     }
@@ -1992,14 +2006,14 @@ bool os_atomic_replace_file(String path, u64 size, void *data) {
     CloseHandle(file);
 
     if (write_success) {
-      success = MoveFileExA(temp_filename, string_to_cstr(path), MOVEFILE_REPLACE_EXISTING);
+      success = MoveFileExW(filename, cast(WCHAR *)string16_from_string(arena, path).data, MOVEFILE_REPLACE_EXISTING);
     } else {
-      print("[file] Failed to atomically replace file: %s -> %s\n", temp_filename, string_to_cstr(path));
+      print("[file] Failed to atomically replace file: %.*s -> %.*s\n", LIT(temp_filepath), LIT(path));
     }
   }
 
   if (!success) {
-    DeleteFileA(temp_filename);
+    DeleteFileW(filename);
   }
 
   return success;
@@ -2038,9 +2052,13 @@ File os_open_file(String path, u32 mode_flags) {
     creation = CREATE_ALWAYS;
   }
 
-  // @Incomplete: CreateFileW
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
 
-  HANDLE handle = CreateFileA(string_to_cstr(thread_get_temporary_arena(), path), permissions, FILE_SHARE_READ, 0, creation, 0, 0);
+  String16 path_w = string16_from_string(arena, path);
+
+  HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, permissions, FILE_SHARE_READ, 0, creation, 0, 0);
   result.handle = (void *)handle;
 
   if (handle == INVALID_HANDLE_VALUE) {
@@ -2048,7 +2066,10 @@ File os_open_file(String path, u32 mode_flags) {
   }
 
   if ((mode_flags & FILE_MODE_APPEND) && !(mode_flags & FILE_MODE_WRITE)) {
-    u32 size = GetFileSize(handle, NULL);
+    LARGE_INTEGER file_size;
+    GetFileSizeEx(handle, &file_size);
+    u64 size = cast(u64)file_size.QuadPart;
+
     result.offset = size;
   }
 
@@ -2060,7 +2081,7 @@ void os_read_file(File *file, u64 offset, u64 size, void *dest) {
 
   HANDLE handle = (HANDLE)file->handle;
 
-  // @Incomplete: CreateFileW
+  // :Win32_64BitFileIO
   assert(size <= U32_MAX);
   u32 size32 = cast(u32)size;
 
@@ -2081,7 +2102,7 @@ void os_write_file(File *file, u64 offset, u64 size, void *data) {
 
   HANDLE handle = (HANDLE)file->handle;
 
-  // @Incomplete: CreateFileW
+  // :Win32_64BitFileIO
   assert(size <= U32_MAX);
   u32 size32 = cast(u32)(size);
 
@@ -2112,10 +2133,11 @@ void os_close_file(File *file) {
 bool os_delete_file(String path) {
   Arena *arena = thread_get_temporary_arena();
 
-  auto restore_point = arena_get_position(arena);
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
   String16 str = string16_from_string(arena, path);
   BOOL success = DeleteFileW(cast(WCHAR *)str.data);
-  arena_set_position(arena, restore_point);
 
   return success;
 }
@@ -2123,10 +2145,11 @@ bool os_delete_file(String path) {
 bool os_make_directory(String path) {
   Arena *arena = thread_get_temporary_arena();
 
-  auto restore_point = arena_get_position(arena);
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
   String16 str = string16_from_string(arena, path);
   BOOL success = CreateDirectoryW(cast(WCHAR *)str.data, NULL);
-  arena_set_position(arena, restore_point);
 
   return success;
 }
@@ -2134,47 +2157,57 @@ bool os_make_directory(String path) {
 bool os_delete_directory(String path) {
   Arena *arena = thread_get_temporary_arena();
 
-  auto restore_point = arena_get_position(arena);
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
   String16 str = string16_from_string(arena, path);
   BOOL success = RemoveDirectoryW(cast(WCHAR *)str.data);
-  arena_set_position(arena, restore_point);
 
   return success;
+}
+
+String string_from_wstr(Arena *arena, WCHAR *wstr) {
+  String16 str16 = make_string16(wstr, wcslen(wstr));
+  return string_from_string16(arena, str16);
 }
 
 bool os_delete_entire_directory(String path) {
   Arena *arena = thread_get_temporary_arena();
 
-  auto restore_point = arena_get_position(arena);
-  char *find_path = cstr_print(arena, "%.*s\\*.*", LIT(path));
+  auto mark = arena_get_position(arena);
+  defer { arena_set_position(arena, mark); };
+
+  auto find_path = string16_from_string(arena, string_join(arena, path, S("\\*.*"))); // @Incomplete: use \\?\ prefix?
 
   bool success = true;
 
-  WIN32_FIND_DATA data;
-  HANDLE handle = FindFirstFile(find_path, &data);
+  WIN32_FIND_DATAW data;
+  HANDLE handle = FindFirstFileW(cast(WCHAR *)find_path.data, &data);
 
   if (handle != INVALID_HANDLE_VALUE) {
     do {
-      String file_name = string_from_cstr(data.cFileName);
+      auto mark = arena_get_position(arena);
+
+      String file_name = string_from_wstr(arena, data.cFileName);
 
       if (string_equals(file_name, S(".")) || string_equals(file_name, S(".."))) continue;
 
-      String file_path = string_join(path, S("/"), file_name);
+      String file_path = path_join(path, file_name);
 
       if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        // @Speed: is the recursive ever a problem?
         success |= os_delete_entire_directory(file_path);
       } else {
         success |= os_delete_file(file_path);
       }
 
-    } while(FindNextFile(handle, &data));
+      arena_set_position(arena, mark);
+    } while(FindNextFileW(handle, &data));
   }
 
   FindClose(handle);
 
   success |= os_delete_directory(path);
-
-  arena_set_position(arena, restore_point);
 
   return success;
 }
@@ -2182,9 +2215,11 @@ bool os_delete_entire_directory(String path) {
 File_Lister os_file_list_begin(Arena *arena, String path) {
   File_Lister result = {};
 
-  char *find_path = cstr_print(arena, "%.*s\\*.*", LIT(path));
-  result.find_path = find_path;
-  result.handle = 0;
+  String16 find_path = string16_from_string(arena, string_join(path, S("\\*.*"))); // @Incomplete: use \\?\ prefix?
+
+  result.find_path = cast(WCHAR *)find_path.data;
+  result.arena     = arena;
+  result.handle    = 0;
 
   return result;
 }
@@ -2193,18 +2228,18 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
   bool should_continue = true;
 
   if (!iter->handle) {
-    iter->handle = FindFirstFile(iter->find_path, &iter->data);
+    iter->handle = FindFirstFileW(iter->find_path, &iter->data);
   } else {
-    should_continue = FindNextFile(iter->handle, &iter->data);
+    should_continue = FindNextFileW(iter->handle, &iter->data);
   }
 
   if (iter->handle != INVALID_HANDLE_VALUE) {
-    String name = string_from_cstr(iter->data.cFileName);
+    String name = string_from_wstr(iter->arena, iter->data.cFileName);
 
     // Ignore . and .. "directories"
     while (should_continue && (string_equals(name, S(".")) || string_equals(name, S("..")))) {
-      should_continue = FindNextFile(iter->handle, &iter->data);
-      name = string_from_cstr(iter->data.cFileName);
+      should_continue = FindNextFileW(iter->handle, &iter->data);
+      name = string_from_wstr(iter->arena, iter->data.cFileName);
     }
 
     *info = {};
@@ -2221,6 +2256,7 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
 
 void os_file_list_end(File_Lister *iter) {
   if (iter->handle) {
+    // @Memory: restore arena to position when os_file_list_begin was called?
     FindClose(iter->handle);
     iter->handle = 0;
   }
@@ -2232,10 +2268,10 @@ File_Info os_get_file_info(Arena *arena, String path) {
   auto mark = arena_get_position(arena);
   defer { arena_set_position(arena, mark); };
 
-  char *cpath = string_to_cstr(arena, path);
+  String16 str = string16_from_string(arena, path);
 
   WIN32_FILE_ATTRIBUTE_DATA data;
-  if (GetFileAttributesExA(cpath, GetFileExInfoStandard, &data)) {
+  if (GetFileAttributesExW(cast(WCHAR *)str.data, GetFileExInfoStandard, &data)) {
     result.name         = path_filename(path);
     result.date         = ((u64)data.ftLastWriteTime.dwHighDateTime << (u64)32) | (u64)data.ftLastWriteTime.dwLowDateTime;
     result.size         = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
