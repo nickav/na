@@ -25,7 +25,6 @@
 
 #if DEBUG
 #ifndef DEBUG_TRAP
-
   #if defined(_MSC_VER)
     #if _MSC_VER < 1300
     #define DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
@@ -35,7 +34,6 @@
   #else
     #define DEBUG_TRAP() __builtin_trap()
   #endif
-
 #endif
 #else
   #define DEBUG_TRAP()
@@ -74,34 +72,83 @@
 #endif
 #endif
 
-#if defined(__cplusplus)
-  #define EXTERN extern "C"
-#else
-  #define EXTERN extern
+#ifndef nja_extern
+  #define nja_extern extern "C"
 #endif
 
+#ifndef nja_inline
+  #if defined(__GNUC__) && (__GNUC__ >= 4)
+    #define nja_inline __attribute__((always_inline)) inline
+  #elif defined(__llvm__)
+    #define nja_inline __attribute__((always_inline)) inline
+  #elif defined(_MSC_VER)
+    #define nja_inline __forceinline
+  #else
+    #define nja_inline inline
+  #endif
+#endif
+
+#ifndef nja_dll_export
 #if defined(_WIN32)
-  #define DLL_EXPORT EXTERN __declspec(dllexport)
-  #define DLL_IMPORT EXTERN __declspec(dllimport)
+  #define nja_dll_export EXTERN __declspec(dllexport)
+  #define nja_dll_import EXTERN __declspec(dllimport)
 #else
-  #define DLL_EXPORT EXTERN __attribute__((visibility("default")))
-  #define DLL_IMPORT EXTERN
+  #define nja_dll_export EXTERN __attribute__((visibility("default")))
+  #define nja_dll_import EXTERN
+#endif
 #endif
 
+#if !defined(nja_thread_local)
+  #if defined(_MSC_VER) && _MSC_VER >= 1300
+    #define nja_thread_local __declspec(thread)
+  #elif defined(__GNUC__)
+    #define nja_thread_local __thread
+  #else
+    #define nja_thread_local thread_local
+  #endif
+#endif
+
+#ifndef cast
 #define cast(type) (type)
+#endif
 
+#ifndef size_of
+#define size_of(x) ((isize)sizeof(x))
+#endif
+
+#ifndef count_of
 #define count_of(array) (sizeof(array) / sizeof((array)[0]))
+#endif
 
+#ifndef offset_of
 #define offset_of(Type, member) ((uint64_t) & (((Type *)0)->member))
+#endif
 
-#define size_of(type) ((isize)sizeof(type))
+#ifndef align_of
+#define align_of(Type) ((isize)alignof(Type))
+#endif
 
+#ifndef nja_global
+#define nja_global        static // Global variables
+#define nja_internal      static // Internal linkage
+#define nja_local_persist static // Local Persisting variables
+#endif
+
+#ifndef FOUR_CC
+#define FOUR_CC(a, b, c, d) \
+  (((u32)(a) << 0) | ((u32)(b) << 8) | ((u32)(c) << 16) | ((u32)(d) << 24))
+#endif
+
+#ifndef SWAP
+#define SWAP(Type, a, b) do { Type tmp = (a); (a) = (b); (b) = tmp; } while (0)
+#endif
+
+#ifndef CONCAT
 #define CONCAT_HELPER(x, y) x##y
 #define CONCAT(x, y) CONCAT_HELPER(x, y)
+#endif
 
-#define SWAP(Type, a, b) do { Type tmp = (a); (a) = (b); (b) = tmp; } while (0)
-
-#if defined(__cplusplus) && !defined(defer)
+#ifndef defer
 // Defer macro/thing.
 template<typename T>
 struct ExitScope {
@@ -122,7 +169,13 @@ public:
 #define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
 #endif
 
+#ifndef lambda
+#define lambda(...) [](__VA_ARGS__)
+#endif
+
+#ifndef set_flag
 #define set_flag(flags, flag, enable) do { if (enable) { flags |= (flag); } else { flags &= ~(flag); } } while(0)
+#endif
 
 #if defined(_WIN32) || defined(_WIN64)
   #define OS_WINDOWS 1
@@ -141,15 +194,15 @@ public:
 #endif
 
 #ifndef OS_WINDOWS
-  #define OS_WINDOWS 0
+#define OS_WINDOWS 0
 #endif
 
 #ifndef OS_MACOS
-  #define OS_MACOS 0
+#define OS_MACOS 0
 #endif
 
 #ifndef OS_LINUX
-  #define OS_LINUX 0
+#define OS_LINUX 0
 #endif
 
 #if defined(_MSC_VER)
@@ -163,15 +216,15 @@ public:
 #endif
 
 #ifndef COMPILER_MSVC
-  #define COMPILER_MSVC 0
+#define COMPILER_MSVC 0
 #endif
 
 #ifndef COMPILER_GCC
-  #define COMPILER_GCC 0
+#define COMPILER_GCC 0
 #endif
 
 #ifndef COMPILER_CLANG
-  #define COMPILER_CLANG 0
+#define COMPILER_CLANG 0
 #endif
 
 #if OS_WINDOWS
@@ -214,6 +267,11 @@ typedef ptrdiff_t isize;
 #define F32_MAX 3.40282347e+38f
 #define F64_MIN 2.2250738585072014e-308
 #define F64_MAX 1.7976931348623157e+308
+
+#define USIZE_MIX U64_MIN
+#define USIZE_MAX U64_MAX
+#define ISIZE_MIX I64_MIN
+#define ISIZE_MAX I64_MAX
 
 STATIC_ASSERT(sizeof(u8)  == sizeof(i8));
 STATIC_ASSERT(sizeof(u16) == sizeof(i16));
@@ -260,6 +318,30 @@ u64 nja_previous_power_of_two(u64 x) {
   x |= x >> 16;
   x |= x >> 32;
   return x - (x >> 1);
+}
+
+inline u32 nja_rotate_left(u32 value, i32 amount) {
+#if COMPILER_MSVC
+  u32 result = _rotl(value, amount);
+#else
+  // TODO(casey): Actually port this to other compiler platforms!
+  amount &= 31;
+  u32 result = ((value << amount) | (value >> (32 - amount)));
+#endif
+
+  return result;
+}
+
+inline u32 nja_rotate_right(u32 value, i32 amount) {
+#if COMPILER_MSVC
+  u32 result = _rotr(value, amount);
+#else
+  // TODO(casey): Actually port this to other compiler platforms!
+  amount &= 31;
+  u32 result = ((value >> amount) | (value << (32 - amount)));
+#endif
+
+  return result;
 }
 
 void *nja_align_forward(void *ptr, isize alignment) {
@@ -641,7 +723,49 @@ inline u64 rdtsc(void) {
 #endif
 }
 
-void init_thread_context(u64 temporary_storage_size) {
+#if COMPILER_MSVC
+  #define read_barrier() _ReadBarrier()
+  #define write_barrier() _WriteBarrier()
+#else
+  #define read_barrier() asm volatile("" ::: "memory")
+  #define write_barrier() asm volatile("" ::: "memory")
+#endif
+
+#if COMPILER_MSVC
+inline u32 atomic_compare_exchange_u32(u32 volatile *value, u32 New, u32 Expected) {
+  u32 result = _InterlockedCompareExchange((long volatile *)value, New, Expected);
+  return (result);
+}
+
+inline u64 atomic_exchange_u64(u64 volatile *value, u64 New) {
+  u64 result = _InterlockedExchange64((__int64 volatile *)value, New);
+  return (result);
+}
+
+inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
+  // NOTE(casey): Returns the original value _prior_ to adding
+  u64 result = _InterlockedExchangeAdd64((__int64 volatile *)value, Addend);
+  return (result);
+}
+#else // COMPILER_MSVC
+inline u32 atomic_compare_exchange_u32(u32 volatile *value, u32 New, u32 Expected) {
+  u32 result = __sync_val_compare_and_swap(value, Expected, New);
+  return (result);
+}
+
+inline u64 atomic_exchange_u64(u64 volatile *value, u64 New) {
+  u64 result = __sync_lock_test_and_set(value, New);
+  return (result);
+}
+
+inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
+  // NOTE(casey): Returns the original value _prior_ to adding
+  u64 result = __sync_fetch_and_add(value, Addend);
+  return (result);
+}
+#endif // COMPILER_MSVC
+
+void thread_context_init(u64 temporary_storage_size) {
   Thread_Context *ctx = (Thread_Context *)os_alloc(sizeof(Thread_Context));
 
   u8 *data = (u8 *)os_alloc(temporary_storage_size);
@@ -650,7 +774,7 @@ void init_thread_context(u64 temporary_storage_size) {
   os_thread_set_context(ctx);
 }
 
-void free_thread_context() {
+void thread_context_free() {
   Thread_Context *ctx = (Thread_Context *)os_thread_get_context();
 
   os_free(&ctx->temporary_storage.data);
@@ -697,6 +821,30 @@ struct String {
 #define S(x) String{sizeof(x) - 1, cast(u8 *)x}
 
 #define LIT(str) (int)str.count, (char *)str.data
+
+nja_inline bool char_is_alpha(char ch) {
+  return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+}
+
+nja_inline bool char_is_digit(char ch) {
+  return ch >= '0' && ch <= '9';
+}
+
+nja_inline bool char_is_numeric(char ch) {
+  return char_is_digit(ch) || ch == '.' || ch == '-';
+}
+
+nja_inline bool char_is_whitespace(char ch) {
+  return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
+}
+
+nja_inline char char_to_upper(char ch) {
+  return ch >= 'a' && ch <= 'z' ? ch - ('a' - 'A') : ch;
+}
+
+nja_inline char char_to_lower(char ch) {
+  return ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch;
+}
 
 String make_string(void *data, i64 count) {
   return String{count, (u8 *)data};
@@ -835,10 +983,6 @@ void string_advance(String *str, i64 amount) {
   str->data  += amount;
 }
 
-bool char_is_whitespace(char ch) {
-  return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
-}
-
 String string_trim_whitespace(String str) {
   while (str.count > 0 && char_is_whitespace(str.data[0])) {
     str.data ++;
@@ -850,6 +994,17 @@ String string_trim_whitespace(String str) {
   }
 
   return str;
+}
+
+bool string_eat_whitespace(String *str) {
+  u64 start_count = str->count;
+
+  while (str->count > 0 && char_is_whitespace((*str)[0])) {
+    str->data ++;
+    str->count --;
+  }
+
+  return start_count != str->count;
 }
 
 #include <stdarg.h>
@@ -914,10 +1069,15 @@ char *cstr_print(Arena *arena, const char *format, ...) {
 // All paths should be normalized at the OS interface level, so we can make that assumption here.
 
 String path_join(String path1, String path2) {
+  if (!path1.count) return path2;
+  if (!path2.count) return path1;
   return sprint("%.*s/%.*s", path1.count, path1.data, path2.count, path2.data);
 }
 
 String path_join(String path1, String path2, String path3) {
+  if (!path1.count) return path_join(path2, path3);
+  if (!path2.count) return path_join(path1, path3);
+  if (!path3.count) return path_join(path2, path3);
   return sprint("%.*s/%.*s/%.*s", path1.count, path1.data, path2.count, path2.data, path3.count, path3.data);
 }
 
@@ -962,6 +1122,18 @@ String path_get_extension(String path) {
   }
 
   return {};
+}
+
+bool path_is_absolute(String path) {
+  if (path.count == 0) { return false; }
+
+  char first_char = path[0];
+
+  return (
+    first_char == '/' ||
+    // Windows drive root:
+    (path.count > 2 && char_is_alpha(first_char) && path[1] == ':' && path[2] == '/')
+  );
 }
 
 String to_string(bool x) { if (x) return S("true"); return S("false"); }
@@ -1313,8 +1485,8 @@ String string_from_string16(Arena *arena, String16 str) {
 // Functions
 //
 
-#define PI       3.14159265359f
-#define TAU      6.28318530717958647692f
+#define PI  3.14159265359f
+#define TAU 6.28318530717958647692f
 
 #define EPSILON_F32 (1.1920929e-7f)
 #define EPSILON_F64 (2.220446e-16)
@@ -1353,6 +1525,78 @@ inline f64 sign_f64(f64 a) { return SIGN(a); }
 inline i32 abs_i32(i32 a) { return ABS(a); }
 inline f32 abs_f32(f32 a) { return ABS(a); }
 inline f64 abs_f64(f64 a) { return ABS(a); }
+
+inline f32 lerp(f32 a, f32 b, f32 t) {
+  return (1 - t) * a + b * t;
+}
+
+//
+// Random
+//
+struct Random_Lcg {
+  u32 state;
+};
+
+inline Random_Lcg random_seed_lcg(u32 state) {
+  return {state};
+}
+
+inline u32 random_next_u32(Random_Lcg *series) {
+  return series->state = (series->state * 1103515245 + 12345) & U32_MAX;
+}
+
+inline f32 random(Random_Lcg *series) {
+  f32 divisor = 1.0f / (f32)U32_MAX;
+  return divisor * (f32)random_next_u32(series);
+}
+
+inline f32 random_between(Random_Lcg *series, f32 min, f32 max) {
+  return lerp(min, max, random(series));
+}
+
+inline i32 random_int_between(Random_Lcg *series, i32 min, i32 max) {
+  assert(max >= min);
+  return min + (i32)(random_next_u32(series) % (max - min + 1));
+}
+
+struct Random_Pcg {
+  u64 state;
+  u64 selector;
+};
+
+inline Random_Pcg random_seed_pcg(u64 state, u64 selector) {
+  Random_Pcg result;
+
+  result.state = state;
+  result.selector = (selector << 1) | 1;
+
+  return result;
+}
+
+inline u32 random_next_u32(Random_Pcg *series) {
+  u64 state = series->state;
+  state = state * 6364136223846793005ULL + series->selector;
+  series->state = state;
+
+  u32 pre_rotate = (u32)((state ^ (state >> 18)) >> 27);
+  u32 result = nja_rotate_right(pre_rotate, (i32)(state >> 59));
+
+  return result;
+}
+
+inline f32 random(Random_Pcg *series) {
+  f32 divisor = 1.0f / (f32)U32_MAX;
+  return divisor * (f32)random_next_u32(series);
+}
+
+inline f32 random_between(Random_Pcg *series, f32 min, f32 max) {
+  return lerp(min, max, random(series));
+}
+
+inline i32 random_int_between(Random_Pcg *series, i32 min, i32 max) {
+  assert(max >= min);
+  return min + (i32)(random_next_u32(series) % (max - min + 1));
+}
 
 //
 // OS
@@ -1400,8 +1644,6 @@ struct OS_Memory {
 };
 
 bool os_init();
-
-//template <typename T> struct Array;
 
 void *os_alloc(u64 size);
 void os_free(void *ptr);
@@ -1474,7 +1716,7 @@ bool os_init() {
 
   win32_thread_context_index = TlsAlloc();
 
-  init_thread_context(megabytes(32));
+  thread_context_init(megabytes(32));
 
   did_init_os = true;
   return true;
@@ -1565,8 +1807,7 @@ String os_read_entire_file(Arena *arena, String path) {
 
   u64 size = ((cast(u64)hi_size) << 32) | cast(u64)lo_size;
 
-  result.data = cast(u8 *)arena_alloc(arena, size + 1); // space for null character.
-  result.data[size] = 0;
+  result.data  = cast(u8 *)arena_alloc(arena, size);
   result.count = size;
 
   DWORD bytes_read = 0;
@@ -1797,10 +2038,10 @@ File_Info os_get_file_info(Arena *arena, String path) {
 DWORD WINAPI win32_thread_proc(LPVOID lpParameter) {
   Thread_Params *params = (Thread_Params *)lpParameter;
 
-  init_thread_context(megabytes(16));
+  thread_context_init(megabytes(16));
   assert(params->proc);
   u32 result = params->proc(params->data);
-  free_thread_context();
+  thread_context_free();
 
   os_free(params);
 
@@ -1992,7 +2233,7 @@ bool os_init() {
 
   pthread_key_create(&macos_thread_local_key, NULL);
 
-  init_thread_context(megabytes(32));
+  thread_context_init(megabytes(32));
 
   return true;
 }
@@ -2112,7 +2353,7 @@ bool os_clipboard_set_text(String text) {
 #if OS_MACOS || OS_LINUX
 
 #include <stdlib.h>   // calloc, free, fseek, ftell, fread, fclose
-#include <dirent.h> // opendir, readdir, closedir
+#include <dirent.h>   // opendir, readdir, closedir
 #include <sys/stat.h> // stat
 
 void *os_alloc(u64 size) {
@@ -2266,9 +2507,9 @@ void *unix_thread_proc(void *data) {
   Thread_Params *params = (Thread_Params *)data;
   assert(params->proc);
 
-  init_thread_context(megabytes(32));
+  thread_context_init(megabytes(32));
   u32 result = params->proc(params->data);
-  free_thread_context();
+  thread_context_free();
   os_free(params);
 
   return (void *)result;
@@ -2320,21 +2561,6 @@ void os_set_high_process_priority(bool enable) {
 }
 
 #endif // OS_MACOS || OS_LINUX
-
-String os_read_entire_file(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  return os_read_entire_file(arena, path);
-}
-
-File_Info os_get_file_info(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  return os_get_file_info(arena, path);
-}
-
-String os_get_executable_directory() {
-  String result = os_get_executable_path();
-  return path_dirname(result);
-}
 
 //
 // DLLs
@@ -2434,7 +2660,9 @@ void *Alloc(u64 size, Allocator allocator) {
 
 void Free(void *data, Allocator allocator) {
   assert(allocator.proc);
-  allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data);
+  if (data != NULL) {
+    allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data);
+  }
 }
 
 void *Realloc(void *data, u64 new_size, u64 old_size, Allocator allocator) {
@@ -2502,6 +2730,10 @@ void *arena_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size
 
     case ALLOCATOR_MODE_FREE_ALL: {
       arena_reset(arena);
+      return NULL;
+    }
+
+    default: {
       return NULL;
     }
   }
@@ -2610,9 +2842,10 @@ void array_free(Array<T> &it) {
   if (it.data) {
     Free(it.data, it.allocator);
     it.data = NULL;
-    it.capacity = 0;
-    it.count = 0;
   }
+
+  it.capacity = 0;
+  it.count = 0;
 }
 
 template <typename T>
@@ -2690,13 +2923,13 @@ Slice<T> make_slice(T *data, i64 count) {
 }
 
 template <typename T>
-Slice<T> slice_array(Array<T> &array, i64 start_index, i64 end_index) {
-  assert(start_index >= 0 && start_index <= end_index && end_index <= array.count);
+Slice<T> slice_array(Array<T> &array, i64 lo, i64 hi) {
+  assert(lo >= 0 && lo <= hi && hi <= array.count);
 
   Slice<T> result = {};
 
-  result.data = array.data + start_index;
-  result.count = end_index - start_index;
+  result.data  = array.data + lo;
+  result.count = hi - lo;
 
   return result;
 }
@@ -2704,8 +2937,10 @@ Slice<T> slice_array(Array<T> &array, i64 start_index, i64 end_index) {
 template <typename T>
 Slice<T> slice_from_array(Array<T> &array) {
   Slice<T> result = {};
-  result.data = array.data;
+
+  result.data  = array.data;
   result.count = array.count;
+
   return result;
 }
 
@@ -3087,6 +3322,19 @@ V table_contains(Hash_Table<K, V> &it, K key) {
 // Extended OS Functions
 //
 
+String os_read_entire_file(String path) {
+  return os_read_entire_file(thread_get_temporary_arena(), path);
+}
+
+File_Info os_get_file_info(String path) {
+  return os_get_file_info(thread_get_temporary_arena(), path);
+}
+
+String os_get_executable_directory() {
+  String result = os_get_executable_path();
+  return path_dirname(result);
+}
+
 Array<File_Info *> os_scan_directory(Arena *arena, String path) {
   Array<File_Info *> result = {};
   result.allocator = arena_allocator(arena);
@@ -3122,25 +3370,28 @@ Array<File_Info *> os_scan_directory_recursive(Arena *arena, String path, u32 ma
   results.allocator = arena_allocator(arena);
   stack.allocator   = arena_allocator(arena);
 
-  array_push(stack, path);
+  array_push(stack, S(""));
 
   for (u32 i = 0; i < max_depth + 1; i++) {
     u32 n = stack.count;
 
     for (u32 dir_index = 0; dir_index < n; dir_index++) {
-      auto infos = os_scan_directory(arena, stack[dir_index]);
+      auto dir = stack[dir_index];
+      auto infos = os_scan_directory(arena, path_join(path, dir));
 
       For (infos) {
         if (it->is_directory) {
-          auto path = path_join(stack[dir_index], it->name);
-          array_push(stack, path);
+          array_push(stack, path_join(dir, it->name));
         } else {
+          it->name = path_join(stack[dir_index], it->name);
           array_push(results, it);
         }
       }
     }
 
-    array_remove_ordered(stack, 0, n);
+    if (n > 0) {
+      array_remove_ordered(stack, 0, n);
+    }
   }
 
   return results;

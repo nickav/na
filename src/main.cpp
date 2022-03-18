@@ -9,9 +9,15 @@ int main() {
 
   auto result = os_clipboard_get_text();
 
+  print("\n");
+  print("Clipboard:\n");
+
   os_clipboard_set_text(S("Yoooooooooooooooo!"));
 
   print("clipboard text: %.*s\n", LIT(result));
+
+  print("\n");
+  print("Files:\n");
 
   auto exe_path = os_get_executable_path();
   print("executable path: %.*s\n", LIT(exe_path));
@@ -21,21 +27,12 @@ int main() {
 
   auto cwd = os_get_current_directory();
 
-  auto files = os_scan_directory(thread_get_temporary_arena(), cwd);
+  os_delete_entire_directory(path_join(cwd, S("foo")));
+  assert(os_make_directory(path_join(cwd, S("foo"))));
+  assert(os_make_directory(path_join(cwd, S("foo/bar"))));
+  assert(os_write_entire_file(path_join(cwd, S("foo/bar/hello_sailor.txt")), S("This is a test file!")));
 
-  #if 0
-  For (files) {
-    auto path = path_join(dir, it.name);
-
-    print("%.*s\n", LIT(path));
-    print("  name:         %.*s\n", LIT(it.name));
-    print("  size:         %llu\n", it.size);
-    print("  date:         %llu\n", it.date);
-    print("  is_directory: %d\n", it.is_directory);
-  }
-  #endif
-
-  dump(sizeof(File_Info));
+  auto files = os_scan_directory_recursive(cwd);
 
   For (files) {
     auto path = path_join(dir, it->name);
@@ -45,6 +42,9 @@ int main() {
     print("  size:         %llu\n", it->size);
     print("  date:         %llu\n", it->date);
     print("  is_directory: %d\n", it->is_directory);
+
+    auto contents = os_read_entire_file(path);
+    print("  os_read_entire_file: %lld\n", contents.count);
   }
 
   print("\n");
@@ -89,24 +89,23 @@ int main() {
 
   Hash_Table<i32, i32> my_table = {};
 
-  dump(sizeof(Hash_Table<i32, i32>));
+  table_add(my_table, 42, 9);
+  table_add(my_table, 3,  99);
+  table_add(my_table, 23, 999);
+  table_add(my_table, 11, 9999);
 
-  table_add(my_table, 42, 42);
-  table_add(my_table, 3, 3);
-  table_add(my_table, 23, 23);
-  table_add(my_table, 11, 11);
-
-  #if 0
   For (my_table) {
     if (it.hash < TABLE_FIRST_VALID_HASH) continue;
-
-    print("key: %d, value: %d\n", it.key, it.value);
+    print("(key: %d, value: %d) ", it.key, it.value);
   }
-  #endif
+
+  print("\n");
 
   For_Table (it, my_table) {
-    print("key: %d, value: %d\n", it->key, it->value);
+    print("(key: %d, value: %d) ", it->key, it->value);
   }
+
+  print("\n");
 
   return 0;
 }
