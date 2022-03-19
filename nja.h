@@ -72,10 +72,6 @@
 #endif
 #endif
 
-#ifndef nja_extern
-  #define nja_extern extern "C"
-#endif
-
 #ifndef nja_inline
   #if defined(__GNUC__) && (__GNUC__ >= 4)
     #define nja_inline __attribute__((always_inline)) inline
@@ -88,13 +84,17 @@
   #endif
 #endif
 
+#ifndef nja_extern
+  #define nja_extern extern "C"
+#endif
+
 #ifndef nja_dll_export
 #if defined(_WIN32)
-  #define nja_dll_export EXTERN __declspec(dllexport)
-  #define nja_dll_import EXTERN __declspec(dllimport)
+  #define nja_dll_export nja_extern __declspec(dllexport)
+  #define nja_dll_import nja_extern __declspec(dllimport)
 #else
-  #define nja_dll_export EXTERN __attribute__((visibility("default")))
-  #define nja_dll_import EXTERN
+  #define nja_dll_export nja_extern __attribute__((visibility("default")))
+  #define nja_dll_import nja_extern
 #endif
 #endif
 
@@ -564,6 +564,7 @@ struct Arena {
 
 struct Arena_Mark {
   u64 offset;
+  u64 prev_offset;
 };
 
 Arena make_arena(u8 *data, u64 size) {
@@ -686,14 +687,22 @@ void *arena_push(Arena *arena, u64 size) {
 #define push_array(arena, Struct, count)  \
   (Struct *)arena_push(arena, count * sizeof(Struct))
 
+#define scratch_memory(arena) \
+  auto CONCAT(mark, __LINE__) = arena_get_position(arena); \
+  defer { arena_set_position(arena, CONCAT(mark, __LINE__)); };
+
 Arena_Mark arena_get_position(Arena *arena) {
   Arena_Mark result = {};
-  result.offset = arena->offset;
+
+  result.offset      = arena->offset;
+  result.prev_offset = arena->prev_offset;
+
   return result;
 }
 
 void arena_set_position(Arena *arena, Arena_Mark mark) {
-  arena->offset = mark.offset;
+  arena->offset      = mark.offset;
+  arena->prev_offset = mark.prev_offset;
 }
 
 //
@@ -925,6 +934,25 @@ void reset_temporary_storage() {
   arena_reset(arena);
 }
 
+struct Scratch_Memory {
+  Arena *arena;
+  Arena_Mark restore_point;
+
+  Scratch_Memory(Arena *_arena) {
+    arena = _arena;
+    restore_point = arena_get_position(arena);
+  }
+
+  ~Scratch_Memory() {
+    arena_set_position(arena, restore_point);
+  }
+};
+
+Scratch_Memory thread_get_scratch_memory() {
+  Arena *arena = thread_get_temporary_arena();
+  return Scratch_Memory(arena);
+}
+
 //
 // String
 //
@@ -991,7 +1019,7 @@ i64 cstr_length(char *str) {
   char *at = str;
 
   // @Speed: this can be made wide
-  if (at) {
+  if (at != NULL) {
     while (*at != 0) {
       at ++;
     }
@@ -1257,19 +1285,22 @@ bool path_is_absolute(String path) {
   );
 }
 
-String to_string(bool x) { if (x) return S("true"); return S("false"); }
-String to_string(char x) { return sprint("%c", x); }
-String to_string(char *x) { return string_from_cstr(x); }
-String to_string(i8 x)  { return sprint("%d", x); }
-String to_string(u8 x)  { return sprint("%d", x); }
-String to_string(i16 x) { return sprint("%d", x); }
-String to_string(u16 x) { return sprint("%d", x); }
-String to_string(i32 x) { return sprint("%d", x); }
-String to_string(u32 x) { return sprint("%d", x); }
-String to_string(i64 x) { return sprint("%d", x); }
-String to_string(u64 x) { return sprint("%llu", x); }
+String to_string(bool x)   { if (x) return S("true"); return S("false"); }
+String to_string(char x)   { return sprint("%c", x); }
+String to_string(char *x)  { return string_from_cstr(x); }
+String to_string(i8 x)     { return sprint("%d", x); }
+String to_string(u8 x)     { return sprint("%d", x); }
+String to_string(i16 x)    { return sprint("%d", x); }
+String to_string(u16 x)    { return sprint("%d", x); }
+String to_string(i32 x)    { return sprint("%d", x); }
+String to_string(u32 x)    { return sprint("%d", x); }
+String to_string(i64 x)    { return sprint("%lld", x); }
+String to_string(u64 x)    { return sprint("%llu", x); }
+String to_string(isize x)  { return sprint("%lld", x); }
+String to_string(usize x)  { return sprint("%llu", x); }
 String to_string(f32 x)    { return sprint("%.2f", x); }
 String to_string(f64 x)    { return sprint("%.4f", x); }
+String to_string(void *x)  { return sprint("%p", x); }
 String to_string(String x) { return x; }
 
 //
@@ -1663,8 +1694,11 @@ String os_read_entire_file(Allocator allocator, String path);
 String os_read_entire_file(String path);
 bool os_write_entire_file(String path, String contents);
 bool os_atomic_replace_file(String path, u64 size, void *data);
-bool os_delete_file(String path);
+
+bool os_make_directory(String path);
 bool os_file_exists(String path);
+bool os_delete_file(String path);
+bool os_delete_directory(String path);
 
 File os_open_file(String path, u32 mode_flags);
 void os_read_file(File *file, u64 offset, u64 size, void *dest);
@@ -1672,9 +1706,6 @@ void os_write_file(File *file, u64 offset, u64 size, void *data);
 void os_append_file(File *file, u64 size, void *data);
 void os_append_file(File *file, String str);
 void os_close_file(File *file);
-
-bool os_make_directory(String path);
-bool os_delete_directory(String path);
 
 File_Lister os_file_list_begin(Arena *arena, String path);
 bool os_file_list_next(File_Lister *iter, File_Info *info);
@@ -2111,8 +2142,13 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
     String name = string_from_wstr(iter->arena, iter->data.cFileName);
 
     // Ignore . and .. "directories"
-    while (should_continue && (string_equals(name, S(".")) || string_equals(name, S("..")))) {
+    while (string_equals(name, S(".")) || string_equals(name, S(".."))) {
       should_continue = FindNextFileW(iter->handle, &iter->data);
+
+      if (!should_continue) {
+        return false;
+      }
+
       name = string_from_wstr(iter->arena, iter->data.cFileName);
     }
 
@@ -2438,7 +2474,7 @@ String os_get_current_directory() {
 
 struct NSString;
 typedef NSString * NSPasteboardType;
-EXTERN NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
+nja_extern NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
 
 #define objc_msgSend_id ((id (*)(id, SEL))objc_msgSend)
 #define objc_method(ReturnType, ...) ((ReturnType (*)(__VA_ARGS__))objc_msgSend)
@@ -2477,6 +2513,7 @@ bool os_clipboard_set_text(String text) {
 #include <sys/stat.h> // stat
 
 struct File_Lister {
+  Arena *arena;
   char *find_path;
 
   DIR *handle;
@@ -2493,9 +2530,27 @@ void os_free(void *memory) {
   }
 }
 
+void *os_memory_reserve(u64 size) {
+  return NULL;
+}
+
+void os_memory_commit(void *ptr, u64 size) {
+}
+
+void os_memory_decommit(void *ptr, u64 size) {
+}
+
+void os_memory_release(void *ptr) {
+}
+
 String os_read_entire_file(Allocator allocator, String path) {
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+
   String result = {};
   FILE *f = fopen(string_to_cstr(arena, path), "rb");
+
+  arena_set_position(arena, mark);
 
   if (f == NULL) {
     print("[file] Failed to read entire file: %.*s\n", LIT(path));
@@ -2506,7 +2561,7 @@ String os_read_entire_file(Allocator allocator, String path) {
   u64 size = ftell(f);
   fseek(f, 0, SEEK_SET);
 
-  result.data = cast(u8 *)arena_alloc(arena, size + 1); // space for null character.
+  result.data = cast(u8 *)allocator_alloc(allocator, size + 1); // space for null character.
   result.data[size] = 0;
   result.count = size;
   size_t bytes_read = fread(result.data, sizeof(char), size, f);
@@ -2518,6 +2573,10 @@ String os_read_entire_file(Allocator allocator, String path) {
   fclose(f);
 
   return result;
+}
+
+bool os_write_entire_file(String path, String contents) {
+  return false;
 }
 
 bool os_atomic_replace_file(String path, u64 size, void *data) {
@@ -2606,8 +2665,13 @@ File os_open_file(String path, u32 mode_flags) {
     mode[1] = 'b';
   }
 
-  FILE *f = fopen(path.c_str(), mode);
+  Arena *arena = thread_get_temporary_arena();
+  auto mark = arena_get_position(arena);
+
+  FILE *f = fopen(string_to_cstr(arena, path), mode);
   result.handle = f;
+
+  arena_set_position(arena, mark);
 
   if (!f) {
     unix_file_error(&result, "Failed to open file", path);
@@ -2674,7 +2738,8 @@ File_Lister os_file_list_begin(Arena *arena, String path) {
   DIR *handle = opendir(cpath);
 
   result.find_path = cpath;
-  result.handle = handle;
+  result.handle    = handle;
+  result.arena     = arena;
 
   return result;
 }
@@ -2693,13 +2758,17 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
     String name = string_from_cstr(data->d_name);
 
     // Ignore . and .. "directories"
-    while (data && (string_equals(name, S(".")) || string_equals(name, S("..")))) {
+    while (string_equals(name, S(".")) || string_equals(name, S(".."))) {
       data = readdir(iter->handle);
+      if (data == NULL) {
+        return false;
+      }
+
       name = string_from_cstr(data->d_name);
     }
 
     *info = {};
-    info->name         = name;
+    info->name         = string_copy(iter->arena, name);
     info->date         = stat_info.st_mtime;
     info->size         = data->d_reclen;
     info->is_directory = data->d_type == DT_DIR;
@@ -2716,8 +2785,33 @@ void os_file_list_end(File_Lister *iter) {
 }
 
 bool os_file_exists(String path) {
+  //Arena *arena = thread_get_scratch_memory().arena;
+  Arena *arena = thread_get_temporary_arena();
+  scratch_memory(arena);
+
   struct stat buffer;
-  return stat(string_to_cstr(path), &buffer) == 0;
+  return stat(string_to_cstr(arena, path), &buffer) == 0;
+}
+
+bool os_make_directory(String path) {
+  Arena *arena = thread_get_temporary_arena();
+  scratch_memory(arena);
+
+  return mkdir(string_to_cstr(arena, path), 0700) == 0;
+}
+
+bool os_delete_file(String path) {
+  Arena *arena = thread_get_temporary_arena();
+  scratch_memory(arena);
+
+  return unlink(string_to_cstr(arena, path)) == 0;
+}
+
+bool os_delete_directory(String path) {
+  Arena *arena = thread_get_temporary_arena();
+  scratch_memory(arena);
+
+  return rmdir(string_to_cstr(arena, path)) == 0;
 }
 
 #include <pthread.h>
@@ -3369,7 +3463,7 @@ void table_init(Hash_Table<K, V> &it, u32 table_size) {
 
   assert(nja_is_power_of_two(it.capacity)); // Must be a power of two!
 
-  it.data = (Hash_Table<K, V>::Entry *)allocator_alloc(it.allocator, it.capacity * sizeof(Hash_Table<K, V>::Entry));
+  it.data = (typename Hash_Table<K, V>::Entry *)allocator_alloc(it.allocator, it.capacity * sizeof(typename Hash_Table<K, V>::Entry));
   table_reset(it); // @Speed: Can be removed if data is initialized to zero!
 }
 
@@ -3564,17 +3658,18 @@ String os_get_executable_directory() {
 
 bool os_delete_entire_directory(String path) {
   Arena *arena = thread_get_temporary_arena();
-
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
+  scratch_memory(arena);
 
   bool success = true;
 
   auto handle = os_file_list_begin(arena, path);
+  print("1\n");
 
   File_Info info = {};
   while (os_file_list_next(&handle, &info)) {
     auto file_path = path_join(path, info.name);
+    print("file_path: %.*s\n", LIT(file_path));
+    print("2\n");
 
     if (info.is_directory) {
       // @Speed: is the recursive ever a problem?
@@ -3584,6 +3679,7 @@ bool os_delete_entire_directory(String path) {
     }
   }
 
+  print("3\n");
   os_file_list_end(&handle);
 
   success |= os_delete_directory(path);
@@ -3884,14 +3980,14 @@ void destroy_mutex(Mutex *mutex) {
 #define internal static
 
 // Make sure this fits into the handle pointer!
-Static_Assert(sizeof(semaphore_t) <= sizeof(void *));
+STATIC_ASSERT(sizeof(semaphore_t) <= sizeof(void *));
 
 Semaphore create_semaphore(u32 max_count) {
   Semaphore result = {};
 
   mach_port_t self = mach_task_self();
 
-  semaphore_t *handle = os_alloc(sizeof(semaphore_t)); // @Memory @Cleanup
+  semaphore_t *handle = cast(semaphore_t *)os_alloc(sizeof(semaphore_t)); // @Memory @Cleanup
   result.handle = handle;
 
   kern_return_t ret = semaphore_create(self, handle, SYNC_POLICY_PREPOST, 1);
@@ -3914,7 +4010,7 @@ void wait_for(Semaphore *sem, bool infinite) {
     ret = semaphore_wait(*handle);
   } else {
     // @Incomplete
-    invalid_code_path;
+    assert(!"Invalid code path");
   }
 
   assert(ret == KERN_SUCCESS);

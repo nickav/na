@@ -48,11 +48,12 @@ int main() {
     print("executable directory: %.*s\n", LIT(dir));
 
     auto cwd = os_get_current_directory();
+    print("cwd: %.*s\n", LIT(cwd));
 
     os_delete_entire_directory(path_join(cwd, S("foo")));
     assert(os_make_directory(path_join(cwd, S("foo"))));
     assert(os_make_directory(path_join(cwd, S("foo/bar"))));
-    assert(os_write_entire_file(path_join(cwd, S("foo/bar/hello_sailor.txt")), S("This is a test file!")));
+    //assert(os_write_entire_file(path_join(cwd, S("foo/bar/hello_sailor.txt")), S("This is a test file!")));
 
     assert(os_make_directory_recursive(path_join(cwd, S("this/is/a/recursive/test"))));
 
