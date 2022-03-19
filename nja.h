@@ -1700,12 +1700,12 @@ bool os_file_exists(String path);
 bool os_delete_file(String path);
 bool os_delete_directory(String path);
 
-File os_open_file(String path, u32 mode_flags);
-void os_read_file(File *file, u64 offset, u64 size, void *dest);
-void os_write_file(File *file, u64 offset, u64 size, void *data);
-void os_append_file(File *file, u64 size, void *data);
-void os_append_file(File *file, String str);
-void os_close_file(File *file);
+File os_file_open(String path, u32 mode_flags);
+void os_file_read(File *file, u64 offset, u64 size, void *dest);
+void os_file_write(File *file, u64 offset, u64 size, void *data);
+void os_file_append(File *file, u64 size, void *data);
+void os_file_append(File *file, String str);
+void os_file_close(File *file);
 
 File_Lister os_file_list_begin(Arena *arena, String path);
 bool os_file_list_next(File_Lister *iter, File_Info *info);
@@ -1966,7 +1966,7 @@ void win32_file_error(File *file, char *message, String file_name = {}) {
   file->has_errors = true;
 }
 
-File os_open_file(String path, u32 mode_flags) {
+File os_file_open(String path, u32 mode_flags) {
   File result = {};
 
   DWORD permissions = 0;
@@ -2011,7 +2011,7 @@ File os_open_file(String path, u32 mode_flags) {
   return result;
 }
 
-void os_read_file(File *file, u64 offset, u64 size, void *dest) {
+void os_file_read(File *file, u64 offset, u64 size, void *dest) {
   if (file->has_errors) { return; }
 
   HANDLE handle = (HANDLE)file->handle;
@@ -2032,7 +2032,7 @@ void os_read_file(File *file, u64 offset, u64 size, void *dest) {
   }
 }
 
-void os_write_file(File *file, u64 offset, u64 size, void *data) {
+void os_file_write(File *file, u64 offset, u64 size, void *data) {
   if (file->has_errors) { return; }
 
   HANDLE handle = (HANDLE)file->handle;
@@ -2053,7 +2053,7 @@ void os_write_file(File *file, u64 offset, u64 size, void *data) {
   }
 }
 
-void os_close_file(File *file) {
+void os_file_close(File *file) {
   if (file->handle) {
     HANDLE handle = (HANDLE)file->handle;
     BOOL success = CloseHandle(handle);
@@ -2575,8 +2575,11 @@ String os_read_entire_file(Allocator allocator, String path) {
   return result;
 }
 
-bool os_write_entire_file(String path, String contents) {
-  return false;
+bool os_file_rename(String from, String to) {
+  Arena *arena = thread_get_temporary_arena();
+  scratch_memory(arena);
+
+  return rename(string_to_cstr(arena, from), string_to_cstr(arena, to)) == 0;
 }
 
 bool os_atomic_replace_file(String path, u64 size, void *data) {
@@ -2637,7 +2640,7 @@ void unix_file_error(File *file, char *message, String file_name = {}) {
   file->has_errors = true;
 }
 
-File os_open_file(String path, u32 mode_flags) {
+File os_file_open(String path, u32 mode_flags) {
   File result = {};
 
   char mode[4] = {};
@@ -2689,7 +2692,7 @@ File os_open_file(String path, u32 mode_flags) {
   return result;
 }
 
-void os_read_file(File *file, u64 offset, u64 size, void *dest) {
+void os_file_read(File *file, u64 offset, u64 size, void *dest) {
   if (file->has_errors) { return; }
 
   FILE *f = (FILE *)file->handle;
@@ -2705,7 +2708,7 @@ void os_read_file(File *file, u64 offset, u64 size, void *dest) {
   }
 }
 
-void os_write_file(File *file, u64 offset, u64 size, void *data) {
+void os_file_write(File *file, u64 offset, u64 size, void *data) {
   if (file->has_errors) { return; }
 
   FILE *f = (FILE *)file->handle;
@@ -2721,7 +2724,7 @@ void os_write_file(File *file, u64 offset, u64 size, void *data) {
   }
 }
 
-void os_close_file(File *file) {
+void os_file_close(File *file) {
   if (file->handle) {
     FILE *f = (FILE *)file->handle;
     file->handle = NULL;
@@ -2729,6 +2732,14 @@ void os_close_file(File *file) {
     int close_result = fclose(f);
     if (close_result != 0) { unix_file_error(file, "Failed to close file"); }
   }
+}
+
+bool os_write_entire_file(String path, String contents) {
+  auto file = os_file_open(path, FILE_MODE_WRITE);
+  os_file_write(&file, 0, contents.count, contents.data);
+  os_file_close(&file);
+
+  return !file.has_errors;
 }
 
 File_Lister os_file_list_begin(Arena *arena, String path) {
@@ -3637,17 +3648,17 @@ File_Lister os_file_list_begin(String path) {
   return os_file_list_begin(thread_get_temporary_arena(), path);
 }
 
-void os_write_file(File *file, u64 offset, String str) {
-  os_write_file(file, offset, str.count, str.data);
+void os_file_write(File *file, u64 offset, String str) {
+  os_file_write(file, offset, str.count, str.data);
 }
 
-void os_append_file(File *file, u64 size, void *data) {
-  os_write_file(file, file->offset, size, data);
+void os_file_append(File *file, u64 size, void *data) {
+  os_file_write(file, file->offset, size, data);
   file->offset += size;
 }
 
-void os_append_file(File *file, String str) {
-  os_write_file(file, file->offset, str.count, str.data);
+void os_file_append(File *file, String str) {
+  os_file_write(file, file->offset, str.count, str.data);
   file->offset += str.count;
 }
 
