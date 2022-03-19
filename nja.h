@@ -1696,7 +1696,6 @@ bool os_write_entire_file(String path, String contents);
 bool os_atomic_replace_file(String path, u64 size, void *data);
 
 bool os_make_directory(String path);
-bool os_file_exists(String path);
 bool os_delete_file(String path);
 bool os_delete_directory(String path);
 
@@ -2075,17 +2074,6 @@ bool os_delete_file(String path) {
   BOOL success = DeleteFileW(cast(WCHAR *)str.data);
 
   return success;
-}
-
-bool os_file_exists(String path) {
-  Arena *arena = thread_get_temporary_arena();
-
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
-
-  String16 path_w = string16_from_string(arena, path);
-  DWORD attrib = GetFileAttributesW(cast(WCHAR *)path_w.data);
-  return attrib != INVALID_FILE_ATTRIBUTES;
 }
 
 bool os_make_directory(String path) {
@@ -2793,15 +2781,6 @@ void os_file_list_end(File_Lister *iter) {
     closedir(iter->handle);
     iter->handle = 0;
   }
-}
-
-bool os_file_exists(String path) {
-  //Arena *arena = thread_get_scratch_memory().arena;
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
-
-  struct stat buffer;
-  return stat(string_to_cstr(arena, path), &buffer) == 0;
 }
 
 bool os_make_directory(String path) {
@@ -3698,6 +3677,14 @@ bool os_delete_entire_directory(String path) {
   return success;
 }
 
+nja_inline bool os_file_info_exists(File_Info info) {
+  return info.name.count > 0;
+}
+
+bool os_file_or_directory_exists(String path) {
+  return os_file_info_exists(os_get_file_info(path));
+}
+
 bool os_make_directory_recursive(String path) {
   i64 index = string_index(path, S("/"));
 
@@ -3707,13 +3694,13 @@ bool os_make_directory_recursive(String path) {
 
     auto slice = string_slice(path, 0, index);
 
-    if (!os_file_exists(slice)) {
+    if (!os_file_or_directory_exists(slice)) {
       bool success = os_make_directory(slice);
       if (!success) return false;
     }
   }
 
-  if (!os_file_exists(path)) {
+  if (!os_file_or_directory_exists(path)) {
     bool success = os_make_directory(path);
     if (!success) return false;
   }
