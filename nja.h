@@ -1702,6 +1702,7 @@ bool os_delete_directory(String path);
 File os_file_open(String path, u32 mode_flags);
 void os_file_read(File *file, u64 offset, u64 size, void *dest);
 void os_file_write(File *file, u64 offset, u64 size, void *data);
+u64  os_file_get_size(File *file);
 void os_file_append(File *file, u64 size, void *data);
 void os_file_append(File *file, String str);
 void os_file_close(File *file);
@@ -2518,19 +2519,54 @@ void os_free(void *memory) {
   }
 }
 
+#include <sys/mman.h>
+
 void *os_memory_reserve(u64 size) {
-  return NULL;
+  void *result = 0;
+
+  result = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
+  return result;
 }
 
 void os_memory_commit(void *ptr, u64 size) {
+  // @Incomplete: test this/
+  madvise(ptr, size, MADV_WILLNEED);
 }
 
 void os_memory_decommit(void *ptr, u64 size) {
+  // @Incomplete: test this?
+  madvise(ptr, size, MADV_DONTNEED);
 }
 
 void os_memory_release(void *ptr) {
+  munmap(ptr, 0); // @Incomplete: can size be 0 like on windows?
 }
 
+u64 os_file_get_size(File *file) {
+  FILE *f = (FILE *)file->handle;
+
+  fseek(f, 0, SEEK_END);
+  u64 size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  return size;
+}
+
+String os_read_entire_file(Allocator allocator, String path) {
+  auto file = os_file_open(path, FILE_MODE_READ);
+  auto size = os_file_get_size(&file);
+
+  String result = {};
+  result.data = cast(u8 *)allocator_alloc(allocator, size + 1); // space for null character.
+  result.count = size;
+
+  os_file_read(&file, 0, size, result.data);
+
+  return result;
+}
+
+#if 0
 String os_read_entire_file(Allocator allocator, String path) {
   Arena *arena = thread_get_temporary_arena();
   auto mark = arena_get_position(arena);
@@ -2562,6 +2598,7 @@ String os_read_entire_file(Allocator allocator, String path) {
 
   return result;
 }
+#endif
 
 bool os_file_rename(String from, String to) {
   Arena *arena = thread_get_temporary_arena();
@@ -3653,13 +3690,10 @@ bool os_delete_entire_directory(String path) {
   bool success = true;
 
   auto handle = os_file_list_begin(arena, path);
-  print("1\n");
 
   File_Info info = {};
   while (os_file_list_next(&handle, &info)) {
     auto file_path = path_join(path, info.name);
-    print("file_path: %.*s\n", LIT(file_path));
-    print("2\n");
 
     if (info.is_directory) {
       // @Speed: is the recursive ever a problem?
@@ -3669,7 +3703,6 @@ bool os_delete_entire_directory(String path) {
     }
   }
 
-  print("3\n");
   os_file_list_end(&handle);
 
   success |= os_delete_directory(path);
