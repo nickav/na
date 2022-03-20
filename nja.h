@@ -24,23 +24,27 @@
 #endif
 
 #if DEBUG
-#ifndef DEBUG_TRAP
+#ifndef debug_breakpoint
   #if defined(_MSC_VER)
     #if _MSC_VER < 1300
-    #define DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
+    #define debug_breakpoint() __asm int 3 /* Trap to debugger! */
     #else
-    #define DEBUG_TRAP() __debugbreak()
+    #define debug_breakpoint() __debugbreak()
     #endif
   #else
-    #define DEBUG_TRAP() __builtin_trap()
+    #define debug_breakpoint() __builtin_trap()
   #endif
 #endif
 #else
-  #define DEBUG_TRAP()
+  #define debug_breakpoint()
 #endif
 
 #ifndef assert
 #ifdef DEBUG
+  #ifndef assert_break
+  #define assert_break debug_breakpoint
+  #endif
+
   void nja_assert_handler(char *prefix, char *expr, char *file, long int line, char *msg) {
     print("%s(%ld): %s: ", file, line, prefix);
     if (expr) {
@@ -52,24 +56,22 @@
     print("\n");
   }
 
-  #define assert(expr) do { if (!(expr)) { nja_assert_handler("Assertion Failed", #expr, __FILE__, __LINE__, NULL); DEBUG_TRAP(); } } while (0)
+  #define assert(expr) do { if (!(expr)) { nja_assert_handler("Assertion Failed", #expr, __FILE__, __LINE__, NULL); assert_break(); } } while (0)
 #else
   #define assert(...)
 #endif
 #endif
 
+#ifndef dump
 #if DEBUG
   #define dump(var) print("%s: %s\n", #var, string_to_cstr(to_string(var)))
 #else
   #define dump(...)
 #endif
+#endif
 
 #ifndef STATIC_ASSERT
-#ifdef __cplusplus
-  #define STATIC_ASSERT(expr) static_assert(expr, "")
-#else
-  #define STATIC_ASSERT(expr) _Static_assert(expr, "")
-#endif
+#define STATIC_ASSERT(expr) static_assert(expr, "")
 #endif
 
 #ifndef nja_inline
@@ -551,15 +553,49 @@ void memory_swap(void *i, void *j, isize size) {
 // Arenas
 //
 
+enum Allocator_Mode {
+  ALLOCATOR_MODE_ALLOC    = 0,
+  ALLOCATOR_MODE_RESIZE   = 1,
+  ALLOCATOR_MODE_FREE     = 2,
+  ALLOCATOR_MODE_FREE_ALL = 3,
+};
+
+// @Incomplete: should alignment be an argument for these functions?
+#define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data, u32 alignment)
+typedef ALLOCATOR_PROC(Allocator_Proc);
+
+struct Allocator {
+  Allocator_Proc *proc;
+  void *data;
+};
+
+void *allocator_alloc(Allocator allocator, u64 size);
+
 #ifndef DEFAULT_MEMORY_ALIGNMENT
 #define DEFAULT_MEMORY_ALIGNMENT 16
 #endif
 
+#ifndef DEFAULT_MEMORY_BLOCK_SIZE
+#define DEFAULT_MEMORY_BLOCK_SIZE kilobytes(4)
+#endif
+
+struct Memory {
+  void *(*reserve) (u64 size);
+  void  (*commit)  (void *ptr, u64 size);
+  void  (*decommit)(void *ptr, u64 size);
+  void  (*release) (void *ptr);
+};
+
 struct Arena {
+  Memory backing;
+
   u8 *data;
   u64 offset;
   u64 size;
   u64 prev_offset;
+
+  u64 commit_position;
+  u64 block_size;
 };
 
 struct Arena_Mark {
@@ -567,10 +603,27 @@ struct Arena_Mark {
   u64 prev_offset;
 };
 
-Arena make_arena(u8 *data, u64 size) {
+Arena arena_make(u8 *data, u64 size) {
   Arena result = {};
   result.data = data;
   result.size = size;
+  return result;
+}
+
+void arena_init_from_backing_memory(Arena *arena, Memory memory, u64 total_size, u64 block_size) {
+  *arena = {};
+
+  arena->backing    = memory;
+  arena->data       = cast(u8 *)memory.reserve(total_size);
+  arena->size       = total_size;
+  arena->block_size = block_size;
+
+  arena->commit_position = 0;
+}
+
+Arena arena_make_from_backing_memory(Memory memory, u64 total_size, u64 block_size) {
+  Arena result = {};
+  arena_init_from_backing_memory(&result, memory, total_size, block_size);
   return result;
 }
 
@@ -580,11 +633,7 @@ void arena_init(Arena *arena, u8 *data, u64 size) {
   arena->size = size;
 }
 
-bool arena_contains_pointer(Arena *arena, void *ptr) {
-  return ptr >= arena->data && ptr < arena->data + arena->size;
-}
-
-void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
+void *arena_push(Arena *arena, u64 size, u64 alignment = 1) {
   void *result = NULL;
 
   u64 align_offset = nja_align_offset(arena->data + arena->offset, alignment);
@@ -596,6 +645,16 @@ void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
     result = &arena->data[prev_offset];
     arena->prev_offset = prev_offset;
     arena->offset += size;
+
+    if (arena->backing.commit) {
+      if (arena->offset > arena->commit_position)
+      {
+        u64 commit_size = ((arena->offset - arena->commit_position) / arena->block_size + 1) * arena->block_size;
+
+        arena->backing.commit(arena->data + arena->commit_position, commit_size);
+        arena->commit_position += commit_size;
+      }
+    }
     
     memory_zero(arena->data + prev_offset, size);
 
@@ -606,8 +665,16 @@ void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
   return result;
 }
 
+void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
+  return arena_push(arena, size, alignment);
+}
+
 void *arena_alloc(Arena *arena, u64 size) {
   return arena_alloc_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
+}
+
+bool arena_contains_pointer(Arena *arena, void *ptr) {
+  return ptr >= arena->data && ptr < arena->data + arena->size;
 }
 
 void *arena_realloc_aligned(Arena *arena, u64 size, u64 old_size, void *old_memory, u16 alignment) {
@@ -621,6 +688,7 @@ void *arena_realloc_aligned(Arena *arena, u64 size, u64 old_size, void *old_memo
   }
 
   if (arena->data + arena->prev_offset == old_memory) {
+    // @Incomplete: use backing.commit if needed
     arena->offset = arena->prev_offset + size;
     assert(arena_contains_pointer(arena, arena->data + arena->offset));
 
@@ -646,39 +714,46 @@ void *arena_realloc(Arena *arena, u64 size, u64 old_size, void *old_memory) {
   return arena_realloc_aligned(arena, size, old_size, old_memory, DEFAULT_MEMORY_ALIGNMENT);
 }
 
-void arena_free(Arena *arena, void *ptr) {
+void arena_pop_to(Arena *arena, u64 pos) {
+  if (pos < arena->offset) {
+    arena->prev_offset = arena->offset; // @Robustness: test this with realloc!
+    arena->offset = pos;
+
+    if (arena->backing.decommit) {
+      u64 commit_position = arena->commit_position;
+      u64 next_commit_position = (arena->offset / arena->block_size + 1) * arena->block_size;
+
+      isize decommit_size = commit_position - next_commit_position;
+
+      if (decommit_size > 0) {
+        arena->backing.decommit(arena->data + arena->offset, decommit_size);
+      }
+    }
+  }
+}
+
+void arena_pop(Arena *arena, u64 size) {
+  arena_pop_to(arena, arena->offset - size);
+}
+
+void arena_free_pointer(Arena *arena, void *ptr) {
   if (arena->data + arena->prev_offset == ptr) {
-    arena->offset = arena->prev_offset;
+    arena_pop_to(arena, arena->prev_offset);
   }
 
   // NO-OP
 }
 
-void arena_pop(Arena *arena, u64 size) {
-  if (size > arena->offset) {
-    arena->offset = 0;
-    arena->prev_offset = 0;
-  } else {
-    arena->prev_offset = arena->offset; // @Robustness: test this with realloc!
-    arena->offset -= size;
-  }
-}
-
 void arena_reset(Arena *arena) {
   arena->offset = 0;
   arena->prev_offset = 0;
-}
 
-void *arena_push(Arena *arena, u64 size) {
-  void *result = 0;
-
-  if (arena->offset + size < arena->size) {
-    result = arena->data + arena->offset;
-    arena->prev_offset = arena->offset;
-    arena->offset += size;
+  if (arena->backing.decommit) {
+    if (arena->commit_position > 0) {
+      arena->backing.decommit(arena->data, arena->commit_position);
+      arena->commit_position = 0;
+    }
   }
-
-  return result;
 }
 
 #define push_struct(arena, Struct)  \
@@ -1644,34 +1719,6 @@ struct Thread_Params {
   void *data;
 };
 
-struct Virtual_Memory {
-  void *(*alloc)(u64 size);
-  void  (*free)(void *ptr);
-
-  void *(*reserve)(u64 size);
-  void  (*commit)(void *ptr, u64 size);
-  void  (*decommit)(void *ptr, u64 size);
-  void  (*release)(void *ptr);
-};
-
-enum Allocator_Mode {
-  ALLOCATOR_MODE_ALLOC    = 0,
-  ALLOCATOR_MODE_RESIZE   = 1,
-  ALLOCATOR_MODE_FREE     = 2,
-  ALLOCATOR_MODE_FREE_ALL = 3,
-};
-
-// @Incomplete: should alignment be an argument for these functions?
-#define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data);
-typedef ALLOCATOR_PROC(Allocator_Proc);
-
-struct Allocator {
-  Allocator_Proc *proc;
-  void *data;
-};
-
-void *allocator_alloc(Allocator allocator, u64 size);
-
 bool os_init();
 
 void *os_alloc(u64 size);
@@ -1904,6 +1951,17 @@ bool os_write_entire_file(String path, String contents) {
   CloseHandle(handle);
 
   return true;
+}
+
+bool os_file_rename(String from, String to) {
+  Arena *arena = thread_get_temporary_arena();
+  scratch_memory(arena);
+
+  String16 from16 = string16_from_string(arena, from);
+  String16 to16   = string16_from_string(arena, to);
+
+  bool result = MoveFileW((WCHAR*)from.data, (WCHAR*)to.data);
+  return result;
 }
 
 bool os_atomic_replace_file(String path, u64 size, void *data) {
@@ -2546,9 +2604,10 @@ void os_memory_release(void *ptr) {
 u64 os_file_get_size(File *file) {
   FILE *f = (FILE *)file->handle;
 
+  u64 prev_position = ftell(f);
   fseek(f, 0, SEEK_END);
   u64 size = ftell(f);
-  fseek(f, 0, SEEK_SET);
+  fseek(f, prev_position, SEEK_SET);
 
   return size;
 }
@@ -2980,38 +3039,48 @@ inline OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name) {
 
 void *allocator_alloc(Allocator allocator, u64 size) {
   assert(allocator.proc);
-  void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data);
+  void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
+  return result;
+}
+
+void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment) {
+  assert(allocator.proc);
+  void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, alignment);
   return result;
 }
 
 void allocator_free(Allocator allocator, void *data) {
   assert(allocator.proc);
   if (data != NULL) {
-    allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data);
+    allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data, 0);
   }
 }
 
 void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size) {
   assert(allocator.proc);
-  return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data);
+  return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
 }
 
-/*
-#define Alloc  (size, allocator) allocator_alloc(allocator, size)
-#define Free   (data, allocator) allocator_free(allocator, data)
-#define Realloc(data, new_size, old_size, allocator) allocator_realloc(allocator, data, new_size, old_size)
-*/
+void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment) {
+  assert(allocator.proc);
+  return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, alignment);
+}
 
-void *os_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data) {
+ALLOCATOR_PROC(os_allocator_proc) {
   switch (mode) {
     case ALLOCATOR_MODE_FREE: {
       os_free(old_memory_pointer);
       return NULL;
     }
 
+    case ALLOCATOR_MODE_FREE_ALL: {
+      // @Incomplete
+      return NULL;
+    }
+
     case ALLOCATOR_MODE_RESIZE:
     case ALLOCATOR_MODE_ALLOC: {
-      u64 actual_size = requested_size + nja_align_offset(0, DEFAULT_MEMORY_ALIGNMENT);
+      u64 actual_size = requested_size + nja_align_offset(0, alignment);
 
       void *result = os_alloc(actual_size);
 
@@ -3034,20 +3103,20 @@ Allocator os_allocator() {
   return Allocator{os_allocator_proc, 0};
 }
 
-void *arena_allocator_proc(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data) {
+ALLOCATOR_PROC(arena_allocator_proc) {
   Arena *arena = cast(Arena *)allocator_data; 
 
   switch (mode) {
     case ALLOCATOR_MODE_ALLOC: {
-      return arena_alloc_aligned(arena, requested_size, DEFAULT_MEMORY_ALIGNMENT);
+      return arena_alloc_aligned(arena, requested_size, alignment);
     }
 
     case ALLOCATOR_MODE_RESIZE: {
-      return arena_realloc_aligned(arena, requested_size, old_size, old_memory_pointer, DEFAULT_MEMORY_ALIGNMENT);
+      return arena_realloc_aligned(arena, requested_size, old_size, old_memory_pointer, alignment);
     }
 
     case ALLOCATOR_MODE_FREE: {
-      arena_free(arena, old_memory_pointer);
+      arena_free_pointer(arena, old_memory_pointer);
       return NULL;
     }
 
@@ -3678,6 +3747,17 @@ void os_file_append(File *file, String str) {
   file->offset += str.count;
 }
 
+Memory os_virtual_memory() {
+  Memory result = {};
+
+  result.reserve  = &os_memory_reserve;
+  result.commit   = &os_memory_commit;
+  result.decommit = &os_memory_decommit;
+  result.release  = &os_memory_release;
+
+  return result;
+}
+
 String os_get_executable_directory() {
   String result = os_get_executable_path();
   return path_dirname(result);
@@ -3808,19 +3888,6 @@ Array<File_Info *> os_scan_files_recursive(Arena *arena, String path, i32 max_de
 
 Array<File_Info *> os_scan_files_recursive(String path, u32 max_depth = 1024) {
   return os_scan_files_recursive(thread_get_temporary_arena(), path, max_depth);
-}
-
-Virtual_Memory os_virtual_memory() {
-  Virtual_Memory result = {};
-
-  result.alloc    = &os_alloc;
-  result.free     = &os_free;
-  result.reserve  = &os_memory_reserve;
-  result.commit   = &os_memory_commit;
-  result.decommit = &os_memory_decommit;
-  result.release  = &os_memory_release;
-
-  return result;
 }
 
 //

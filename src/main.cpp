@@ -26,9 +26,21 @@ int main() {
     print("ptr2: %p\n", ptr2);
     assert(ptr2 != ptr1);
     assert(a.offset == (64 + 16 + 128));
+
+    print("\n");
+    print("Virtual Memory:\n");
+    Arena b = arena_make_from_backing_memory(os_virtual_memory(), gigabytes(2), kilobytes(4));
+    arena_alloc(&b, kilobytes(2));
+    assert(b.commit_position == kilobytes(4));
+    arena_alloc(&b, kilobytes(1));
+    assert(b.commit_position == kilobytes(4));
+    arena_alloc(&b, kilobytes(1));
+    assert(b.commit_position == kilobytes(4));
+    arena_alloc(&b, 1);
+    assert(b.commit_position == kilobytes(8));
   }
 
-  print("\n");
+  print("\n\n");
   print("Clipboard:\n");
   {
     auto result = os_clipboard_get_text();
@@ -38,7 +50,7 @@ int main() {
     print("clipboard text: %.*s\n", LIT(result));
   }
 
-  print("\n");
+  print("\n\n");
   print("Files:\n");
   {
     auto exe_path = os_get_executable_path();
@@ -73,7 +85,7 @@ int main() {
     }
   }
 
-  print("\n");
+  print("\n\n");
   print("Array:\n");
   {
     Array<i32> my_array = {};
@@ -111,7 +123,7 @@ int main() {
     For (my_slice) { print("%d\n", it); }
   }
 
-  print("\n");
+  print("\n\n");
   print("Hash_Table:\n");
   {
     Hash_Table<i32, i32> my_table = {};
@@ -135,7 +147,7 @@ int main() {
     print("\n");
   }
 
-  print("\n");
+  print("\n\n");
   print("String Extensions:\n");
   {
     auto parts = string_split(S("This is a cool little test!"), S(" "));
