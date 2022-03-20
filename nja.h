@@ -392,50 +392,70 @@ inline isize nja_pointer_diff(void *begin, void *end) {
 
 #define SQRT_2 0.70710678118
 
-#ifndef MIN
-#define MIN(a, b) ((a < b) ? (a) : (b))
-#endif
-#ifndef MAX
-#define MAX(a, b) ((a > b) ? (a) : (b))
-#endif
-#ifndef CLAMP
-#define CLAMP(value, lower, upper) (MAX(MIN(value, upper), lower))
+#ifndef Min
+#define Min(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 
-#ifndef SIGN
-#define SIGN(x) ((x > 0) - (x < 0))
-#endif
-#ifndef ABS
-#define ABS(x) ((x < 0) ? -(x) : (x))
+#ifndef Max
+#define Max(a, b) (((a) > (b)) ? (a) : (b))
 #endif
 
-inline i32 min_i32(i32 a, i32 b) { return MIN(a, b); }
-inline u32 min_u32(u32 a, u32 b) { return MIN(a, b); }
-inline i64 min_i64(i64 a, i64 b) { return MIN(a, b); }
-inline u64 min_u64(u64 a, u64 b) { return MIN(a, b); }
-inline f32 min_f32(f32 a, f32 b) { return MIN(a, b); }
-inline f64 min_f64(f64 a, f64 b) { return MIN(a, b); }
+#ifndef Clamp
+#define Clamp(value, lower, upper) (Max(Min(value, upper), lower))
+#endif
 
-inline i32 max_i32(i32 a, i32 b) { return MAX(a, b); }
-inline u32 max_u32(u32 a, u32 b) { return MAX(a, b); }
-inline i64 max_i64(i64 a, i64 b) { return MAX(a, b); }
-inline u64 max_u64(u64 a, u64 b) { return MAX(a, b); }
-inline f32 max_f32(f32 a, f32 b) { return MAX(a, b); }
-inline f64 max_f64(f64 a, f64 b) { return MAX(a, b); }
+#ifndef ClampTop
+#define ClampTop(a, b) Min(a, b)
+#endif
 
-inline i32 clamp_i32(i32 value, i32 lower, i32 upper) { return CLAMP(value, lower, upper); }
-inline u32 clamp_u32(u32 value, u32 lower, u32 upper) { return CLAMP(value, lower, upper); }
-inline u64 clamp_u64(u64 value, u64 lower, u64 upper) { return CLAMP(value, lower, upper); } 
-inline f32 clamp_f32(f32 value, f32 lower, f32 upper) { return CLAMP(value, lower, upper); }
-inline f64 clamp_f64(f64 value, f64 lower, f64 upper) { return CLAMP(value, lower, upper); }
+#ifndef ClampBot
+#define ClampBot(a, b) Max(a, b)
+#endif
 
-inline i32 sign_i32(i32 a) { return SIGN(a); }
-inline f32 sign_f32(f32 a) { return SIGN(a); }
-inline f64 sign_f64(f64 a) { return SIGN(a); }
+#ifndef Sign
+#define Sign(x) (((x) > 0) - ((x) < 0))
+#endif
 
-inline i32 abs_i32(i32 a) { return ABS(a); }
-inline f32 abs_f32(f32 a) { return ABS(a); }
-inline f64 abs_f64(f64 a) { return ABS(a); }
+#ifndef Abs
+#define Abs(x) (((x) < 0) ? -(x) : (x))
+#endif
+
+#ifndef AlignUpPow2
+#define AlignUpPow2(x,p) (((x) + (p) - 1) & ~((p) - 1))
+#endif
+
+#define kilobytes(value) (value * 1024LL)
+#define megabytes(value) (value * 1024LL * 1024LL)
+#define gigabytes(value) (value * 1024LL * 1024LL * 1024LL)
+#define terabytes(value) (value * 1024LL * 1024LL * 1024LL * 1024LL)
+
+inline i32 min_i32(i32 a, i32 b) { return Min(a, b); }
+inline u32 min_u32(u32 a, u32 b) { return Min(a, b); }
+inline i64 min_i64(i64 a, i64 b) { return Min(a, b); }
+inline u64 min_u64(u64 a, u64 b) { return Min(a, b); }
+inline f32 min_f32(f32 a, f32 b) { return Min(a, b); }
+inline f64 min_f64(f64 a, f64 b) { return Min(a, b); }
+
+inline i32 max_i32(i32 a, i32 b) { return Max(a, b); }
+inline u32 max_u32(u32 a, u32 b) { return Max(a, b); }
+inline i64 max_i64(i64 a, i64 b) { return Max(a, b); }
+inline u64 max_u64(u64 a, u64 b) { return Max(a, b); }
+inline f32 max_f32(f32 a, f32 b) { return Max(a, b); }
+inline f64 max_f64(f64 a, f64 b) { return Max(a, b); }
+
+inline i32 clamp_i32(i32 value, i32 lower, i32 upper) { return Clamp(value, lower, upper); }
+inline u32 clamp_u32(u32 value, u32 lower, u32 upper) { return Clamp(value, lower, upper); }
+inline u64 clamp_u64(u64 value, u64 lower, u64 upper) { return Clamp(value, lower, upper); } 
+inline f32 clamp_f32(f32 value, f32 lower, f32 upper) { return Clamp(value, lower, upper); }
+inline f64 clamp_f64(f64 value, f64 lower, f64 upper) { return Clamp(value, lower, upper); }
+
+inline i32 sign_i32(i32 a) { return Sign(a); }
+inline f32 sign_f32(f32 a) { return Sign(a); }
+inline f64 sign_f64(f64 a) { return Sign(a); }
+
+inline i32 abs_i32(i32 a) { return Abs(a); }
+inline f32 abs_f32(f32 a) { return Abs(a); }
+inline f64 abs_f64(f64 a) { return Abs(a); }
 
 inline f32 lerp(f32 a, f32 b, f32 t) {
   return (1 - t) * a + b * t;
@@ -444,11 +464,6 @@ inline f32 lerp(f32 a, f32 b, f32 t) {
 //
 // Memory
 //
-
-#define kilobytes(value) (value * 1024LL)
-#define megabytes(value) (value * 1024LL * 1024LL)
-#define gigabytes(value) (value * 1024LL * 1024LL * 1024LL)
-#define terabytes(value) (value * 1024LL * 1024LL * 1024LL * 1024LL)
 
 void *memory_copy(void *from, void *to, u64 size) {
   if (to == NULL) {
@@ -581,9 +596,9 @@ void *allocator_alloc(Allocator allocator, u64 size);
 
 struct Memory {
   void *(*reserve) (u64 size);
-  void  (*commit)  (void *ptr, u64 size);
-  void  (*decommit)(void *ptr, u64 size);
-  void  (*release) (void *ptr);
+  bool  (*commit)  (void *ptr, u64 size);
+  bool  (*decommit)(void *ptr, u64 size);
+  bool  (*release) (void *ptr, u64 size);
 };
 
 struct Arena {
@@ -610,8 +625,10 @@ Arena arena_make(u8 *data, u64 size) {
   return result;
 }
 
-void arena_init_from_backing_memory(Arena *arena, Memory memory, u64 total_size, u64 block_size) {
+void arena_init_from_backing_memory(Arena *arena, Memory memory, u64 total_size, u64 block_size = DEFAULT_MEMORY_BLOCK_SIZE) {
   *arena = {};
+
+  assert(total_size % block_size == 0 && "block_size must be a multiple of total_size!");
 
   arena->backing    = memory;
   arena->data       = cast(u8 *)memory.reserve(total_size);
@@ -621,7 +638,7 @@ void arena_init_from_backing_memory(Arena *arena, Memory memory, u64 total_size,
   arena->commit_position = 0;
 }
 
-Arena arena_make_from_backing_memory(Memory memory, u64 total_size, u64 block_size) {
+Arena arena_make_from_backing_memory(Memory memory, u64 total_size, u64 block_size = DEFAULT_MEMORY_BLOCK_SIZE) {
   Arena result = {};
   arena_init_from_backing_memory(&result, memory, total_size, block_size);
   return result;
@@ -633,85 +650,43 @@ void arena_init(Arena *arena, u8 *data, u64 size) {
   arena->size = size;
 }
 
-void *arena_push(Arena *arena, u64 size, u64 alignment = 1) {
+void arena_free(Arena *arena) {
+  if (arena->backing.release) {
+    if (arena->data) {
+      arena->backing.release(arena->data, arena->size);
+      arena->data = NULL;
+    }
+  }
+}
+
+void *arena_push(Arena *arena, u64 size) {
   void *result = NULL;
 
-  u64 align_offset = nja_align_offset(arena->data + arena->offset, alignment);
-  size += align_offset;
-
   if (arena->offset + size < arena->size) {
-    u64 prev_offset = arena->offset + align_offset;
-
-    result = &arena->data[prev_offset];
-    arena->prev_offset = prev_offset;
+    result = &arena->data[arena->offset];
+    arena->prev_offset = arena->offset;
     arena->offset += size;
 
     if (arena->backing.commit) {
       if (arena->offset > arena->commit_position)
       {
-        u64 commit_size = ((arena->offset - arena->commit_position) / arena->block_size + 1) * arena->block_size;
+        u64 commit_size = AlignUpPow2(arena->offset - arena->commit_position, arena->block_size);
+        u64 bytes_remaining = arena->size - arena->offset;
+        commit_size = ClampTop(commit_size, bytes_remaining);
 
-        arena->backing.commit(arena->data + arena->commit_position, commit_size);
-        arena->commit_position += commit_size;
+        if (arena->backing.commit(arena->data + arena->commit_position, commit_size)) {
+          arena->commit_position += commit_size;
+          memory_zero(result, size);
+        } else {
+          result = NULL;
+        }
       }
+    } else {
+      memory_zero(result, size);
     }
-    
-    memory_zero(arena->data + prev_offset, size);
-
-    // NOTE(nick): make sure our data is aligned properly
-    assert((u64)result % alignment == 0);
   }
 
   return result;
-}
-
-void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
-  return arena_push(arena, size, alignment);
-}
-
-void *arena_alloc(Arena *arena, u64 size) {
-  return arena_alloc_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
-}
-
-bool arena_contains_pointer(Arena *arena, void *ptr) {
-  return ptr >= arena->data && ptr < arena->data + arena->size;
-}
-
-void *arena_realloc_aligned(Arena *arena, u64 size, u64 old_size, void *old_memory, u16 alignment) {
-  if (old_memory == NULL || old_size == 0 || arena->offset < arena->prev_offset) {
-    return arena_alloc_aligned(arena, size, alignment);
-  }
-
-  if (!arena_contains_pointer(arena, old_memory)) {
-    assert(!"Memory is out of bounds in this arena");
-    return NULL;
-  }
-
-  if (arena->data + arena->prev_offset == old_memory) {
-    // @Incomplete: use backing.commit if needed
-    arena->offset = arena->prev_offset + size;
-    assert(arena_contains_pointer(arena, arena->data + arena->offset));
-
-    i64 delta_size = cast(i64)(size - old_size);
-    if (delta_size > 0) memory_zero(cast(u8 *)old_memory + old_size, delta_size);
-
-    // The assumption is that the alignment will not change between allocations.
-    assert(nja_align_offset(old_memory, alignment) == 0);
-
-    return old_memory;
-  }
-
-  void *new_memory = arena_alloc_aligned(arena, size, alignment);
-
-  i64 delta_size = cast(i64)(size - old_size);
-  memory_copy(old_memory, new_memory, min_i64(old_size, size));
-  memory_zero(cast(u8 *)new_memory + old_size, max_i64(delta_size, 0));
-
-  return new_memory;
-}
-
-void *arena_realloc(Arena *arena, u64 size, u64 old_size, void *old_memory) {
-  return arena_realloc_aligned(arena, size, old_size, old_memory, DEFAULT_MEMORY_ALIGNMENT);
 }
 
 void arena_pop_to(Arena *arena, u64 pos) {
@@ -720,19 +695,23 @@ void arena_pop_to(Arena *arena, u64 pos) {
     arena->offset = pos;
 
     if (arena->backing.decommit) {
-      u64 commit_position = arena->commit_position;
-      u64 next_commit_position = (arena->offset / arena->block_size + 1) * arena->block_size;
+      u64 prev_commit_position = arena->commit_position;
+      u64 next_commit_position = AlignUpPow2(arena->offset, arena->block_size);
 
-      isize decommit_size = commit_position - next_commit_position;
+      if (next_commit_position < prev_commit_position) {
+        u64 decommit_size = prev_commit_position - next_commit_position;
 
-      if (decommit_size > 0) {
-        arena->backing.decommit(arena->data + arena->offset, decommit_size);
+        if (arena->backing.decommit(arena->data + next_commit_position, decommit_size)) {
+          arena->commit_position = next_commit_position;
+        }
       }
     }
   }
 }
 
 void arena_pop(Arena *arena, u64 size) {
+  assert(size <= arena->offset);
+
   arena_pop_to(arena, arena->offset - size);
 }
 
@@ -754,6 +733,78 @@ void arena_reset(Arena *arena) {
       arena->commit_position = 0;
     }
   }
+}
+
+void arena_set_alignment(Arena *arena, u64 alignment) {
+  u64 align_offset = nja_align_offset(arena->data + arena->offset, alignment);
+  if (align_offset > 0) {
+    arena_push(arena, align_offset);
+
+    // NOTE(nick): make sure our data is aligned properly
+    assert((u64)(arena->data + arena->offset) % alignment == 0);
+  }
+}
+
+void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
+  arena_set_alignment(arena, alignment);
+  return arena_push(arena, size);
+}
+
+void *arena_alloc(Arena *arena, u64 size) {
+  return arena_alloc_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
+}
+
+bool arena_contains_pointer(Arena *arena, void *ptr) {
+  return ptr >= arena->data && ptr < arena->data + arena->size;
+}
+
+void *arena_realloc_aligned(Arena *arena, u64 size, u64 old_size, void *old_memory, u16 alignment) {
+  if (old_memory == NULL || old_size == 0 || arena->offset < arena->prev_offset) {
+    return arena_alloc_aligned(arena, size, alignment);
+  }
+
+  if (!arena_contains_pointer(arena, old_memory)) {
+    assert(!"Memory is out of bounds in this arena");
+    return NULL;
+  }
+
+  if (arena->data + arena->prev_offset == old_memory) {
+    arena->offset = arena->prev_offset + size;
+    assert(arena_contains_pointer(arena, arena->data + arena->offset));
+
+    if (arena->backing.commit) {
+      if (arena->offset > arena->commit_position)
+      {
+        u64 commit_size = AlignUpPow2(arena->offset - arena->commit_position, arena->block_size);
+        u64 bytes_remaining = arena->size - arena->offset;
+        commit_size = ClampTop(commit_size, bytes_remaining);
+
+        if (arena->backing.commit(arena->data + arena->commit_position, commit_size)) {
+          arena->commit_position += commit_size;
+        }
+      }
+    }
+
+    i64 delta_size = cast(i64)(size - old_size);
+    if (delta_size > 0) memory_zero(cast(u8 *)old_memory + old_size, delta_size);
+
+    // The assumption is that the alignment will not change between allocations.
+    assert(nja_align_offset(old_memory, alignment) == 0);
+
+    return old_memory;
+  }
+
+  void *new_memory = arena_alloc_aligned(arena, size, alignment);
+
+  i64 delta_size = cast(i64)(size - old_size);
+  memory_copy(old_memory, new_memory, min_i64(old_size, size));
+  memory_zero(cast(u8 *)new_memory + old_size, max_i64(delta_size, 0));
+
+  return new_memory;
+}
+
+void *arena_realloc(Arena *arena, u64 size, u64 old_size, void *old_memory) {
+  return arena_realloc_aligned(arena, size, old_size, old_memory, DEFAULT_MEMORY_ALIGNMENT);
 }
 
 #define push_struct(arena, Struct)  \
@@ -973,8 +1024,8 @@ inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
 void thread_context_init(u64 temporary_storage_size) {
   Thread_Context *ctx = (Thread_Context *)os_alloc(sizeof(Thread_Context));
 
-  u8 *data = (u8 *)os_alloc(temporary_storage_size);
-  arena_init(&ctx->temporary_storage, data, temporary_storage_size);
+  Memory os_virtual_memory();
+  arena_init_from_backing_memory(&ctx->temporary_storage, os_virtual_memory(), temporary_storage_size, DEFAULT_MEMORY_BLOCK_SIZE);
 
   os_thread_set_context(ctx);
 }
@@ -1171,7 +1222,7 @@ String string_copy(Arena *arena, String other) {
   return copy;
 }
 
-String string_join(Arena *arena, String a, String b) {
+String string_concat(Arena *arena, String a, String b) {
   u8 *data = push_array(arena, u8, a.count + b.count);
 
   memory_copy(a.data, data + 0,       a.count);
@@ -1180,12 +1231,12 @@ String string_join(Arena *arena, String a, String b) {
   return make_string(data, a.count + b.count);
 }
 
-String string_join(String a, String b) {
+String string_concat(String a, String b) {
   Arena *arena = thread_get_temporary_arena();
-  return string_join(arena, a, b);
+  return string_concat(arena, a, b);
 }
 
-String string_join(Arena *arena, String a, String b, String c) {
+String string_concat(Arena *arena, String a, String b, String c) {
   u8 *data = push_array(arena, u8, a.count + b.count + c.count);
 
   memory_copy(a.data, data + 0,                 a.count);
@@ -1195,9 +1246,9 @@ String string_join(Arena *arena, String a, String b, String c) {
   return make_string(data, a.count + b.count + c.count);
 }
 
-String string_join(String a, String b, String c) {
+String string_concat(String a, String b, String c) {
   Arena *arena = thread_get_temporary_arena();
-  return string_join(arena, a, b, c);
+  return string_concat(arena, a, b, c);
 }
 
 void string_advance(String *str, i64 amount) {
@@ -1371,8 +1422,10 @@ String to_string(i32 x)    { return sprint("%d", x); }
 String to_string(u32 x)    { return sprint("%d", x); }
 String to_string(i64 x)    { return sprint("%lld", x); }
 String to_string(u64 x)    { return sprint("%llu", x); }
+/*
 String to_string(isize x)  { return sprint("%lld", x); }
 String to_string(usize x)  { return sprint("%llu", x); }
+*/
 String to_string(f32 x)    { return sprint("%.2f", x); }
 String to_string(f64 x)    { return sprint("%.4f", x); }
 String to_string(void *x)  { return sprint("%p", x); }
@@ -1724,9 +1777,9 @@ bool os_init();
 void *os_alloc(u64 size);
 void os_free(void *ptr);
 void *os_memory_reserve(u64 size);
-void os_memory_commit(void *ptr, u64 size);
-void os_memory_decommit(void *ptr, u64 size);
-void os_memory_release(void *ptr);
+bool os_memory_commit(void *ptr, u64 size);
+bool os_memory_decommit(void *ptr, u64 size);
+bool os_memory_release(void *ptr);
 
 void os_thread_set_context(void *ptr);
 void *os_thread_get_context();
@@ -1856,16 +1909,17 @@ void *os_memory_reserve(u64 size) {
   return VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE);
 }
 
-void os_memory_commit(void *ptr, u64 size) {
-  VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE);
+bool os_memory_commit(void *ptr, u64 size) {
+  return VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE) != NULL;
 }
 
-void os_memory_decommit(void *ptr, u64 size) {
-  VirtualFree(ptr, size, MEM_DECOMMIT);
+bool os_memory_decommit(void *ptr, u64 size) {
+  return VirtualFree(ptr, size, MEM_DECOMMIT) != NULL;
 }
 
-void os_memory_release(void *ptr) {
-  VirtualFree(ptr, 0, MEM_RELEASE);
+bool os_memory_release(void *ptr, u64 size) {
+  // According to the docs, the size should be 0 when using MEM_RELEASE
+  return VirtualFree(ptr, 0, MEM_RELEASE) != NULL;
 }
 
 void *os_alloc(u64 size) {
@@ -2292,9 +2346,10 @@ void win32_normalize_path(String path) {
 }
 
 String os_get_executable_path() {
-  WCHAR buffer[1024];
+  WCHAR buffer[2048];
 
   DWORD length = GetModuleFileNameW(NULL, buffer, sizeof(buffer));
+  // @Incomplete: retry if buffer wasn't enough space
   if (length == 0) {
     return {};
   }
@@ -2309,9 +2364,10 @@ String os_get_executable_path() {
 }
 
 String os_get_current_directory() {
-  WCHAR buffer[1024];
+  WCHAR buffer[2048];
 
   DWORD length = GetCurrentDirectoryW(sizeof(buffer), buffer);
+  // @Incomplete: retry if buffer wasn't enough space
   if (length == 0) {
     return {};
   }
@@ -2587,18 +2643,18 @@ void *os_memory_reserve(u64 size) {
   return result;
 }
 
-void os_memory_commit(void *ptr, u64 size) {
-  // @Incomplete: test this/
-  madvise(ptr, size, MADV_WILLNEED);
-}
-
-void os_memory_decommit(void *ptr, u64 size) {
+bool os_memory_commit(void *ptr, u64 size) {
   // @Incomplete: test this?
-  madvise(ptr, size, MADV_DONTNEED);
+  return madvise(ptr, size, MADV_WILLNEED) == 0;
 }
 
-void os_memory_release(void *ptr) {
-  munmap(ptr, 0); // @Incomplete: can size be 0 like on windows?
+bool os_memory_decommit(void *ptr, u64 size) {
+  // @Incomplete: test this?
+  return madvise(ptr, size, MADV_DONTNEED) == 0;
+}
+
+bool os_memory_release(void *ptr, u64 size) {
+  return munmap(ptr, size) == 0; // @Incomplete: can size be 0 like on windows?
 }
 
 u64 os_file_get_size(File *file) {
@@ -3086,7 +3142,7 @@ ALLOCATOR_PROC(os_allocator_proc) {
 
       if (result && old_memory_pointer && mode == ALLOCATOR_MODE_RESIZE) {
         // @Incomplete: provide os-level realloc function
-        memory_copy(old_memory_pointer, result, MIN(requested_size, old_size));
+        memory_copy(old_memory_pointer, result, Min(requested_size, old_size));
         os_free(old_memory_pointer);
       }
 

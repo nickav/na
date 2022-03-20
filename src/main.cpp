@@ -29,15 +29,28 @@ int main() {
 
     print("\n");
     print("Virtual Memory:\n");
+
     Arena b = arena_make_from_backing_memory(os_virtual_memory(), gigabytes(2), kilobytes(4));
+
     arena_alloc(&b, kilobytes(2));
     assert(b.commit_position == kilobytes(4));
+
     arena_alloc(&b, kilobytes(1));
     assert(b.commit_position == kilobytes(4));
     arena_alloc(&b, kilobytes(1));
     assert(b.commit_position == kilobytes(4));
+
     arena_alloc(&b, 1);
     assert(b.commit_position == kilobytes(8));
+
+    arena_pop(&b, 1);
+    assert(b.commit_position == kilobytes(4));
+
+    arena_pop(&b, kilobytes(4));
+    assert(b.commit_position == 0);
+
+    arena_reset(&b);
+    assert(b.commit_position == 0);
   }
 
   print("\n\n");
@@ -63,6 +76,7 @@ int main() {
     print("cwd: %.*s\n", LIT(cwd));
 
     os_delete_entire_directory(path_join(cwd, S("foo")));
+    print("cwd: %.*s\n", LIT(cwd));
     assert(os_make_directory(path_join(cwd, S("foo"))));
     assert(os_make_directory(path_join(cwd, S("foo/bar"))));
     assert(os_write_entire_file(path_join(cwd, S("foo/bar/hello_sailor.txt")), S("This is a test file!")));
