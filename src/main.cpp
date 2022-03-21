@@ -75,6 +75,13 @@ int main() {
     auto cwd = os_get_current_directory();
     print("cwd: %.*s\n", LIT(cwd));
 
+    auto from_file = path_join(cwd, S("foo.txt"));
+    auto to_file   = path_join(cwd, S("bar.txt"));
+    os_write_entire_file(from_file, S("bar"));
+
+    os_delete_file(to_file);
+    assert(os_file_rename(from_file, to_file));
+
     os_delete_entire_directory(path_join(cwd, S("foo")));
     print("cwd: %.*s\n", LIT(cwd));
     assert(os_make_directory(path_join(cwd, S("foo"))));

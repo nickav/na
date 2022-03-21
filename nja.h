@@ -575,7 +575,6 @@ enum Allocator_Mode {
   ALLOCATOR_MODE_FREE_ALL = 3,
 };
 
-// @Incomplete: should alignment be an argument for these functions?
 #define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data, u32 alignment)
 typedef ALLOCATOR_PROC(Allocator_Proc);
 
@@ -811,7 +810,7 @@ void *arena_realloc(Arena *arena, u64 size, u64 old_size, void *old_memory) {
   (Struct *)arena_push(arena, sizeof(Struct))
 
 #define push_array(arena, Struct, count)  \
-  (Struct *)arena_push(arena, count * sizeof(Struct))
+  (Struct *)arena_push(arena, (count) * sizeof(Struct))
 
 #define scratch_memory(arena) \
   auto CONCAT(mark, __LINE__) = arena_get_position(arena); \
@@ -827,6 +826,8 @@ Arena_Mark arena_get_position(Arena *arena) {
 }
 
 void arena_set_position(Arena *arena, Arena_Mark mark) {
+  arena_pop_to(arena, mark.offset);
+
   arena->offset      = mark.offset;
   arena->prev_offset = mark.prev_offset;
 }
@@ -1043,8 +1044,6 @@ Arena *thread_get_temporary_arena() {
   return &ctx->temporary_storage;
 }
 
-// @Robustness: support overflowing
-// @Robustness: support arbitrary temp storage size
 void *talloc(u64 size) {
   Arena *arena = thread_get_temporary_arena();
   return arena_alloc(arena, size);
@@ -1532,15 +1531,16 @@ String_Decode string_decode_utf16(u16 *str, u32 capacity) {
 
   u16 x = str[0];
 
-  if (x < 0xD800 || x > 0xDFFF) {
+  if (x < 0xD800 || 0xDFFF < x) {
     result.codepoint = x;
     result.size = 1;
   } else if (capacity >= 2) {
     u16 y = str[1];
 
-    // @Robustness: range check?
-    result.codepoint = ((x - 0xD800) << 10 | (y - 0xDC00)) + 0x10000;
-    result.size = 2;
+    if (0xD800 <= x && x < 0xDC00 && 0xDC00 <= y && y < 0xE000) {
+      result.codepoint = (((x - 0xD800) << 10) | (y - 0xDC00)) + 0x10000;
+      result.size = 2;
+    }
   }
 
   return result;
@@ -1555,7 +1555,7 @@ u32 string_encode_utf16(u16 *dest, u32 codepoint) {
   } else {
     u32 x = (codepoint - 0x10000);
     dest[0] = (x >> 10) + 0xD800;
-    dest[1] = (x & 0x3ff) + 0xDC00;
+    dest[1] = (x & 0x3FF) + 0xDC00;
     size = 2;
   }
 
@@ -1614,31 +1614,29 @@ String string_from_string32(Arena *arena, String32 str) {
 }
 
 String16 string16_from_string(Arena *arena, String str) {
-  u16 *memory = push_array(arena, u16, str.count + 1);
+  u16 *data = push_array(arena, u16, str.count * 2 + 1);
 
+  u16 *at = data;
   u8 *p0 = str.data;
   u8 *p1 = str.data + str.count;
-  u16 *at = memory;
-  i64 remaining = str.count;
 
   while (p0 < p1) {
-    auto decode = string_decode_utf8(p0, remaining);
+    auto decode = string_decode_utf8(p0, (u64)(p1 - p0));
     u32 encode_size = string_encode_utf16(at, decode.codepoint);
 
-    at += encode_size;
     p0 += decode.size;
-    remaining -= decode.size;
+    at += encode_size;
   }
 
   *at = 0;
 
   i64 alloc_count = str.count + 1;
-  i64 string_count = cast(u64)(at - memory);
+  i64 string_count = cast(u64)(at - data);
   i64 unused_count = alloc_count - string_count - 1;
 
   arena_pop(arena, unused_count * sizeof(u16));
 
-  String16 result = {string_count, memory};
+  String16 result = {string_count, data};
   return result;
 }
 
@@ -2014,7 +2012,7 @@ bool os_file_rename(String from, String to) {
   String16 from16 = string16_from_string(arena, from);
   String16 to16   = string16_from_string(arena, to);
 
-  bool result = MoveFileW((WCHAR*)from.data, (WCHAR*)to.data);
+  BOOL result = MoveFileW((WCHAR *)from16.data, (WCHAR *)to16.data);
   return result;
 }
 
@@ -2163,6 +2161,16 @@ void os_file_write(File *file, u64 offset, u64 size, void *data) {
   } else {
     win32_file_error(file, "Failed to write file");
   }
+}
+
+u64 os_file_get_size(File *file) {
+  HANDLE handle = (HANDLE)file->handle;
+
+  LARGE_INTEGER file_size;
+  GetFileSizeEx(handle, &file_size);
+  u64 size = cast(u64)file_size.QuadPart;
+
+  return size;
 }
 
 void os_file_close(File *file) {
@@ -2349,15 +2357,17 @@ String os_get_executable_path() {
   WCHAR buffer[2048];
 
   DWORD length = GetModuleFileNameW(NULL, buffer, sizeof(buffer));
-  // @Incomplete: retry if buffer wasn't enough space
   if (length == 0) {
     return {};
   }
 
-  String16 temp = {length, cast(u16 *)buffer};
+  if (length == 2048 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+    // @Incomplete: retry if buffer wasn't enough space
+    return {};
+  }
 
   Arena *arena = thread_get_temporary_arena();
-  String result = string_from_string16(arena, temp);
+  String result = string_from_string16(arena, make_string16(buffer, length));
   win32_normalize_path(result);
 
   return result;
@@ -2367,15 +2377,17 @@ String os_get_current_directory() {
   WCHAR buffer[2048];
 
   DWORD length = GetCurrentDirectoryW(sizeof(buffer), buffer);
-  // @Incomplete: retry if buffer wasn't enough space
   if (length == 0) {
     return {};
   }
 
-  String16 temp = {length, cast(u16 *)buffer};
+  if (length == 2048 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+    // @Incomplete: retry if buffer wasn't enough space
+    return {};
+  }
 
   Arena *arena = thread_get_temporary_arena();
-  String result = string_from_string16(arena, temp);
+  String result = string_from_string16(arena, make_string16(buffer, length));
   win32_normalize_path(result);
 
   return result;
