@@ -111,8 +111,6 @@ int main() {
   {
     Array<i32> my_array = {};
 
-    dump(sizeof(Array<i32>));
-
     array_push(my_array, 0);
     array_push(my_array, 1);
     array_push(my_array, 2);

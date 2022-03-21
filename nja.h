@@ -1018,10 +1018,11 @@ inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
 }
 #endif // COMPILER_MSVC
 
+Memory os_virtual_memory();
+
 void thread_context_init(u64 temporary_storage_size) {
   Thread_Context *ctx = (Thread_Context *)os_alloc(sizeof(Thread_Context));
 
-  Memory os_virtual_memory();
   arena_init_from_backing_memory(&ctx->temporary_storage, os_virtual_memory(), temporary_storage_size, DEFAULT_MEMORY_BLOCK_SIZE);
 
   os_thread_set_context(ctx);
@@ -2418,7 +2419,7 @@ String os_get_executable_path() {
     return {};
   }
 
-  u32 alloc_size = MAX(length, PATH_MAX);
+  u32 alloc_size = Max(length, PATH_MAX);
 
   char *normalized = (char *)talloc(alloc_size);
   if (realpath(buffer, normalized) != NULL)
@@ -2461,11 +2462,14 @@ String os_clipboard_get_text() {
   id string = objc_method(id, id, SEL, id)(pasteboard, sel_registerName("stringForType:"), (id)NSPasteboardTypeString);
   // char *text = [string UTF8String];
   char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
-  return string_from_cstr(text);
+  
+  return string_copy(thread_get_temporary_arena(), string_from_cstr(text));
 }
 
 bool os_clipboard_set_text(String text) {
-  char *str = string_to_cstr(text);
+  auto scratch = begin_scratch_memory();
+  char *str = string_to_cstr(scratch.arena, text);
+  end_scratch_memory(scratch);
 
   // [NSString stringWithUTF8String: str];
   id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
@@ -2611,13 +2615,12 @@ File os_file_open(String path, u32 mode_flags) {
     mode[1] = 'b';
   }
 
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
+  auto scratch = begin_scratch_memory();
 
-  FILE *f = fopen(string_to_cstr(arena, path), mode);
+  FILE *f = fopen(string_to_cstr(scratch.arena, path), mode);
   result.handle = f;
 
-  arena_set_position(arena, mark);
+  end_scratch_memory(scratch);
 
   if (!f) {
     unix_file_error(&result, "Failed to open file", path);
@@ -2677,14 +2680,6 @@ void os_file_close(File *file) {
   }
 }
 
-bool os_write_entire_file(String path, String contents) {
-  auto file = os_file_open(path, FILE_MODE_WRITE);
-  os_file_write(&file, 0, contents.count, contents.data);
-  os_file_close(&file);
-
-  return !file.has_errors;
-}
-
 File_Lister os_file_list_begin(Arena *arena, String path) {
   File_Lister result = {};
 
@@ -2739,24 +2734,24 @@ void os_file_list_end(File_Lister *iter) {
 }
 
 bool os_make_directory(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
-
-  return mkdir(string_to_cstr(arena, path), 0700) == 0;
+  auto scratch = begin_scratch_memory();
+  int result = mkdir(string_to_cstr(scratch.arena, path), 0700);
+  end_scratch_memory(scratch);
+  return result == 0;
 }
 
 bool os_delete_file(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
-
-  return unlink(string_to_cstr(arena, path)) == 0;
+  auto scratch = begin_scratch_memory();
+  int result = unlink(string_to_cstr(scratch.arena, path));
+  end_scratch_memory(scratch);
+  return result == 0;
 }
 
 bool os_delete_directory(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
-
-  return rmdir(string_to_cstr(arena, path)) == 0;
+  auto scratch = begin_scratch_memory();
+  int result = rmdir(string_to_cstr(scratch.arena, path));
+  end_scratch_memory(scratch);
+  return result == 0;
 }
 
 #include <pthread.h>
@@ -2864,15 +2859,13 @@ inline OS_Library_Proc gb_dll_proc_address(OS_Library lib, char *proc_name) {
 #include <dlfcn.h>
 
 OS_Library os_lib_load(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
+  auto scratch = begin_scratch_memory();
 
-  char *cpath = string_to_cstr(arena, path);
   OS_Library result = {};
   // TODO(bill): Should this be RTLD_LOCAL?
-  result.handle = dlopen(cpath, RTLD_LAZY | RTLD_GLOBAL);
+  result.handle     = dlopen(string_to_cstr(scratch.arena, path), RTLD_LAZY | RTLD_GLOBAL);
 
-  arena_set_position(arena, mark);
+  end_scratch_memory(scratch);
 
   return result;
 }
