@@ -1783,7 +1783,6 @@ void os_set_high_process_priority(bool enable);
 String os_read_entire_file(Allocator allocator, String path);
 String os_read_entire_file(String path);
 bool os_write_entire_file(String path, String contents);
-bool os_atomic_replace_file(String path, u64 size, void *data);
 
 bool os_make_directory(String path);
 bool os_delete_file(String path);
@@ -1924,77 +1923,6 @@ void os_free(void *ptr) {
   }
 }
 
-String os_read_entire_file(Allocator allocator, String path) {
-  String result = {};
-
-  auto scratch = begin_scratch_memory();
-
-  String16 str = string16_from_string(scratch.arena, path);
-  HANDLE handle = CreateFileW(cast(WCHAR *)str.data, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-
-  end_scratch_memory(scratch);
-
-  if (handle == INVALID_HANDLE_VALUE) {
-    print("[file] Error reading entire file: (error code: %d) for %.*s\n", GetLastError(), LIT(path));
-    return result;
-  }
-
-  LARGE_INTEGER file_size;
-  GetFileSizeEx(handle, &file_size);
-  u64 size = cast(u64)file_size.QuadPart;
-
-  result.data  = cast(u8 *)allocator_alloc(allocator, size);
-  result.count = size;
-
-  DWORD bytes_read = 0;
-  BOOL success = ReadFile(handle, (void *)result.data, size, &bytes_read, 0);
-
-  if (!success) {
-    print("[file] Failed to read entire file: %.*s\n", LIT(path));
-  } else if (bytes_read != size) {
-    // @Robustness: should this keep reading until it reads everything?
-    print("[file] Warning byte read mismatch, expected %llu but got %lu for file: %.*s\n", size, bytes_read, LIT(path));
-  }
-
-  CloseHandle(handle);
-
-  return result;
-}
-
-bool os_write_entire_file(String path, String contents) {
-  auto scratch = begin_scratch_memory();
-
-  String16 str = string16_from_string(scratch.arena, path);
-  HANDLE handle = CreateFileW(cast(WCHAR *)str.data, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
-
-  end_scratch_memory(scratch);
-
-  if (handle == INVALID_HANDLE_VALUE) {
-    print("[file] Error writing entire file: (error code: %d) for %.*s\n", GetLastError(), LIT(path));
-    return false;
-  }
-
-  // @Incomplete @Robustness: support sizes > u32
-  // :Win32_64BitFileIO
-  assert(contents.count <= U32_MAX);
-
-  DWORD bytes_written;
-  BOOL success = WriteFile(handle, contents.data, contents.count, &bytes_written, 0);
-
-  if (!success) {
-    print("[file] Failed to write entire file: %.*s\n", LIT(path));
-    return false;
-  } else if (bytes_written != contents.count) {
-    // @Robustness: keep writing until everything is written?
-    print("[file] Warning byte read mismatch, expected %llu but got %lu for file: %.*s\n", contents.count, bytes_written, LIT(path));
-    return false;
-  }
-
-  CloseHandle(handle);
-
-  return true;
-}
-
 bool os_file_rename(String from, String to) {
   auto scratch = begin_scratch_memory();
 
@@ -2004,49 +1932,6 @@ bool os_file_rename(String from, String to) {
   BOOL result = MoveFileW((WCHAR *)from16.data, (WCHAR *)to16.data);
   end_scratch_memory(scratch);
   return result;
-}
-
-bool os_atomic_replace_file(String path, u64 size, void *data) {
-  bool success = false;
-
-  auto scratch = begin_scratch_memory();
-
-  String temp_file = string_concat(scratch.arena, path, S(".tmp"));
-  String16 temp_file16 = string16_from_string(scratch.arena, temp_file);
-
-  HANDLE file = CreateFileW(cast(WCHAR *)temp_file16.data, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-
-  if (file == INVALID_HANDLE_VALUE) {
-    print("[file] Failed to open temporary file: %.*s\n", LIT(temp_file));
-  } else {
-    bool write_success = false;
-    DWORD bytes_written = 0;
-    
-    // @Incomplete @Robustness: support sizes > u32
-    // :Win32_64BitFileIO
-    assert(size <= U32_MAX);
-
-    if (WriteFile(file, data, (u32)size, &bytes_written, 0)) {
-      write_success = bytes_written == size;
-    }
-
-    CloseHandle(file);
-
-    if (write_success) {
-      String16 path_w = string16_from_string(scratch.arena, path);
-      success = MoveFileExW(cast(WCHAR *)temp_file16.data, cast(WCHAR *)path_w.data, MOVEFILE_REPLACE_EXISTING);
-    } else {
-      print("[file] Failed to atomically replace file: %.*s -> %.*s\n", LIT(temp_file), LIT(path));
-    }
-  }
-
-  if (!success) {
-    DeleteFileW((WCHAR *)temp_file16.data);
-  }
-
-  end_scratch_memory(scratch);
-
-  return success;
 }
 
 void win32_file_error(File *file, char *message, String file_name = {}) {
@@ -2269,7 +2154,7 @@ File_Info os_get_file_info(Arena *arena, String path) {
     result.size         = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
     result.is_directory = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
   }
-  
+
   end_scratch_memory(scratch);
 
   return result;
@@ -2655,53 +2540,6 @@ u64 os_file_get_size(File *file) {
   return size;
 }
 
-String os_read_entire_file(Allocator allocator, String path) {
-  auto file = os_file_open(path, FILE_MODE_READ);
-  auto size = os_file_get_size(&file);
-
-  String result = {};
-  result.data = cast(u8 *)allocator_alloc(allocator, size + 1); // space for null character.
-  result.count = size;
-
-  os_file_read(&file, 0, size, result.data);
-
-  return result;
-}
-
-#if 0
-String os_read_entire_file(Allocator allocator, String path) {
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
-
-  String result = {};
-  FILE *f = fopen(string_to_cstr(arena, path), "rb");
-
-  arena_set_position(arena, mark);
-
-  if (f == NULL) {
-    print("[file] Failed to read entire file: %.*s\n", LIT(path));
-    return result;
-  }
-
-  fseek(f, 0, SEEK_END);
-  u64 size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-
-  result.data = cast(u8 *)allocator_alloc(allocator, size + 1); // space for null character.
-  result.data[size] = 0;
-  result.count = size;
-  size_t bytes_read = fread(result.data, sizeof(char), size, f);
-
-  if (bytes_read != size) {
-    print("[file] Warning byte read mismatch, expected %llu but got %zu for file: %.*s\n", size, bytes_read, LIT(path));
-  }
-
-  fclose(f);
-
-  return result;
-}
-#endif
-
 bool os_file_rename(String from, String to) {
   auto scratch = begin_scratch_memory();
   defer { end_scratch_memory(scratch); };
@@ -2710,31 +2548,6 @@ bool os_file_rename(String from, String to) {
   char *to_cstr   = string_to_cstr(scratch.arena, to);
 
   return rename(from_cstr, to_cstr) == 0;
-}
-
-bool os_atomic_replace_file(String path, u64 size, void *data) {
-  bool success = false;
-
-  char *cpath = string_to_cstr(path);
-  char *temp_filename = cprint("%s.tmp", cpath);
-  FILE *file = fopen(cpath, "wb");
-
-  if (file) {
-    size_t bytes_written = fwrite(data, sizeof(char), size, file);
-    bool write_success = bytes_written == size;
-    fclose(file);
-
-    if (write_success) {
-      int result = rename(temp_filename, cpath);
-      success = result == 0;
-    }
-  }
-
-  if (!success) {
-    unlink(temp_filename);
-  }
-
-  return success;
 }
 
 File_Info os_get_file_info(Arena *arena, String path) {
@@ -3019,25 +2832,23 @@ struct OS_Library {
 typedef void (*OS_Library_Proc)(void);
 
 OS_Library os_lib_load(String path);
-void os_lib_unload(OS_Library lib);
+void os_lib_release(OS_Library lib);
 OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name);
 
 #if OS_WINDOWS
 
 OS_Library os_lib_load(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
+  auto scratch = begin_scratch_memory();
 
-  char *cpath = string_to_cstr(arena, path);
   OS_Library result = {};
-  result.handle = LoadLibraryA(cpath);
+  result.handle     = LoadLibraryW((WCHAR *)string16_from_string(scratch.arena, path).data);
 
-  arena_set_position(arena, mark);
+  end_scratch_memory(scratch);
 
   return result;
 }
 
-inline void os_lib_unload(OS_Library lib) {
+inline void os_lib_release(OS_Library lib) {
   if (lib.handle) {
     FreeLibrary((HMODULE)lib.handle);
     lib.handle = 0;
@@ -3066,7 +2877,7 @@ OS_Library os_lib_load(String path) {
   return result;
 }
 
-inline void os_lib_unload(OS_Library lib) {
+inline void os_lib_release(OS_Library lib) {
   if (lib.handle) {
     dlclose(lib.handle);
     lib.handle = 0;
@@ -3767,8 +3578,29 @@ V table_contains(Hash_Table<K, V> &it, K key) {
 // Extended OS Functions
 //
 
+String os_read_entire_file(Allocator allocator, String path) {
+  auto file = os_file_open(path, FILE_MODE_READ);
+  auto size = os_file_get_size(&file);
+
+  String result = {};
+  result.data = cast(u8 *)allocator_alloc(allocator, size);
+  result.count = size;
+
+  os_file_read(&file, 0, size, result.data);
+  os_file_close(&file);
+
+  return result;
+}
+
 String os_read_entire_file(String path) {
   return os_read_entire_file(arena_allocator(thread_get_temporary_arena()), path);
+}
+
+bool os_write_entire_file(String path, String contents) {
+  auto file = os_file_open(path, FILE_MODE_WRITE);
+  os_file_write(&file, 0, contents.count, contents.data);
+  os_file_close(&file);
+  return !file.has_errors;
 }
 
 File_Info os_get_file_info(String path) {
