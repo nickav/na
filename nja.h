@@ -2439,7 +2439,8 @@ String os_get_executable_path() {
   u32 length = 0;
   _NSGetExecutablePath(0, &length);
 
-  char *buffer = (char *)talloc(length);
+  Arena *arena = thread_get_temporary_arena();
+  char *buffer = (char *)arena_push(arena, length);
 
   if (_NSGetExecutablePath(buffer, &length) < 0) {
     return {};
@@ -2447,12 +2448,12 @@ String os_get_executable_path() {
 
   u32 alloc_size = Max(length, PATH_MAX);
 
-  char *normalized = (char *)talloc(alloc_size);
+  char *normalized = (char *)arena_push(arena, alloc_size);
   if (realpath(buffer, normalized) != NULL)
   {
     auto result = make_string(normalized, length);
     u32 unused_size = alloc_size - result.count;
-    tpop(unused_size);
+    arena_pop(arena, unused_size);
     return result;
   }
 
@@ -2460,12 +2461,14 @@ String os_get_executable_path() {
 }
 
 String os_get_current_directory() {
-  char *buffer = (char *)talloc(PATH_MAX);
+  Arena *arena = thread_get_temporary_arena();
+
+  char *buffer = (char *)arena_push(arena, PATH_MAX);
   getcwd(buffer, PATH_MAX);
 
   auto result = string_from_cstr(buffer);
   u32 unused_size = PATH_MAX - result.count;
-  tpop(unused_size);
+  arena_pop(arena, unused_size);
   return result;
 }
 
