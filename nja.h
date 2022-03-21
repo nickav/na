@@ -421,7 +421,11 @@ inline isize nja_pointer_diff(void *begin, void *end) {
 #endif
 
 #ifndef AlignUpPow2
-#define AlignUpPow2(x,p) (((x) + (p) - 1) & ~((p) - 1))
+#define AlignUpPow2(x, p) (((x) + (p) - 1) & ~((p) - 1))
+#endif
+
+#ifndef AlignDownPow2
+#define AlignDownPow2(x, p) ((x) & ~((p) - 1))
 #endif
 
 #define kilobytes(value) (value * 1024LL)
@@ -2536,19 +2540,54 @@ void os_free(void *memory) {
 void *os_memory_reserve(u64 size) {
   void *result = 0;
 
-  result = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  result = mmap(NULL, size, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  //msync(result, size, MS_SYNC | MS_INVALIDATE);
 
   return result;
 }
 
 bool os_memory_commit(void *ptr, u64 size) {
-  // @Incomplete: test this?
-  return madvise(ptr, size, MADV_WILLNEED) == 0;
+  int page_size = sysconf(_SC_PAGE_SIZE);
+
+  isize p = (isize)ptr;
+  isize p_aligned = AlignDownPow2(p, page_size);
+
+  if (p != p_aligned) {
+    isize delta = p - p_aligned;
+    ptr = nja_pointer_sub(ptr, delta);
+    size += delta;
+  }
+
+  size = AlignUpPow2(size, page_size);
+
+  // NOTE(nick): ptr must be aligned to a page boundary.
+  int result = mprotect(ptr, size, PROT_READ | PROT_WRITE);
+
+  madvise(ptr, size, MADV_WILLNEED);
+
+  return result == 0;
 }
 
 bool os_memory_decommit(void *ptr, u64 size) {
-  // @Incomplete: test this?
-  return madvise(ptr, size, MADV_DONTNEED) == 0;
+  int page_size = sysconf(_SC_PAGE_SIZE);
+
+  isize p = (isize)ptr;
+  isize p_aligned = AlignDownPow2(p, page_size);
+
+  if (p != p_aligned) {
+    isize delta = p - p_aligned;
+    ptr = nja_pointer_sub(ptr, delta);
+    size += delta;
+  }
+
+  size = AlignUpPow2(size, page_size);
+
+  // NOTE(nick): ptr must be aligned to a page boundary.
+  int result = mprotect(ptr, size, PROT_NONE);
+
+  //madvise(ptr, size, MADV_DONTNEED); // is this too harsh?
+
+  return result == 0;
 }
 
 bool os_memory_release(void *ptr, u64 size) {
