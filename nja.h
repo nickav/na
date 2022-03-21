@@ -812,10 +812,6 @@ void *arena_realloc(Arena *arena, u64 size, u64 old_size, void *old_memory) {
 #define push_array(arena, Struct, count)  \
   (Struct *)arena_push(arena, (count) * sizeof(Struct))
 
-#define scratch_memory(arena) \
-  auto CONCAT(mark, __LINE__) = arena_get_position(arena); \
-  defer { arena_set_position(arena, CONCAT(mark, __LINE__)); };
-
 Arena_Mark arena_get_position(Arena *arena) {
   Arena_Mark result = {};
 
@@ -1045,38 +1041,37 @@ Arena *thread_get_temporary_arena() {
 }
 
 void *talloc(u64 size) {
-  Arena *arena = thread_get_temporary_arena();
-  return arena_alloc(arena, size);
+  return arena_alloc(thread_get_temporary_arena(), size);
 }
 
 void tpop(u64 size) {
-  Arena *arena = thread_get_temporary_arena();
-  arena_pop(arena, size);
+  arena_pop(thread_get_temporary_arena(), size);
 }
 
 void reset_temporary_storage() {
-  Arena *arena = thread_get_temporary_arena();
-  arena_reset(arena);
+  arena_reset(thread_get_temporary_arena());
 }
 
 struct Scratch_Memory {
   Arena *arena;
   Arena_Mark restore_point;
-
-  Scratch_Memory(Arena *_arena) {
-    arena = _arena;
-    restore_point = arena_get_position(arena);
-  }
-
-  ~Scratch_Memory() {
-    arena_set_position(arena, restore_point);
-  }
 };
 
-Scratch_Memory thread_get_scratch_memory() {
+Scratch_Memory begin_scratch_memory() {
+  Scratch_Memory result = {};
+
   Arena *arena = thread_get_temporary_arena();
-  return Scratch_Memory(arena);
+
+  result.arena         = arena;
+  result.restore_point = arena_get_position(arena);
+
+  return result;
 }
+
+void end_scratch_memory(Scratch_Memory scratch) {
+  arena_set_position(scratch.arena, scratch.restore_point);
+}
+
 
 //
 // String
@@ -1136,8 +1131,7 @@ char *string_to_cstr(Arena *arena, String str) {
 }
 
 char *string_to_cstr(String str) {
-  Arena *arena = thread_get_temporary_arena();
-  return string_to_cstr(arena, str);
+  return string_to_cstr(thread_get_temporary_arena(), str);
 }
 
 i64 cstr_length(char *str) {
@@ -1231,8 +1225,7 @@ String string_concat(Arena *arena, String a, String b) {
 }
 
 String string_concat(String a, String b) {
-  Arena *arena = thread_get_temporary_arena();
-  return string_concat(arena, a, b);
+  return string_concat(thread_get_temporary_arena(), a, b);
 }
 
 String string_concat(Arena *arena, String a, String b, String c) {
@@ -1246,8 +1239,7 @@ String string_concat(Arena *arena, String a, String b, String c) {
 }
 
 String string_concat(String a, String b, String c) {
-  Arena *arena = thread_get_temporary_arena();
-  return string_concat(arena, a, b, c);
+  return string_concat(thread_get_temporary_arena(), a, b, c);
 }
 
 void string_advance(String *str, i64 amount) {
@@ -1935,13 +1927,12 @@ void os_free(void *ptr) {
 String os_read_entire_file(Allocator allocator, String path) {
   String result = {};
 
-  auto arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
+  auto scratch = begin_scratch_memory();
 
-  String16 str = string16_from_string(arena, path);
+  String16 str = string16_from_string(scratch.arena, path);
   HANDLE handle = CreateFileW(cast(WCHAR *)str.data, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
 
-  arena_set_position(arena, mark);
+  end_scratch_memory(scratch);
 
   if (handle == INVALID_HANDLE_VALUE) {
     print("[file] Error reading entire file: (error code: %d) for %.*s\n", GetLastError(), LIT(path));
@@ -1971,13 +1962,12 @@ String os_read_entire_file(Allocator allocator, String path) {
 }
 
 bool os_write_entire_file(String path, String contents) {
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
+  auto scratch = begin_scratch_memory();
 
-  String16 str = string16_from_string(arena, path);
+  String16 str = string16_from_string(scratch.arena, path);
   HANDLE handle = CreateFileW(cast(WCHAR *)str.data, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
 
-  arena_set_position(arena, mark);
+  end_scratch_memory(scratch);
 
   if (handle == INVALID_HANDLE_VALUE) {
     print("[file] Error writing entire file: (error code: %d) for %.*s\n", GetLastError(), LIT(path));
@@ -2006,37 +1996,29 @@ bool os_write_entire_file(String path, String contents) {
 }
 
 bool os_file_rename(String from, String to) {
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
+  auto scratch = begin_scratch_memory();
 
-  String16 from16 = string16_from_string(arena, from);
-  String16 to16   = string16_from_string(arena, to);
+  String16 from16 = string16_from_string(scratch.arena, from);
+  String16 to16   = string16_from_string(scratch.arena, to);
 
   BOOL result = MoveFileW((WCHAR *)from16.data, (WCHAR *)to16.data);
+  end_scratch_memory(scratch);
   return result;
 }
 
 bool os_atomic_replace_file(String path, u64 size, void *data) {
   bool success = false;
 
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
+  auto scratch = begin_scratch_memory();
 
-  String temp_filepath = string_concat(arena, path, S(".tmp"));
+  String temp_file = string_concat(scratch.arena, path, S(".tmp"));
+  String16 temp_file16 = string16_from_string(scratch.arena, temp_file);
 
-  String16 str = string16_from_string(arena, temp_filepath);
-  WCHAR *filename = cast(WCHAR *)str.data;
-
-  String16 path_w = string16_from_string(arena, path);
-
-  HANDLE file = CreateFileW(filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+  HANDLE file = CreateFileW(cast(WCHAR *)temp_file16.data, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 
   if (file == INVALID_HANDLE_VALUE) {
-    print("[file] Failed to open temporary file: %.*s\n", LIT(temp_filepath));
-  }
-
-  if (file != INVALID_HANDLE_VALUE) {
+    print("[file] Failed to open temporary file: %.*s\n", LIT(temp_file));
+  } else {
     bool write_success = false;
     DWORD bytes_written = 0;
     
@@ -2051,15 +2033,18 @@ bool os_atomic_replace_file(String path, u64 size, void *data) {
     CloseHandle(file);
 
     if (write_success) {
-      success = MoveFileExW(filename, cast(WCHAR *)string16_from_string(arena, path).data, MOVEFILE_REPLACE_EXISTING);
+      String16 path_w = string16_from_string(scratch.arena, path);
+      success = MoveFileExW(cast(WCHAR *)temp_file16.data, cast(WCHAR *)path_w.data, MOVEFILE_REPLACE_EXISTING);
     } else {
-      print("[file] Failed to atomically replace file: %.*s -> %.*s\n", LIT(temp_filepath), LIT(path));
+      print("[file] Failed to atomically replace file: %.*s -> %.*s\n", LIT(temp_file), LIT(path));
     }
   }
 
   if (!success) {
-    DeleteFileW(filename);
+    DeleteFileW((WCHAR *)temp_file16.data);
   }
+
+  end_scratch_memory(scratch);
 
   return success;
 }
@@ -2097,14 +2082,13 @@ File os_file_open(String path, u32 mode_flags) {
     creation = CREATE_ALWAYS;
   }
 
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
+  auto scratch = begin_scratch_memory();
 
-  String16 path_w = string16_from_string(arena, path);
-
+  String16 path_w = string16_from_string(scratch.arena, path);
   HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, permissions, FILE_SHARE_READ, 0, creation, 0, 0);
   result.handle = (void *)handle;
+
+  end_scratch_memory(scratch);
 
   if (handle == INVALID_HANDLE_VALUE) {
     win32_file_error(&result, "Failed to open file", path);
@@ -2186,37 +2170,28 @@ void os_file_close(File *file) {
 }
 
 bool os_delete_file(String path) {
-  Arena *arena = thread_get_temporary_arena();
-
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
-
-  String16 str = string16_from_string(arena, path);
+  auto scratch = begin_scratch_memory();
+  String16 str = string16_from_string(scratch.arena, path);
   BOOL success = DeleteFileW(cast(WCHAR *)str.data);
+  end_scratch_memory(scratch);
 
   return success;
 }
 
 bool os_make_directory(String path) {
-  Arena *arena = thread_get_temporary_arena();
-
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
-
-  String16 str = string16_from_string(arena, path);
+  auto scratch = begin_scratch_memory();
+  String16 str = string16_from_string(scratch.arena, path);
   BOOL success = CreateDirectoryW(cast(WCHAR *)str.data, NULL);
+  end_scratch_memory(scratch);
 
   return success;
 }
 
 bool os_delete_directory(String path) {
-  Arena *arena = thread_get_temporary_arena();
-
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
-
-  String16 str = string16_from_string(arena, path);
+  auto scratch = begin_scratch_memory();
+  String16 str = string16_from_string(scratch.arena, path);
   BOOL success = RemoveDirectoryW(cast(WCHAR *)str.data);
+  end_scratch_memory(scratch);
 
   return success;
 }
@@ -2284,10 +2259,8 @@ void os_file_list_end(File_Lister *iter) {
 File_Info os_get_file_info(Arena *arena, String path) {
   File_Info result = {};
 
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
-
-  String16 str = string16_from_string(arena, path);
+  auto scratch = begin_scratch_memory();
+  String16 str = string16_from_string(scratch.arena, path);
 
   WIN32_FILE_ATTRIBUTE_DATA data;
   if (GetFileAttributesExW(cast(WCHAR *)str.data, GetFileExInfoStandard, &data)) {
@@ -2296,6 +2269,8 @@ File_Info os_get_file_info(Arena *arena, String path) {
     result.size         = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
     result.is_directory = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
   }
+  
+  end_scratch_memory(scratch);
 
   return result;
 }
@@ -2398,11 +2373,10 @@ bool os_clipboard_set_text(String str) {
   HANDLE handle;
   WCHAR* buffer;
 
-  Arena *arena = thread_get_temporary_arena();
-  auto mark = arena_get_position(arena);
-  char *cstr = string_to_cstr(arena, str);
+  auto scratch = begin_scratch_memory();
+  defer { end_scratch_memory(scratch); };
 
-  defer { arena_set_position(arena, mark); };
+  char *cstr = string_to_cstr(scratch.arena, str);
 
   count = MultiByteToWideChar(CP_UTF8, 0, cstr, -1, NULL, 0);
 
@@ -2464,7 +2438,8 @@ String os_clipboard_get_text() {
   u32 buffer_size = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
   String16 str16 = make_string16(buffer, buffer_size);
 
-  String result = string_from_string16(thread_get_temporary_arena(), str16);
+  auto arena = thread_get_temporary_arena();
+  String result = string_from_string16(arena, str16);
 
   GlobalUnlock(handle);
   CloseClipboard();
@@ -2728,10 +2703,13 @@ String os_read_entire_file(Allocator allocator, String path) {
 #endif
 
 bool os_file_rename(String from, String to) {
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
+  auto scratch = begin_scratch_memory();
+  defer { end_scratch_memory(scratch); };
 
-  return rename(string_to_cstr(arena, from), string_to_cstr(arena, to)) == 0;
+  char *from_cstr = string_to_cstr(scratch.arena, from);
+  char *to_cstr   = string_to_cstr(scratch.arena, to);
+
+  return rename(from_cstr, to_cstr) == 0;
 }
 
 bool os_atomic_replace_file(String path, u64 size, void *data) {
@@ -3832,12 +3810,11 @@ String os_get_executable_directory() {
 }
 
 bool os_delete_entire_directory(String path) {
-  Arena *arena = thread_get_temporary_arena();
-  scratch_memory(arena);
+  auto scratch = begin_scratch_memory();
 
   bool success = true;
 
-  auto handle = os_file_list_begin(arena, path);
+  auto handle = os_file_list_begin(scratch.arena, path);
 
   File_Info info = {};
   while (os_file_list_next(&handle, &info)) {
@@ -3855,6 +3832,7 @@ bool os_delete_entire_directory(String path) {
 
   success |= os_delete_directory(path);
 
+  end_scratch_memory(scratch);
   return success;
 }
 
