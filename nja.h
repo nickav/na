@@ -1635,7 +1635,7 @@ String16 string16_from_string(Arena *arena, String str) {
 
 String string_from_string16(Arena *arena, String16 str) {
   String result = {};
-  result.data = push_array(arena, u8, str.count * 2);
+  result.data = push_array(arena, u8, str.count * 3 + 1);
 
   u16 *p0 = str.data;
   u16 *p1 = str.data + str.count;
@@ -1651,8 +1651,10 @@ String string_from_string16(Arena *arena, String16 str) {
 
   result.count = at - result.data;
 
-  u64 unused_size = (result.count - str.count);
-  arena_pop(arena, unused_size);
+  u64 alloc_count = str.count * 3 + 1;
+  u64 string_count = result.count;
+  u64 unused_count = alloc_count - string_count;
+  arena_pop(arena, unused_count);
 
   return result;
 }
@@ -2215,19 +2217,39 @@ void win32_normalize_path(String path) {
 }
 
 String os_get_executable_path() {
-  WCHAR buffer[2048];
+  Arena *arena = thread_get_temporary_arena();
 
-  DWORD length = GetModuleFileNameW(NULL, buffer, sizeof(buffer));
+  u64 buffer_size = 2048;
+  WCHAR *buffer = push_array(arena, WCHAR, buffer_size);
+
+  DWORD length = GetModuleFileNameW(NULL, buffer, buffer_size);
   if (length == 0) {
     return {};
   }
 
-  if (length == 2048 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-    // @Incomplete: retry if buffer wasn't enough space
-    return {};
+  if (length == buffer_size && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+    bool success = false;
+
+    for (int i = 0; i < 4; i ++) {
+      arena_pop(arena, buffer_size * sizeof(WCHAR));
+
+      buffer_size *= 2;
+      buffer = push_array(arena, WCHAR, buffer_size);
+      length = GetModuleFileNameW(NULL, buffer, buffer_size);
+
+      if (!(length == buffer_size && GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+        success = true;
+        break;
+      }
+    }
+
+    if (!success) {
+      return {};
+    }
   }
 
-  Arena *arena = thread_get_temporary_arena();
+  arena_pop(arena, (buffer_size - length) * sizeof(WCHAR));
+
   String result = string_from_string16(arena, make_string16(buffer, length));
   win32_normalize_path(result);
 
@@ -2235,19 +2257,19 @@ String os_get_executable_path() {
 }
 
 String os_get_current_directory() {
-  WCHAR buffer[2048];
+  Arena *arena = thread_get_temporary_arena();
 
-  DWORD length = GetCurrentDirectoryW(sizeof(buffer), buffer);
+  DWORD length = GetCurrentDirectoryW(0, NULL);
   if (length == 0) {
     return {};
   }
 
-  if (length == 2048 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-    // @Incomplete: retry if buffer wasn't enough space
+  WCHAR *buffer = push_array(arena, WCHAR, length);
+  DWORD bytes_written = GetCurrentDirectoryW(length, buffer);
+  if (bytes_written + 1 != length) {
     return {};
   }
 
-  Arena *arena = thread_get_temporary_arena();
   String result = string_from_string16(arena, make_string16(buffer, length));
   win32_normalize_path(result);
 
@@ -2882,6 +2904,13 @@ inline OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name) {
 }
 
 #endif
+
+inline OS_Library_Proc os_lib_get_proc(OS_Library lib, String proc_name) {
+  auto scratch = begin_scratch_memory();
+  auto result = os_lib_get_proc(lib, string_to_cstr(scratch.arena, proc_name));
+  end_scratch_memory(scratch);
+  return result;
+}
 
 //
 // Allocator
