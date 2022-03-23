@@ -1830,8 +1830,8 @@ String os_clipboard_get_text();
 
 #pragma comment(lib, "user32")
 
-static LARGE_INTEGER win32_perf_frequency;
-static LARGE_INTEGER win32_perf_counter;
+static u64 win32_ticks_per_second = 1;
+static u64 win32_counter_offset = 0;
 
 static DWORD win32_thread_context_index = 0;
 
@@ -1848,10 +1848,19 @@ struct File_Lister {
 bool os_init() {
   if (did_init_os) return false;
 
-  AttachConsole(ATTACH_PARENT_PROCESS);
+  HANDLE stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (!stdout) {
+    AttachConsole(ATTACH_PARENT_PROCESS);
+  }
 
-  QueryPerformanceFrequency(&win32_perf_frequency);
-  QueryPerformanceCounter(&win32_perf_counter);
+  LARGE_INTEGER perf_frequency = {};
+  if (QueryPerformanceFrequency(&perf_frequency)) {
+    win32_ticks_per_second = perf_frequency.QuadPart;
+  }
+  LARGE_INTEGER perf_counter = {};
+  if (QueryPerformanceCounter(&perf_counter)) {
+    win32_counter_offset = perf_counter.QuadPart;
+  }
 
   win32_thread_context_index = TlsAlloc();
 
@@ -1871,14 +1880,15 @@ void *os_thread_get_context() {
 }
 
 f64 os_time_in_miliseconds() {
-  assert(win32_perf_frequency.QuadPart);
+  f64 result = 0;
 
-  LARGE_INTEGER current_time;
-  QueryPerformanceCounter(&current_time);
+  LARGE_INTEGER perf_counter;
+  if (QueryPerformanceCounter(&perf_counter)) {
+    perf_counter.QuadPart -= win32_counter_offset;
+    result = (f64)(perf_counter.QuadPart * 1000) / win32_ticks_per_second;
+  }
 
-  LARGE_INTEGER elapsed;
-  elapsed.QuadPart = current_time.QuadPart - win32_perf_counter.QuadPart;
-  return (f64)(elapsed.QuadPart * 1000) / win32_perf_frequency.QuadPart;
+  return result;
 }
 
 void os_sleep(f64 miliseconds) {
@@ -3902,20 +3912,20 @@ struct Semaphore {
   void *handle;
 };
 
-Semaphore create_semaphore(u32 max_count);
-void signal(Semaphore *sem);
-void wait_for(Semaphore *sem, bool infinite);
-void destroy_semaphore(Semaphore *sem);
+Semaphore semaphore_create(u32 max_count);
+void semaphore_signal(Semaphore *sem);
+void semaphore_wait_for(Semaphore *sem, bool infinite);
+void semaphore_destroy(Semaphore *sem);
 
 struct Mutex {
   void *handle;
 };
 
-Mutex create_mutex(u32 spin_count = 0);
-void aquire_lock(Mutex *mutex);
-bool try_aquire_lock(Mutex *mutex);
-void release_lock(Mutex *mutex);
-void destroy_mutex(Mutex *mutex);
+Mutex mutex_create(u32 spin_count = 0);
+void  mutex_aquire_lock(Mutex *mutex);
+bool  mutex_try_aquire_lock(Mutex *mutex);
+void  mutex_release_lock(Mutex *mutex);
+void  mutex_destroy(Mutex *mutex);
 
 #define WORKER_PROC(name) void name(void *data)
 typedef WORKER_PROC(Worker_Proc);
@@ -3940,24 +3950,24 @@ struct Worker_Params {
   Work_Queue *queue;
 };
 
-void create_work_queue(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params);
-void add_entry(Work_Queue *queue, Worker_Proc *callback, void *data);
-void complete_all_work(Work_Queue *queue);
+void work_queue_create(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params);
+void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, void *data);
+void work_queue_complete_all_work(Work_Queue *queue);
 
 #if OS_WINDOWS
 
-Semaphore create_semaphore(u32 max_count) {
+Semaphore semaphore_create(u32 max_count) {
   Semaphore result = {};
   result.handle = CreateSemaphoreEx(0, 0, max_count, 0, 0, SEMAPHORE_ALL_ACCESS);
   return result;
 }
 
-void signal(Semaphore *sem) {
+void semaphore_signal(Semaphore *sem) {
   BOOL ok = ReleaseSemaphore(sem->handle, 1, 0);
   assert(ok);
 }
 
-void wait_for(Semaphore *sem, bool infinite) {
+void semaphore_wait_for(Semaphore *sem, bool infinite) {
   DWORD res;
 
   if (infinite) {
@@ -3969,12 +3979,12 @@ void wait_for(Semaphore *sem, bool infinite) {
   assert(res != WAIT_FAILED);
 }
 
-void destroy_semaphore(Semaphore *sem) {
+void semaphore_destroy(Semaphore *sem) {
   CloseHandle(sem->handle);
   sem->handle = 0;
 }
 
-Mutex create_mutex(u32 spin_count) {
+Mutex mutex_create(u32 spin_count) {
   Mutex result = {};
 
   result.handle = os_alloc(sizeof(CRITICAL_SECTION));
@@ -3989,19 +3999,19 @@ Mutex create_mutex(u32 spin_count) {
   return result;
 }
 
-void aquire_lock(Mutex *mutex) {
+void mutex_aquire_lock(Mutex *mutex) {
   EnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
 }
 
-bool try_aquire_lock(Mutex *mutex) {
+bool mutex_try_aquire_lock(Mutex *mutex) {
   return TryEnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle) != 0;
 }
 
-void release_lock(Mutex *mutex) {
+void mutex_release_lock(Mutex *mutex) {
   LeaveCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
 }
 
-void destroy_mutex(Mutex *mutex) {
+void mutex_destroy(Mutex *mutex) {
   // @Robustness: track if it's been released before deleting?
   DeleteCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
   os_free(mutex->handle);
@@ -4022,7 +4032,7 @@ void destroy_mutex(Mutex *mutex) {
 // Make sure this fits into the handle pointer!
 STATIC_ASSERT(sizeof(semaphore_t) <= sizeof(void *));
 
-Semaphore create_semaphore(u32 max_count) {
+Semaphore semaphore_create(u32 max_count) {
   Semaphore result = {};
 
   mach_port_t self = mach_task_self();
@@ -4036,13 +4046,13 @@ Semaphore create_semaphore(u32 max_count) {
   return result;
 }
 
-void signal(Semaphore *sem) {
+void semaphore_signal(Semaphore *sem) {
   auto handle = cast(semaphore_t *)sem->handle;
   kern_return_t ret = semaphore_signal(*handle);
   assert(ret == KERN_SUCCESS);
 }
 
-void wait_for(Semaphore *sem, bool infinite) {
+void semaphore_wait_for(Semaphore *sem, bool infinite) {
   kern_return_t ret;
   auto handle = cast(semaphore_t *)sem->handle;
 
@@ -4056,7 +4066,7 @@ void wait_for(Semaphore *sem, bool infinite) {
   assert(ret == KERN_SUCCESS);
 }
 
-void destroy_semaphore(Semaphore *sem) {
+void semaphore_destroy(Semaphore *sem) {
   mach_port_t self = mach_task_self();
   auto handle = cast(semaphore_t *)sem->handle;
   semaphore_destroy(self, *handle);
@@ -4064,7 +4074,7 @@ void destroy_semaphore(Semaphore *sem) {
   handle = 0;
 }
 
-Mutex create_mutex(u32 spin_count) {
+Mutex mutex_create(u32 spin_count) {
   Mutex result = {};
 
   result.handle = os_alloc(sizeof(pthread_mutex_t));
@@ -4075,19 +4085,19 @@ Mutex create_mutex(u32 spin_count) {
   return result;
 }
 
-void aquire_lock(Mutex *mutex) {
+void mutex_aquire_lock(Mutex *mutex) {
   pthread_mutex_lock(cast(pthread_mutex_t *)mutex->handle);
 }
 
-bool try_aquire_lock(Mutex *mutex) {
+bool mutex_try_aquire_lock(Mutex *mutex) {
   return pthread_mutex_trylock(cast(pthread_mutex_t *)mutex->handle) != 0;
 }
 
-void release_lock(Mutex *mutex) {
+void mutex_release_lock(Mutex *mutex) {
   pthread_mutex_unlock(cast(pthread_mutex_t *)mutex->handle);
 }
 
-void destroy_mutex(Mutex *mutex) {
+void mutex_destroy(Mutex *mutex) {
   // @Robustness: track if it's been released before deleting?
   pthread_mutex_destroy(cast(pthread_mutex_t *)mutex->handle);
   os_free(mutex->handle);
@@ -4127,19 +4137,19 @@ nja_internal u32 worker_thread_proc(void *data) {
     bool we_should_sleep = do_next_work_queue_entry(queue);
 
     if (we_should_sleep) {
-      wait_for(&queue->semaphore, true);
+      semaphore_wait_for(&queue->semaphore, true);
     }
   }
 }
 
-void create_work_queue(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params) {
+void work_queue_create(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params) {
   queue->completion_goal = 0;
   queue->completion_count = 0;
 
   queue->next_entry_to_write = 0;
   queue->next_entry_to_read = 0;
 
-  queue->semaphore = create_semaphore(thread_count);
+  queue->semaphore = semaphore_create(thread_count);
 
   for (u32 i = 0; i < thread_count; i++) {
     Worker_Params *params = thread_params + i;
@@ -4150,7 +4160,7 @@ void create_work_queue(Work_Queue *queue, u32 thread_count, Worker_Params *threa
   }
 }
 
-void add_entry(Work_Queue *queue, Worker_Proc *callback, void *data) {
+void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, void *data) {
   // TODO(casey): Switch to InterlockedCompareExchange eventually
   // so that any thread can add?
   u32 new_next_entry_to_write = (queue->next_entry_to_write + 1) % count_of(queue->entries);
@@ -4165,10 +4175,10 @@ void add_entry(Work_Queue *queue, Worker_Proc *callback, void *data) {
 
   queue->next_entry_to_write = new_next_entry_to_write;
 
-  signal(&queue->semaphore);
+  semaphore_signal(&queue->semaphore);
 }
 
-void complete_all_work(Work_Queue *queue) {
+void work_queue_complete_all_work(Work_Queue *queue) {
   while (queue->completion_goal != queue->completion_count) {
     do_next_work_queue_entry(queue);
   }

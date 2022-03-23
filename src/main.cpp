@@ -191,5 +191,12 @@ int main() {
     print("%.*s\n", LIT(result));
   }
 
+  print("time in ms: %f\n", os_time_in_miliseconds());
+
+  auto dir = S("C:/Windows/System32");
+  os_scan_directory(thread_get_temporary_arena(), dir);
+
+  print("time in ms: %f\n", os_time_in_miliseconds());
+
   return 0;
 }
