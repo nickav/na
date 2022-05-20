@@ -6,7 +6,7 @@ set project_root=%script_path%
 
 :: Config
 set build_folder=%project_root%\build\
-set src_file=%project_root%\src\main.cpp
+set src_file=%project_root%\test\main.cpp
 set exe_name=nja.exe
 
 :: Build executable

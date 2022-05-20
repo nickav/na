@@ -1848,8 +1848,8 @@ struct File_Lister {
 bool os_init() {
   if (did_init_os) return false;
 
-  HANDLE stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-  if (!stdout) {
+  HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (!stdout_handle) {
     AttachConsole(ATTACH_PARENT_PROCESS);
   }
 
