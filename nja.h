@@ -1,3 +1,23 @@
+/*
+  nja.h - v0.01 
+  Nick Aversano's C++ helper library
+
+  This is a single header file with a bunch of useful stuff
+  to replace the C++ standard library.
+===========================================================================
+
+LICENSE
+  This software is dual-licensed to the public domain and under the following
+  license: you are granted a perpetual, irrevocable license to copy, modify,
+  publish, and distribute this file as you see fit.
+
+CREDITS
+  Written by Nick Aversano
+
+VERSION HISTORY
+  0.01  - Initial version
+*/
+
 #ifndef NJA_H
 #define NJA_H
 
@@ -133,6 +153,7 @@
 #ifndef nja_global
 #define nja_global        static // Global variables
 #define nja_internal      static // Internal linkage
+#define nja_local         static // Local Persisting variables
 #define nja_local_persist static // Local Persisting variables
 #endif
 
@@ -176,7 +197,7 @@ public:
 #endif
 
 #ifndef set_flag
-#define set_flag(flags, flag, enable) do { if (enable) { flags |= (flag); } else { flags &= ~(flag); } } while(0)
+#define set_flag(flags, mask, enable) do { if (enable) { flags |= (mask); } else { flags &= ~(mask); } } while(0)
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -229,8 +250,17 @@ public:
 #define COMPILER_CLANG 0
 #endif
 
+#if !defined(__cplusplus)
+  #define BYTE_ORDER_LITTLE_ENDIAN    (!*(u8*)&(u16){1})
+  #define BYTE_ORDER_BIG_ENDIAN (!BYTE_ORDER_LITTLE_ENDIAN)
+#endif
+
 #if OS_WINDOWS
 #include <intrin.h>
+#endif
+
+#if OS_MACOS
+#include <xmmintrin.h>
 #endif
 
 //
@@ -252,6 +282,18 @@ typedef float     f32;
 typedef double    f64;
 typedef size_t    usize;
 typedef ptrdiff_t isize;
+
+typedef i8  b8;
+typedef i16 b16;
+typedef i32 b32;
+
+typedef u8 byte;
+typedef i32 rune;
+
+#define enum8(Type)  u8
+#define enum16(Type) u16
+#define enum32(Type) u32
+#define enum64(Type) u64
 
 #define U8_MAX  0xff
 #define I8_MAX  0x7f
@@ -384,6 +426,9 @@ inline isize nja_pointer_diff(void *begin, void *end) {
 // Functions
 //
 
+#ifndef NJA_FUNCTIONS
+#define NJA_FUNCTIONS
+
 #define PI  3.14159265359f
 #define TAU 6.28318530717958647692f
 
@@ -428,11 +473,6 @@ inline isize nja_pointer_diff(void *begin, void *end) {
 #define AlignDownPow2(x, p) ((x) & ~((p) - 1))
 #endif
 
-#define kilobytes(value) (value * 1024LL)
-#define megabytes(value) (value * 1024LL * 1024LL)
-#define gigabytes(value) (value * 1024LL * 1024LL * 1024LL)
-#define terabytes(value) (value * 1024LL * 1024LL * 1024LL * 1024LL)
-
 inline i32 min_i32(i32 a, i32 b) { return Min(a, b); }
 inline u32 min_u32(u32 a, u32 b) { return Min(a, b); }
 inline i64 min_i64(i64 a, i64 b) { return Min(a, b); }
@@ -449,29 +489,83 @@ inline f64 max_f64(f64 a, f64 b) { return Max(a, b); }
 
 inline i32 clamp_i32(i32 value, i32 lower, i32 upper) { return Clamp(value, lower, upper); }
 inline u32 clamp_u32(u32 value, u32 lower, u32 upper) { return Clamp(value, lower, upper); }
+inline i32 clamp_i64(i64 value, i64 lower, i64 upper) { return Clamp(value, lower, upper); }
 inline u64 clamp_u64(u64 value, u64 lower, u64 upper) { return Clamp(value, lower, upper); } 
 inline f32 clamp_f32(f32 value, f32 lower, f32 upper) { return Clamp(value, lower, upper); }
 inline f64 clamp_f64(f64 value, f64 lower, f64 upper) { return Clamp(value, lower, upper); }
 
 inline i32 sign_i32(i32 a) { return Sign(a); }
+inline i32 sign_i64(i64 a) { return Sign(a); }
 inline f32 sign_f32(f32 a) { return Sign(a); }
 inline f64 sign_f64(f64 a) { return Sign(a); }
 
 inline i32 abs_i32(i32 a) { return Abs(a); }
-inline f32 abs_f32(f32 a) { return Abs(a); }
-inline f64 abs_f64(f64 a) { return Abs(a); }
+inline i32 abs_i64(i64 a) { return Abs(a); }
+inline f32 abs_f32(f32 x) {
+  union {
+    f32 f;
+    u32 i;
+  } u = {x};
+  u.i &= 0x7fffffff;
+  return u.f;
+}
+inline f64 abs_f64(f64 x) {
+  union {
+    f64 f;
+    u64 i;
+  } u = {x};
+  u.i &= 0x7fffffffffffffff;
+  return u.f;
+}
+
+inline i64 wrap_i64(i64 value, i64 min, i64 max) {
+  //assert(max >= min);
+
+  if (max >= min) {
+    i64 range = max - min + 1;
+    if (value < min) value += range * ((min - value) / range + 1);
+    return min + (value - min) % range;
+  }
+
+  return value;
+}
 
 inline f32 lerp(f32 a, f32 b, f32 t) {
   return (1 - t) * a + b * t;
 }
 
+inline f32 unlerp(f32 a, f32 b, f32 v) {
+  return (v - a) / (b - a);
+}
+
+inline f32 remap(f32 fromA, f32 fromB, f32 toA, f32 toB, f32 fromValue) {
+  f32 rel = unlerp(fromA, fromB, fromValue);
+  return lerp(toA, toB, rel);
+}
+
+#endif // NJA_FUNCTIONS
+
 //
 // Memory
 //
 
+#define kilobytes(value) ((value) * 1024LL)
+#define megabytes(value) ((value) * 1024LL * 1024LL)
+#define gigabytes(value) ((value) * 1024LL * 1024LL * 1024LL)
+#define terabytes(value) ((value) * 1024LL * 1024LL * 1024LL * 1024LL)
+
+#define thousand(value) ((value) * 1000LL)
+#define million (value) ((value) * 1000LL * 1000LL)
+#define billion (value) ((value) * 1000LL * 1000LL * 1000LL)
+#define trillion(value) ((value) * 1000LL * 1000LL * 1000LL * 1000LL)
+
 void *memory_copy(void *from, void *to, u64 size) {
   if (to == NULL) {
     return NULL;
+  }
+
+  if (from == NULL) {
+    return to;
   }
 
 #if OS_WINDOWS
@@ -490,6 +584,10 @@ void *memory_copy(void *from, void *to, u64 size) {
 }
 
 bool memory_equals(void *a_in, void *b_in, u64 size) {
+  if (a_in == b_in) {
+    return true;
+  }
+
   // @Speed: make this faster!
   u8 *a = cast(u8 *)a_in;
   u8 *b = cast(u8 *)b_in;
@@ -588,6 +686,7 @@ struct Allocator {
 };
 
 void *allocator_alloc(Allocator allocator, u64 size);
+void allocator_free(Allocator allocator, void *data);
 
 #ifndef DEFAULT_MEMORY_ALIGNMENT
 #define DEFAULT_MEMORY_ALIGNMENT 16
@@ -762,7 +861,7 @@ bool arena_contains_pointer(Arena *arena, void *ptr) {
 }
 
 void *arena_realloc_aligned(Arena *arena, u64 size, u64 old_size, void *old_memory, u16 alignment) {
-  if (old_memory == NULL || old_size == 0 || arena->offset < arena->prev_offset) {
+  if (old_memory == NULL || old_size == 0) {
     return arena_alloc_aligned(arena, size, alignment);
   }
 
@@ -936,6 +1035,7 @@ isize nja_binary_search(void *base, isize count, isize size, void *key, Compare_
 
 struct Thread_Context {
   Arena temporary_storage;
+  // Arena scratch_memory; // @Incomplete @MemoryCleanup
 };
 
 void *os_thread_get_context();
@@ -1025,7 +1125,7 @@ inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
 Memory os_virtual_memory();
 
 void thread_context_init(u64 temporary_storage_size) {
-  Thread_Context *ctx = (Thread_Context *)os_alloc(sizeof(Thread_Context));
+  Thread_Context *ctx = cast(Thread_Context *)os_alloc(sizeof(Thread_Context));
 
   arena_init_from_backing_memory(&ctx->temporary_storage, os_virtual_memory(), temporary_storage_size, DEFAULT_MEMORY_BLOCK_SIZE);
 
@@ -1039,22 +1139,22 @@ void thread_context_free() {
   os_free(ctx);
 }
 
-Arena *thread_get_temporary_arena() {
+Arena *temp_arena() {
   Thread_Context *ctx = (Thread_Context *)os_thread_get_context();
   assert(ctx);
   return &ctx->temporary_storage;
 }
 
 void *talloc(u64 size) {
-  return arena_alloc(thread_get_temporary_arena(), size);
+  return arena_alloc(temp_arena(), size);
 }
 
 void tpop(u64 size) {
-  arena_pop(thread_get_temporary_arena(), size);
+  arena_pop(temp_arena(), size);
 }
 
 void reset_temporary_storage() {
-  arena_reset(thread_get_temporary_arena());
+  arena_reset(temp_arena());
 }
 
 struct Scratch_Memory {
@@ -1065,7 +1165,7 @@ struct Scratch_Memory {
 Scratch_Memory begin_scratch_memory() {
   Scratch_Memory result = {};
 
-  Arena *arena = thread_get_temporary_arena();
+  Arena *arena = temp_arena();
 
   result.arena         = arena;
   result.restore_point = arena_get_position(arena);
@@ -1112,6 +1212,14 @@ nja_inline bool char_is_whitespace(char ch) {
   return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
 }
 
+nja_inline bool char_is_lower(char ch) {
+  return ch >= 'a' && ch <= 'z';
+}
+
+nja_inline bool char_is_upper(char ch) {
+  return ch >= 'A' && ch <= 'Z';
+}
+
 nja_inline char char_to_upper(char ch) {
   return ch >= 'a' && ch <= 'z' ? ch - ('a' - 'A') : ch;
 }
@@ -1120,8 +1228,12 @@ nja_inline char char_to_lower(char ch) {
   return ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch;
 }
 
-String make_string(void *data, i64 count) {
-  return String{count, (u8 *)data};
+String make_string(u8 *data, i64 count) {
+  return String{count, cast(u8 *)data};
+}
+
+String make_string(char *data, i64 count) {
+  return String{count, cast(u8 *)data};
 }
 
 char *string_to_cstr(Arena *arena, String str) {
@@ -1136,7 +1248,7 @@ char *string_to_cstr(Arena *arena, String str) {
 }
 
 char *string_to_cstr(String str) {
-  return string_to_cstr(thread_get_temporary_arena(), str);
+  return string_to_cstr(temp_arena(), str);
 }
 
 i64 cstr_length(char *str) {
@@ -1209,42 +1321,113 @@ i64 string_index(String str, String search, i64 start_index = 0) {
   return -1;
 }
 
+i64 string_last_index(String str, String search) {
+  i64 start_index = str.count - 1;
+  for (i64 i = start_index; i >= 0; i -= 1) {
+    if (memory_equals(str.data + i, search.data, search.count)) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 bool string_contains(String str, String search) {
   return string_index(str, search) >= 0;
 }
 
+i64 string_count_occurances(String str, String search, i64 start_index = 0) {
+  i64 result = 0;
+
+  for (i64 i = start_index; i < str.count; i += 1) {
+    if (memory_equals(str.data + i, search.data, search.count)) {
+      result += 1;
+      i += search.count - 1;
+    }
+  }
+
+  return result;
+}
+
 String string_copy(Arena *arena, String other) {
+  String copy = {};
   u8 *data = push_array(arena, u8, other.count);
-  String copy = make_string(data, other.count);
-  memory_copy(other.data, copy.data, other.count);
+
+  if (data) {
+    copy = make_string(data, other.count);
+    memory_copy(other.data, copy.data, other.count);
+  }
+
   return copy;
+}
+
+String string_alloc(Allocator allocator, String other) {
+  String copy = {};
+  u8 *data = cast(u8 *)allocator_alloc(allocator, sizeof(u8) * other.count);
+
+  if (data) {
+    copy = make_string(data, other.count);
+    memory_copy(other.data, copy.data, sizeof(u8) * other.count);
+  }
+
+  return copy;
+}
+
+void string_free(Allocator allocator, String *string) {
+  if (string->data) {
+    allocator_free(allocator, string->data);
+    string->data  = NULL;
+    string->count = 0;
+  }
 }
 
 String string_concat(Arena *arena, String a, String b) {
   u8 *data = push_array(arena, u8, a.count + b.count);
 
-  memory_copy(a.data, data + 0,       a.count);
-  memory_copy(b.data, data + a.count, b.count);
+  if (data) {
+    memory_copy(a.data, data + 0,       a.count);
+    memory_copy(b.data, data + a.count, b.count);
+  }
 
   return make_string(data, a.count + b.count);
 }
 
 String string_concat(String a, String b) {
-  return string_concat(thread_get_temporary_arena(), a, b);
+  return string_concat(temp_arena(), a, b);
 }
 
 String string_concat(Arena *arena, String a, String b, String c) {
   u8 *data = push_array(arena, u8, a.count + b.count + c.count);
 
-  memory_copy(a.data, data + 0,                 a.count);
-  memory_copy(b.data, data + a.count,           b.count);
-  memory_copy(c.data, data + a.count + b.count, c.count);
+  if (data) {
+    memory_copy(a.data, data + 0,                 a.count);
+    memory_copy(b.data, data + a.count,           b.count);
+    memory_copy(c.data, data + a.count + b.count, c.count);
+  }
 
   return make_string(data, a.count + b.count + c.count);
 }
 
 String string_concat(String a, String b, String c) {
-  return string_concat(thread_get_temporary_arena(), a, b, c);
+  return string_concat(temp_arena(), a, b, c);
+}
+
+void string_to_lower(String *str) {
+  for (i64 i = 0; i < str->count; i += 1) {
+    str->data[i] = char_to_lower(str->data[i]);
+  }
+}
+
+String string_lower(String str) {
+  String result = string_copy(temp_arena(), str);
+  string_to_lower(&result);
+  return result;
+}
+
+void string_to_upper(String *str) {
+  for (i64 i = 0; i < str->count; i += 1) {
+    str->data[i] = char_to_upper(str->data[i]);
+  }
 }
 
 void string_advance(String *str, i64 amount) {
@@ -1276,6 +1459,22 @@ bool string_eat_whitespace(String *str) {
   }
 
   return start_count != str->count;
+}
+
+void string_strip_nulls(String *str) {
+  for (i64 i = 0; i < str->count; i ++)
+  {
+    if (str->data[i] == NULL)
+    {
+      i64 run_count = 1;
+      while(str->data[i + run_count] == NULL) {
+        run_count += 1;
+      }
+
+      memory_move(str->data + i + run_count, str->data + i, str->count - (i + run_count));
+      str->count -= run_count;
+    }
+  }
 }
 
 #include <stdarg.h>
@@ -1333,29 +1532,65 @@ char *cstr_print(Arena *arena, const char *format, ...) {
   return (char *)result.data;
 }
 
-#define sprint(...) string_print(thread_get_temporary_arena(), __VA_ARGS__)
-#define cprint(...) cstr_print(thread_get_temporary_arena(), __VA_ARGS__)
+#define sprint(...) string_print(temp_arena(), __VA_ARGS__)
+#define cprint(...) cstr_print(temp_arena(), __VA_ARGS__)
 
 // NOTE(nick): The path_* functions assume that we are working with a normalized (unix-like) path string.
 // All paths should be normalized at the OS interface level, so we can make that assumption here.
 
-String path_join(String path1, String path2) {
+String path_join(Arena *arena, String path1, String path2) {
   if (!path1.count) return path2;
   if (!path2.count) return path1;
-  return sprint("%.*s/%.*s", path1.count, path1.data, path2.count, path2.data);
+
+  if (path1.data[path1.count - 1] == '/') path1.count -= 1;
+
+  return string_print(arena, "%.*s/%.*s", path1.count, path1.data, path2.count, path2.data);
 }
 
-String path_join(String path1, String path2, String path3) {
+nja_inline String path_join(String path1, String path2) {
+  return path_join(temp_arena(), path1, path2);
+}
+
+String path_join(Arena *arena, String path1, String path2, String path3) {
   if (!path1.count) return path_join(path2, path3);
   if (!path2.count) return path_join(path1, path3);
   if (!path3.count) return path_join(path2, path3);
-  return sprint("%.*s/%.*s/%.*s", path1.count, path1.data, path2.count, path2.data, path3.count, path3.data);
+
+  if (path1.data[path1.count - 1] == '/') path1.count -= 1;
+  if (path2.data[path2.count - 1] == '/') path2.count -= 1;
+  
+  return string_print(arena, "%.*s/%.*s/%.*s", path1.count, path1.data, path2.count, path2.data, path3.count, path3.data);
 }
 
-String path_dirname(String filename) {
-  for (i32 i = filename.count - 1; i >= 0; i--) {
-    if (filename.data[i] == '/') {
-      return string_slice(filename, 0, i);
+nja_inline String path_join(String path1, String path2, String path3) {
+  return path_join(temp_arena(), path1, path2, path3);
+}
+
+bool path_is_absolute(String path) {
+  return (
+    (path.count > 0 && path[0] == '/') ||
+    // Windows drive root:
+    (path.count > 2 && char_is_alpha(path[0]) && path[1] == ':' && (path.count == 2 || path[2] == '/'))
+  );
+}
+
+// @Incomplete: do we care about Unix vs. Windows differences on each respective platform?
+bool path_is_root(String path) {
+  return (
+    // Unix root:
+    (path.count == 1 && path[0] == '/') ||
+    // Windows drive root:
+    ((path.count == 2 || path.count == 3) && char_is_alpha(path[0]) && path[1] == ':' && (path.count == 2 || path[2] == '/'))
+  );
+}
+
+String path_dirname(String path) {
+  // normalize path
+  if (path.data[path.count - 1] == '/') path.count -= 1;
+
+  for (i32 i = path.count - 1; i >= 0; i--) {
+    if (path.data[i] == '/') {
+      return string_slice(path, 0, i + 1);
     }
   }
 
@@ -1363,6 +1598,9 @@ String path_dirname(String filename) {
 }
 
 String path_filename(String path) {
+  // normalize path
+  if (path.data[path.count - 1] == '/') path.count -= 1;
+
   for (i32 i = path.count - 1; i >= 0; i--) {
     char ch = path.data[i];
     if (ch == '/') {
@@ -1393,18 +1631,6 @@ String path_get_extension(String path) {
   }
 
   return {};
-}
-
-bool path_is_absolute(String path) {
-  if (path.count == 0) { return false; }
-
-  char first_char = path[0];
-
-  return (
-    first_char == '/' ||
-    // Windows drive root:
-    (path.count > 2 && char_is_alpha(first_char) && path[1] == ':' && path[2] == '/')
-  );
 }
 
 String to_string(bool x)   { if (x) return S("true"); return S("false"); }
@@ -1448,6 +1674,40 @@ struct String_Decode {
 
 String16 make_string16(void *data, i64 count) {
   return String16{count, (u16 *)data};
+}
+
+String32 make_string32(u32 *data, i64 count) {
+  return String32{count, data};
+}
+
+String32 string32_slice(String32 str, i64 start_index, i64 end_index) {
+  assert(start_index >= 0 && start_index <= str.count);
+  assert(end_index >= 0 && end_index <= str.count);
+  return make_string32(str.data + start_index, end_index - start_index);
+}
+
+String32 string32_slice(String32 str, i64 start_index) {
+  return string32_slice(str, start_index, str.count);
+}
+
+String32 string32_alloc(Allocator allocator, String32 other) {
+  String32 copy = {};
+  u32 *data = cast(u32 *)allocator_alloc(allocator, sizeof(u32) * other.count);
+
+  if (data) {
+    copy = make_string32(data, other.count);
+    memory_copy(other.data, copy.data, sizeof(u32) * other.count);
+  }
+
+  return copy;
+}
+
+void string32_free(Allocator allocator, String32 *string) {
+  if (string->data) {
+    allocator_free(allocator, string->data);
+    string->data  = NULL;
+    string->count = 0;
+  }
 }
 
 String_Decode string_decode_utf8(u8 *str, u32 capacity) {
@@ -1523,6 +1783,44 @@ u32 string_encode_utf8(u8 *dest, u32 codepoint) {
   return size;
 }
 
+u8 string_seek_right_utf8(u8 *data, u32 capacity) {
+  auto decode = string_decode_utf8(data, capacity);
+  return Min(decode.size, capacity);
+}
+
+u8 string_seek_left_utf8(u8 *data, u32 capacity) {
+  u8 size = 0;
+
+  if (capacity >= 1)
+  {
+    u8 at = *(data - 1);
+
+    if (at < 128)
+    {
+      size = 1;
+    }
+    else if (capacity >= 2)
+    {
+      size = 2;
+      at = *(data - 2);
+
+      // scan for 10xxxxxx
+      if (capacity >= 3 && (at & 0xC0) == 0x80)
+      {
+        size += 1;
+        at = *(data - 3);
+
+        if (capacity >= 4 && (at & 0xC0) == 0x80)
+        {
+          size += 1;
+        }
+      }
+    }
+  }
+
+  return size;
+}
+
 String_Decode string_decode_utf16(u16 *str, u32 capacity) {
   String_Decode result = {'?', 1};
 
@@ -1550,7 +1848,7 @@ u32 string_encode_utf16(u16 *dest, u32 codepoint) {
     dest[0] = codepoint;
     size = 1;
   } else {
-    u32 x = (codepoint - 0x10000);
+    u32 x = codepoint - 0x10000;
     dest[0] = (x >> 10) + 0xD800;
     dest[1] = (x & 0x3FF) + 0xDC00;
     size = 2;
@@ -1560,25 +1858,23 @@ u32 string_encode_utf16(u16 *dest, u32 codepoint) {
 }
 
 String32 string32_from_string(Arena *arena, String str) {
-  u32 *memory = push_array(arena, u32, str.count);;
+  u32 *memory = push_array(arena, u32, str.count);
 
+  u32 *at = memory;
   u8 *p0 = str.data;
   u8 *p1 = str.data + str.count;
-  u32 *at = memory;
-  i64 remaining = str.count;
 
   while (p0 < p1) {
-    auto decode = string_decode_utf8(p0, remaining);
+    auto decode = string_decode_utf8(p0, cast(u64)(p1 - p0));
 
     *at = decode.codepoint;
     p0 += decode.size;
     at += 1;
-    remaining -= decode.size;
   }
 
   i64 alloc_count = str.count;
   i64 string_count = cast(u64)(at - memory);
-  i64 unused_count = string_count - alloc_count;
+  i64 unused_count = alloc_count - string_count;
 
   arena_pop(arena, unused_count * sizeof(u32));
 
@@ -1611,6 +1907,7 @@ String string_from_string32(Arena *arena, String32 str) {
 }
 
 String16 string16_from_string(Arena *arena, String str) {
+  arena_set_alignment(arena, sizeof(u16));
   u16 *data = push_array(arena, u16, str.count * 2 + 1);
 
   u16 *at = data;
@@ -1627,7 +1924,7 @@ String16 string16_from_string(Arena *arena, String str) {
 
   *at = 0;
 
-  i64 alloc_count = str.count + 1;
+  i64 alloc_count = str.count * 2 + 1;
   i64 string_count = cast(u64)(at - data);
   i64 unused_count = alloc_count - string_count - 1;
 
@@ -1663,9 +1960,138 @@ String string_from_string16(Arena *arena, String16 str) {
   return result;
 }
 
+
+//
+// Dates
+//
+ 
+typedef u64 Dense_Time;
+
+struct Date_Time {
+  u16 msec; // [0,999]
+  u8 sec;   // [0,60]
+  u8 min;   // [0,59]
+  u8 hour;  // [0,23]
+  u8 day;   // [1,31]
+  u8 mon;   // [1,12]
+  i16 year; // 1 = 1 CE; 2020 = 2020 CE; 0 = 1 BCE; -100 = 101 BCE; etc.
+};
+
+enum Month {
+  Month_Jan = 1,
+  Month_Feb,
+  Month_Mar,
+  Month_Apr,
+  Month_May,
+  Month_Jun,
+  Month_Jul,
+  Month_Aug,
+  Month_Sep,
+  Month_Oct,
+  Month_Nov,
+  Month_Dec
+};
+
+enum DayOfWeek {
+  DayOfWeek_Sunday,
+  DayOfWeek_Monday,
+  DayOfWeek_Tuesday,
+  DayOfWeek_Wednesday,
+  DayOfWeek_Thursday,
+  DayOfWeek_Friday,
+  DayOfWeek_Saturday
+};
+
+Dense_Time dense_time_from_date_time(Date_Time *in) {
+  u32 year_encoded = (u32)((i32)in->year + 0x8000);
+  Dense_Time result = 0;
+
+  result += year_encoded;
+  result *= 12;
+  result += (in->mon - 1);
+  result *= 31;
+  result += (in->day - 1);
+  result *= 24;
+  result += in->hour;
+  result *= 60;
+  result += in->min;
+  result *= 61;
+  result += in->sec;
+  result *= 1000;
+  result += in->msec;
+
+  return result;
+}
+
+Date_Time date_time_from_dense_time(Dense_Time in) {
+  Date_Time result = {};
+
+  result.msec = in%1000;
+  in /= 1000;
+  result.sec = in%61;
+  in /= 61;
+  result.min = in%60;
+  in /= 60;
+  result.hour = in%24;
+  in /= 24;
+  result.day = (in%31) + 1;
+  in /= 31;
+  result.mon = (in%12) + 1;
+  in /= 12;
+
+  i32 year_encoded = (i32)in;
+  result.year = (year_encoded - 0x8000);
+
+  return result;
+}
+
+String string_from_month(Month month) {
+  String result = S("(null)");
+
+  switch (month) {
+    case Month_Jan: { result = S("January");   } break;
+    case Month_Feb: { result = S("February");  } break;
+    case Month_Mar: { result = S("March");     } break;
+    case Month_Apr: { result = S("April");     } break;
+    case Month_May: { result = S("May");       } break;
+    case Month_Jun: { result = S("June");      } break;
+    case Month_Jul: { result = S("July");      } break;
+    case Month_Aug: { result = S("August");    } break;
+    case Month_Sep: { result = S("September"); } break;
+    case Month_Oct: { result = S("October");   } break;
+    case Month_Nov: { result = S("November");  } break;
+    case Month_Dec: { result = S("December");  } break;
+  }
+
+  return result;
+}
+
+String string_from_day_of_week(DayOfWeek day_of_week) {
+  String result = S("(null)");
+
+  switch (day_of_week) {
+    case DayOfWeek_Sunday:    { result = S("Sunday");    } break;
+    case DayOfWeek_Monday:    { result = S("Monday");    } break;
+    case DayOfWeek_Tuesday:   { result = S("Tuesday");   } break;
+    case DayOfWeek_Wednesday: { result = S("Wednesday"); } break;
+    case DayOfWeek_Thursday:  { result = S("Thursday");  } break;
+    case DayOfWeek_Friday:    { result = S("Friday");    } break;
+    case DayOfWeek_Saturday:  { result = S("Saturday");  } break;
+  }
+
+  return result;
+}
+
+String to_string(Date_Time it) {
+  auto month = string_from_month(cast(Month)it.mon);
+  return sprint("%S %02d %d %02d:%02d:%02d", month, it.day, it.year, it.hour, it.min, it.sec);
+}
+
+
 //
 // Random
 //
+
 struct Random_Lcg {
   u32 state;
 };
@@ -1741,11 +2167,26 @@ struct File {
   u64 offset;
 };
 
+enum File_Attribute_Flag {
+  File_IsDirectory = 0x01,
+  File_IsHidden    = 0x02,
+  File_IsSystem    = 0x04,
+};
+
+enum File_Access_Flag {
+  FileAccess_Read    = 0x01,
+  FileAccess_Write   = 0x02,
+  FileAccess_Execute = 0x04,
+};
+
 struct File_Info {
-  u64 date;
-  u64 size;
   String name;
-  bool is_directory;
+  u64 size;
+  Dense_Time created_at;
+  Dense_Time updated_at;
+  Dense_Time last_accessed_at;
+  u32 flags;
+  u32 access;
 };
 
 enum File_Mode {
@@ -1834,12 +2275,25 @@ static u64 win32_ticks_per_second = 1;
 static u64 win32_counter_offset = 0;
 
 static DWORD win32_thread_context_index = 0;
+static bool win32_sleep_is_granular = false;
 
 static bool did_init_os = false;
 
+typedef HINSTANCE (WINAPI * ShellExecuteW_t)(
+  HWND    hwnd,
+  LPCWSTR lpOperation,
+  LPCWSTR lpFile,
+  LPCWSTR lpParameters,
+  LPCWSTR lpDirectory,
+  INT     nShowCmd
+);
+
+static ShellExecuteW_t _ShellExecuteW = NULL;
+
 struct File_Lister {
   Arena *arena;
-  WCHAR *find_path;
+
+  bool is_first_file;
 
   HANDLE handle;
   WIN32_FIND_DATAW data;
@@ -1848,8 +2302,8 @@ struct File_Lister {
 bool os_init() {
   if (did_init_os) return false;
 
-  HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-  if (!stdout_handle) {
+  HANDLE stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (!stdout) {
     AttachConsole(ATTACH_PARENT_PROCESS);
   }
 
@@ -1862,9 +2316,21 @@ bool os_init() {
     win32_counter_offset = perf_counter.QuadPart;
   }
 
+  HMODULE libwinmm = LoadLibraryA("winmm.dll");
+  typedef UINT (WINAPI * timeBeginPeriod_t)(UINT);
+  auto timeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(libwinmm, "timeBeginPeriod");
+  if (timeBeginPeriod) {
+    win32_sleep_is_granular = timeBeginPeriod(1) == 0 /* TIMERR_NOERROR */;
+  }
+  //FreeLibrary(libwinmm);
+
+  HMODULE libshell32 = LoadLibraryA("shell32.dll");
+  _ShellExecuteW = (ShellExecuteW_t) GetProcAddress(libshell32, "ShellExecuteW");
+  //FreeLibrary(libshell32);
+
   win32_thread_context_index = TlsAlloc();
 
-  thread_context_init(megabytes(32));
+  thread_context_init(megabytes(32 * 1000));
 
   did_init_os = true;
   return true;
@@ -1892,6 +2358,9 @@ f64 os_time_in_miliseconds() {
 }
 
 void os_sleep(f64 miliseconds) {
+  // @Incomplete: only do this is win32_sleep_is_granular
+  // Otherwise do some sort of busy wait thing
+
   LARGE_INTEGER ft;
   ft.QuadPart = -(10 * (__int64)(miliseconds * 1000));
 
@@ -2103,14 +2572,83 @@ String string_from_wstr(Arena *arena, WCHAR *wstr) {
   return string_from_string16(arena, str16);
 }
 
+nja_internal Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
+  Date_Time result = {};
+
+  result.year = in->wYear;
+  result.mon  = cast(u8)in->wMonth;
+  result.day  = in->wDay;
+  result.hour = in->wHour;
+  result.min  = in->wMinute;
+  result.sec  = in->wSecond;
+  result.msec = in->wMilliseconds;
+
+  return result;
+}
+
+nja_internal SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
+  SYSTEMTIME result = {};
+
+  result.wYear = in->year;
+  result.wMonth = in->mon;
+  result.wDay = in->day;
+  result.wHour = in->hour;
+  result.wMinute = in->min;
+  result.wSecond = in->sec;
+  result.wMilliseconds = in->msec;
+
+  return result;
+}
+
+nja_internal Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
+  SYSTEMTIME system_time = {};
+  FileTimeToSystemTime(file_time, &system_time);
+  Date_Time date_time = win32_date_time_from_system_time(&system_time);
+  Dense_Time result = dense_time_from_date_time(&date_time);
+  return result;
+}
+
+nja_internal u32 win32_flags_from_attributes(DWORD attributes) {
+  u32 result = 0;
+
+  if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+    result |= File_IsDirectory;
+  }
+
+  if (attributes & FILE_ATTRIBUTE_HIDDEN) {
+    result |= File_IsHidden;
+  }
+
+  if (attributes & FILE_ATTRIBUTE_SYSTEM) {
+    result |= File_IsSystem;
+  }
+
+  return result;
+}
+
+nja_internal u32 win32_access_from_attributes(DWORD attributes) {
+  u32 result = FileAccess_Read | FileAccess_Execute;
+
+  if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
+    result |= FileAccess_Write;
+  }
+
+  return result;
+}
+
 File_Lister os_file_list_begin(Arena *arena, String path) {
   File_Lister result = {};
 
-  String16 find_path = string16_from_string(arena, string_concat(path, S("\\*.*"))); // @Incomplete: use \\?\ prefix?
+  result.arena         = arena;
+  result.handle        = 0;
+  result.is_first_file = true;
 
-  result.find_path = cast(WCHAR *)find_path.data;
-  result.arena     = arena;
-  result.handle    = 0;
+  auto mark = arena_get_position(arena);
+  String find_path = string_concat(path, S("\\*.*")); // @Incomplete: use \\?\ prefix?
+  WCHAR *find_path_w = cast(WCHAR *)string16_from_string(arena, find_path).data;
+  // FindExInfoStandard
+  result.handle = FindFirstFileExW(find_path_w, FindExInfoBasic, &result.data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+  arena_set_position(arena, mark);
 
   return result;
 }
@@ -2118,8 +2656,8 @@ File_Lister os_file_list_begin(Arena *arena, String path) {
 bool os_file_list_next(File_Lister *iter, File_Info *info) {
   bool should_continue = true;
 
-  if (!iter->handle) {
-    iter->handle = FindFirstFileW(iter->find_path, &iter->data);
+  if (iter->is_first_file) {
+    iter->is_first_file = false;
   } else {
     should_continue = FindNextFileW(iter->handle, &iter->data);
   }
@@ -2138,11 +2676,17 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
       name = string_from_wstr(iter->arena, iter->data.cFileName);
     }
 
+    auto data = iter->data;
+
     *info = {};
-    info->name         = name;
-    info->date         = ((u64)iter->data.ftLastWriteTime.dwHighDateTime << (u64)32) | (u64)iter->data.ftLastWriteTime.dwLowDateTime;
-    info->size         = ((u64)iter->data.nFileSizeHigh << (u64)32) | (u64)iter->data.nFileSizeLow;
-    info->is_directory = iter->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+    info->name             = name;
+    info->size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
+    info->created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
+    info->updated_at       = win32_dense_time_from_file_time(&data.ftLastWriteTime);
+    info->last_accessed_at = win32_dense_time_from_file_time(&data.ftLastAccessTime);
+    info->flags            = win32_flags_from_attributes(data.dwFileAttributes);
+    info->access           = win32_access_from_attributes(data.dwFileAttributes);
+
   } else {
     should_continue = false;
   }
@@ -2159,22 +2703,27 @@ void os_file_list_end(File_Lister *iter) {
 }
 
 File_Info os_get_file_info(Arena *arena, String path) {
-  File_Info result = {};
+  File_Info info = {};
 
   auto scratch = begin_scratch_memory();
   String16 str = string16_from_string(scratch.arena, path);
 
   WIN32_FILE_ATTRIBUTE_DATA data;
-  if (GetFileAttributesExW(cast(WCHAR *)str.data, GetFileExInfoStandard, &data)) {
-    result.name         = path_filename(path);
-    result.date         = ((u64)data.ftLastWriteTime.dwHighDateTime << (u64)32) | (u64)data.ftLastWriteTime.dwLowDateTime;
-    result.size         = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
-    result.is_directory = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+  if (GetFileAttributesExW(cast(WCHAR *)str.data, GetFileExInfoStandard, &data))
+  {
+    // @See https://docs.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-win32_file_attribute_data
+    info.name             = path_filename(path);
+    info.size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
+    info.created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
+    info.updated_at       = win32_dense_time_from_file_time(&data.ftLastWriteTime);
+    info.last_accessed_at = win32_dense_time_from_file_time(&data.ftLastAccessTime);
+    info.flags            = win32_flags_from_attributes(data.dwFileAttributes);
+    info.access           = win32_access_from_attributes(data.dwFileAttributes);
   }
 
   end_scratch_memory(scratch);
 
-  return result;
+  return info;
 }
 
 DWORD WINAPI win32_thread_proc(LPVOID lpParameter) {
@@ -2231,7 +2780,7 @@ void win32_normalize_path(String path) {
 }
 
 String os_get_executable_path() {
-  Arena *arena = thread_get_temporary_arena();
+  Arena *arena = temp_arena();
 
   u64 buffer_size = 2048;
   WCHAR *buffer = push_array(arena, WCHAR, buffer_size);
@@ -2271,7 +2820,7 @@ String os_get_executable_path() {
 }
 
 String os_get_current_directory() {
-  Arena *arena = thread_get_temporary_arena();
+  Arena *arena = temp_arena();
 
   DWORD length = GetCurrentDirectoryW(0, NULL);
   if (length == 0) {
@@ -2308,7 +2857,7 @@ bool os_clipboard_set_text(String str) {
 
   handle = GlobalAlloc(GMEM_MOVEABLE, count * sizeof(WCHAR));
   if (!handle) {
-    print("[clipboard] Failed to allocated global handle for clipboard.");
+    print("[clipboard] Failed to allocate global handle for clipboard.");
     return false;
   }
 
@@ -2337,6 +2886,46 @@ bool os_clipboard_set_text(String str) {
   return true;
 }
 
+nja_internal char * win32_UTF8FromUTF16(Arena *arena, WCHAR *buffer)
+{
+  int size = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
+  if (!size)
+  {
+    return NULL;
+  }
+
+  char *result = cast(char *)arena_push(arena, size);
+
+  if (!WideCharToMultiByte(CP_UTF8, 0, buffer, -1, result, size, NULL, NULL))
+  {
+    arena_pop(arena, size);
+    return NULL;
+  }
+
+  return result;
+}
+
+nja_internal WCHAR * win32_UTF16FromUTF8(Arena *arena, char *buffer)
+{
+  int count = MultiByteToWideChar(CP_UTF8, 0, buffer, -1, NULL, 0);
+  if (!count)
+  {
+    return NULL;
+  }
+
+  arena_set_alignment(arena, sizeof(WCHAR));
+  WCHAR *result = cast(WCHAR *)arena_push(arena, count * sizeof(WCHAR));
+
+  if (!MultiByteToWideChar(CP_UTF8, 0, buffer, -1, result, count))
+  {
+    arena_pop(arena, count * sizeof(WCHAR));
+    return NULL;
+  }
+
+  return result;
+}
+
+
 String os_clipboard_get_text() {
   if (!OpenClipboard(NULL)) {
     print("[clipboard] Failed to open clipboard.");
@@ -2357,16 +2946,41 @@ String os_clipboard_get_text() {
     return {};
   }
 
-  u32 buffer_size = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
-  String16 str16 = make_string16(buffer, buffer_size);
-
-  auto arena = thread_get_temporary_arena();
-  String result = string_from_string16(arena, str16);
+  char *str = win32_UTF8FromUTF16(temp_arena(), buffer);
+  String result = string_from_cstr(str);
 
   GlobalUnlock(handle);
   CloseClipboard();
 
   return result;
+}
+
+bool os_shell_open(String path) {
+  if (!_ShellExecuteW) return false;
+
+  auto scratch = begin_scratch_memory();
+  String16 path_w = string16_from_string(scratch.arena, path);
+  // If the function succeeds, it returns a value greater than 32.
+  bool success = (INT_PTR)_ShellExecuteW(0, 0, cast(WCHAR *)path_w.data, 0, 0 , SW_SHOW) > 32;
+  end_scratch_memory(scratch);
+
+  return success;
+}
+
+bool os_shell_execute(String cmd, String arguments, bool admin = false) {
+  if (!_ShellExecuteW) return false;
+
+  auto scratch = begin_scratch_memory();
+  String16 cmd_w = string16_from_string(scratch.arena, cmd);
+  String16 arguments_w = string16_from_string(scratch.arena, arguments);
+
+  WCHAR *verb = admin ? L"runas" : L"open";
+
+  // If the function succeeds, it returns a value greater than 32.
+  bool success = (INT_PTR)_ShellExecuteW(0, verb, cast(WCHAR *)cmd_w.data, cast(WCHAR *)arguments_w.data, 0, SW_HIDE) > 32;
+  end_scratch_memory(scratch);
+
+  return success;
 }
 
 #endif // OS_WINDOWS
@@ -2449,7 +3063,7 @@ String os_get_executable_path() {
   u32 length = 0;
   _NSGetExecutablePath(0, &length);
 
-  Arena *arena = thread_get_temporary_arena();
+  Arena *arena = temp_arena();
   char *buffer = (char *)arena_push(arena, length);
 
   if (_NSGetExecutablePath(buffer, &length) < 0) {
@@ -2471,7 +3085,7 @@ String os_get_executable_path() {
 }
 
 String os_get_current_directory() {
-  Arena *arena = thread_get_temporary_arena();
+  Arena *arena = temp_arena();
 
   char *buffer = (char *)arena_push(arena, PATH_MAX);
   getcwd(buffer, PATH_MAX);
@@ -2488,6 +3102,8 @@ String os_get_current_directory() {
 #include <objc/NSObjCRuntime.h>
 
 struct NSString;
+struct NSURL;
+
 typedef NSString * NSPasteboardType;
 nja_extern NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
 
@@ -2501,8 +3117,9 @@ String os_clipboard_get_text() {
   id string = objc_method(id, id, SEL, id)(pasteboard, sel_registerName("stringForType:"), (id)NSPasteboardTypeString);
   // char *text = [string UTF8String];
   char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
-  
-  return string_copy(thread_get_temporary_arena(), string_from_cstr(text));
+
+  auto result = string_copy(temp_arena(), string_from_cstr(text));
+  return result;
 }
 
 bool os_clipboard_set_text(String text) {
@@ -2522,6 +3139,34 @@ bool os_clipboard_set_text(String text) {
   return result == YES;
 }
 
+bool os_shell_open(String path) {
+  // [NSWorkspace sharedWorkspace]
+  id workspace = objc_method(id, id, SEL)(cast(id)objc_getClass("NSWorkspace"), sel_registerName("sharedWorkspace"));
+
+  /*
+  NSString* folder = @"/path/to/folder"  
+  [[NSWorkspace sharedWorkspace] openFile:folder withApplication:@"Finder"];
+
+  NSArray *fileURLs = [NSArray arrayWithObjects:fileURL1, nil];
+  [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:fileURLs];
+
+  [[NSWorkspace sharedWorkspace] selectFile:fullPathString inFileViewerRootedAtPath:pathString];
+  */
+
+  auto scratch = begin_scratch_memory();
+  char *str = string_to_cstr(scratch.arena, path);
+  end_scratch_memory(scratch);
+
+  // [NSString stringWithUTF8String: str];
+  id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
+  // NSURL *fileURL = [NSURL fileURLWithPath:@"/path/to/user/"];
+  id fileURL = objc_method(id, id, SEL, id)(cast(id)objc_getClass("NSURL"), sel_registerName("fileURLWithPath:"), string);
+
+  BOOL result = objc_method(BOOL, id, SEL, id)(workspace, sel_registerName("openURL:"), fileURL);
+
+  return result == YES;
+}
+
 #endif // OS_MACOS
 
 #if OS_MACOS || OS_LINUX
@@ -2529,6 +3174,7 @@ bool os_clipboard_set_text(String text) {
 #include <stdlib.h>   // calloc, free, fseek, ftell, fread, fclose
 #include <dirent.h>   // opendir, readdir, closedir
 #include <sys/stat.h> // stat
+#include <stdio.h>
 
 struct File_Lister {
   Arena *arena;
@@ -2628,25 +3274,68 @@ bool os_file_rename(String from, String to) {
   return rename(from_cstr, to_cstr) == 0;
 }
 
-File_Info os_get_file_info(Arena *arena, String path) {
-  struct stat64 stat_info;
+nja_internal u64 unix_date_from_time(time_t time) {
+  // @Incomplete
+  return cast(u64)time;
+}
 
-  auto mark = arena_get_position(arena);
-  defer { arena_set_position(arena, mark); };
+nja_internal u32 unix_flags_from_mode(mode_t mode, String name) {
+  u32 result = 0;
 
-  char *cpath = string_to_cstr(arena, path);
-  bool file_exists = stat64(cpath, &stat_info) == 0;
-
-  File_Info result = {};
-
-  if (file_exists) {
-    result.name         = path_filename(path);
-    result.date         = stat_info.st_mtime;
-    result.size         = stat_info.st_size;
-    result.is_directory = S_ISDIR(stat_info.st_mode);
+  if (S_ISDIR(mode)) {
+    result |= File_IsDirectory;
   }
 
+  if (string_starts_with(name, S("."))) {
+    result |= File_IsHidden;
+  }
+
+  // @Incomplete
+  #if 0
+  if (attributes & FILE_ATTRIBUTE_SYSTEM) {
+    result |= File_IsSystem;
+  }
+  #endif
+
   return result;
+}
+
+nja_internal u32 unix_access_from_mode(mode_t mode) {
+  u32 result = FileAccess_Read | FileAccess_Execute;
+
+  // @Incomplete
+  #if 0
+  if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
+    result |= FileAccess_Write;
+  }
+  #endif
+
+  return result;
+}
+
+File_Info os_get_file_info(Arena *arena, String path) {
+  auto scratch = begin_scratch_memory();
+
+  char *cpath = string_to_cstr(scratch.arena, path);
+
+  struct stat64 stat_info;
+  bool file_exists = stat64(cpath, &stat_info) == 0;
+
+  File_Info info = {};
+
+  if (file_exists) {
+    info.name             = path_filename(path);
+    info.last_accessed_at = unix_date_from_time(stat_info.st_atime);
+    info.updated_at       = unix_date_from_time(stat_info.st_mtime);
+     // NOTE(nick): not really created time, but UNIX doesn't have this concept
+    info.created_at       = unix_date_from_time(stat_info.st_ctime);
+    info.flags            = unix_flags_from_mode(stat_info.st_mode, info.name);
+    info.access           = unix_access_from_mode(stat_info.st_mode);
+  }
+
+  end_scratch_memory(scratch);
+
+  return info;
 }
 
 void unix_file_error(File *file, char *message, String file_name = {}) {
@@ -2775,9 +3464,6 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
   struct dirent *data = readdir(iter->handle);
 
   if (data != NULL) {
-    struct stat64 stat_info;
-    stat64(iter->find_path, &stat_info);
-
     String name = string_from_cstr(data->d_name);
 
     // Ignore . and .. "directories"
@@ -2790,11 +3476,22 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
       name = string_from_cstr(data->d_name);
     }
 
+    *info = os_get_file_info(iter->arena, path_join(string_from_cstr(iter->find_path), name));
+
+    #if 0
+    struct stat64 stat_info;
+    stat64(iter->find_path, &stat_info);
+
     *info = {};
     info->name         = string_copy(iter->arena, name);
-    info->date         = stat_info.st_mtime;
-    info->size         = data->d_reclen;
-    info->is_directory = data->d_type == DT_DIR;
+
+    info->last_accessed_at = unix_date_from_time(stat_info.st_atime);
+    info->updated_at       = unix_date_from_time(stat_info.st_mtime);
+     // NOTE(nick): not really created time, but UNIX doesn't have this concept
+    info->created_at       = unix_date_from_time(stat_info.st_ctime);
+    info->flags            = unix_flags_from_mode(stat_info.st_mode, info->name);
+    info->access           = unix_access_from_mode(stat_info.st_mode);
+    #endif
   }
 
   return data != NULL;
@@ -2900,13 +3597,13 @@ struct OS_Library {
 
 typedef void (*OS_Library_Proc)(void);
 
-OS_Library os_lib_load(String path);
-void os_lib_release(OS_Library lib);
-OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name);
+OS_Library os_library_load(String path);
+void os_library_release(OS_Library lib);
+OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name);
 
 #if OS_WINDOWS
 
-OS_Library os_lib_load(String path) {
+OS_Library os_library_load(String path) {
   auto scratch = begin_scratch_memory();
 
   OS_Library result = {};
@@ -2917,14 +3614,14 @@ OS_Library os_lib_load(String path) {
   return result;
 }
 
-inline void os_lib_release(OS_Library lib) {
+inline void os_library_release(OS_Library lib) {
   if (lib.handle) {
     FreeLibrary((HMODULE)lib.handle);
     lib.handle = 0;
   }
 }
 
-inline OS_Library_Proc gb_dll_proc_address(OS_Library lib, char *proc_name) {
+inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
   return (OS_Library_Proc)GetProcAddress((HMODULE)lib.handle, proc_name);
 }
 
@@ -2932,7 +3629,7 @@ inline OS_Library_Proc gb_dll_proc_address(OS_Library lib, char *proc_name) {
 
 #include <dlfcn.h>
 
-OS_Library os_lib_load(String path) {
+OS_Library os_library_load(String path) {
   auto scratch = begin_scratch_memory();
 
   OS_Library result = {};
@@ -2944,22 +3641,22 @@ OS_Library os_lib_load(String path) {
   return result;
 }
 
-inline void os_lib_release(OS_Library lib) {
+inline void os_library_release(OS_Library lib) {
   if (lib.handle) {
     dlclose(lib.handle);
     lib.handle = 0;
   }
 }
 
-inline OS_Library_Proc os_lib_get_proc(OS_Library lib, char *proc_name) {
+inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
   return (OS_Library_Proc)dlsym(lib.handle, proc_name);
 }
 
 #endif
 
-inline OS_Library_Proc os_lib_get_proc(OS_Library lib, String proc_name) {
+inline OS_Library_Proc os_library_get_proc(OS_Library lib, String proc_name) {
   auto scratch = begin_scratch_memory();
-  auto result = os_lib_get_proc(lib, string_to_cstr(scratch.arena, proc_name));
+  auto result = os_library_get_proc(lib, string_to_cstr(scratch.arena, proc_name));
   end_scratch_memory(scratch);
   return result;
 }
@@ -2969,32 +3666,45 @@ inline OS_Library_Proc os_lib_get_proc(OS_Library lib, String proc_name) {
 //
 
 void *allocator_alloc(Allocator allocator, u64 size) {
-  assert(allocator.proc);
-  void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
-  return result;
+  if (allocator.proc) {
+    void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
+    return result;
+  }
+
+  return NULL;
 }
 
 void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment) {
-  assert(allocator.proc);
-  void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, alignment);
-  return result;
+  if (allocator.proc) {
+    void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, alignment);
+    return result;
+  }
+
+  return NULL;
 }
 
 void allocator_free(Allocator allocator, void *data) {
-  assert(allocator.proc);
-  if (data != NULL) {
-    allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data, 0);
+  if (allocator.proc) {
+    if (data != NULL) {
+      allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data, 0);
+    }
   }
 }
 
 void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size) {
-  assert(allocator.proc);
-  return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
+  if (allocator.proc) {
+    return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
+  }
+
+  return NULL;
 }
 
 void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment) {
-  assert(allocator.proc);
-  return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, alignment);
+  if (allocator.proc) {
+    return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, alignment);
+  }
+
+  return NULL;
 }
 
 ALLOCATOR_PROC(os_allocator_proc) {
@@ -3042,9 +3752,27 @@ ALLOCATOR_PROC(arena_allocator_proc) {
       return arena_alloc_aligned(arena, requested_size, alignment);
     }
 
+    #if 1
     case ALLOCATOR_MODE_RESIZE: {
       return arena_realloc_aligned(arena, requested_size, old_size, old_memory_pointer, alignment);
     }
+    #endif
+
+    // @Hack @Cleanup: fix busted arena_realloc function
+    #if 0
+    case ALLOCATOR_MODE_RESIZE: {
+      u64 actual_size = requested_size + nja_align_offset(0, alignment);
+
+      void *result = arena_alloc_aligned(arena, actual_size, alignment);
+
+      if (result && old_memory_pointer && mode == ALLOCATOR_MODE_RESIZE) {
+        memory_copy(old_memory_pointer, result, Min(requested_size, old_size));
+        arena_free_pointer(arena, old_memory_pointer);
+      }
+
+      return result;
+    }
+    #endif
 
     case ALLOCATOR_MODE_FREE: {
       arena_free_pointer(arena, old_memory_pointer);
@@ -3073,17 +3801,40 @@ Arena arena_create_from_allocator(Allocator allocator, u64 size) {
   return result;
 }
 
+ALLOCATOR_PROC(null_allocator_proc) {
+  return NULL;
+}
+
+Allocator null_allocator() {
+  return Allocator{null_allocator_proc, NULL};
+}
+
+ALLOCATOR_PROC(assert_allocator_proc) {
+  assert(!"Assert allocator");
+  return NULL;
+}
+
+Allocator assert_allocator() {
+  return Allocator{assert_allocator_proc, NULL};
+}
+
+Allocator temp_allocator() {
+  return arena_allocator(temp_arena());
+}
+
 //
 // Array
 //
 
 #define For(array) for (auto it : array)
 
-#define For_Array(it, array) for (auto it : array)
-
 #define Forp(array) \
   auto CONCAT(__array, __LINE__) = (array); \
   for (auto it = CONCAT(__array, __LINE__).begin(); it < CONCAT(__array, __LINE__).end(); it++)
+
+#define Fori(array) for (i64 index = 0; index < cast(i64)(array).count; index++)
+
+#define For_Array(it, array) for (auto it : array)
 
 #define For_Index(array) for (i64 index = 0; index < cast(i64)(array).count; index++)
 
@@ -3107,121 +3858,166 @@ struct Array {
 };
 
 template <typename T>
-void array_init(Array<T> &it, u64 initial_capacity = 16) {
-  it.count = 0;
-  it.data = NULL;
-  array_resize(it, initial_capacity);
+void array_init(Array<T> *it, u64 initial_capacity = 16) {
+  it->count = 0;
+  it->capacity = initial_capacity;
+  it->data = cast(T *)allocator_realloc(it->allocator, NULL, it->capacity * sizeof(T), 0);
 }
 
 template <typename T>
-void array_reset(Array<T> &it) {
-  it.count = 0;
+void array_init_from_allocator(Array<T> *it, Allocator allocator, u64 capacity) {
+  it->allocator = allocator;
+  it->count = 0;
+  it->capacity = capacity;
+  it->data = cast(T *)allocator_realloc(allocator, NULL, capacity * sizeof(T), 0);
 }
 
 template <typename T>
-void array_resize(Array<T> &it, u64 next_capacity) {
-  if (it.data && it.capacity == next_capacity) return;
+Array<T> array_make(u64 initial_capacity = 16) {
+  Array<T> result = {};
+  array_init(result, initial_capacity);
+  return result;
+}
 
-  u64 prev_size = it.capacity * sizeof(T);
+template <typename T>
+Array<T> array_make_from_allocator(Allocator allocator, u64 capacity) {
+  Array<T> result = {};
+  array_init_from_allocator(result, allocator, capacity);
+  return result;
+}
+
+template <typename T>
+void array_reset(Array<T> *it) {
+  it->count = 0;
+}
+
+template <typename T>
+void array_resize(Array<T> *it, u64 next_capacity) {
+  if (it->data && it->capacity == next_capacity) return;
+
+  u64 prev_size = it->capacity * sizeof(T);
   u64 next_size = next_capacity * sizeof(T);
 
-  it.data = (T *)allocator_realloc(it.allocator, it.data, next_size, prev_size);
-  assert(it.data);
-  it.capacity = next_capacity;
+  auto next_data = (T *)allocator_realloc(it->allocator, it->data, next_size, prev_size);
+  if (next_data) {
+    it->data = next_data;
+    it->capacity = next_capacity;
+  }
 }
 
 template <typename T>
-bool array_at_capacity(Array<T> &it) {
-  return it.capacity <= it.count;
+bool array_at_capacity(Array<T> *it) {
+  return it->capacity <= it->count;
 }
 
 template <typename T>
-T *array_peek(Array<T> &it) {
-  return it.count > 0 ? &it.data[it.count - 1] : NULL;
+T *array_peek(Array<T> *it) {
+  return it->count > 0 ? &it->data[it->count - 1] : NULL;
 }
 
 template <typename T>
-void *array_pop(Array<T> &it) {
-  void *removed = array_peek(it);
-  if (removed) it.count --;
+T *array_pop(Array<T> *it) {
+  T *removed = array_peek(it);
+  if (removed) it->count --;
   return removed;
 }
 
 template <typename T>
-void array_remove_unordered(Array<T> &it, i64 index) {
-  assert(index >= 0 && index < it.count);
-  memory_copy(&it.data[it.count - 1], &it.data[index], sizeof(T));
-  it.count--;
+void array_remove_unordered(Array<T> *it, i64 index) {
+  assert(index >= 0 && index < it->count);
+  memory_copy(&it->data[it->count - 1], &it->data[index], sizeof(T));
+  it->count--;
 }
 
 template <typename T>
-void array_remove_ordered(Array<T> &it, i64 index, i64 num_to_remove = 1) {
-  assert(index >= 0 && index < it.count);
-  assert(num_to_remove > 0 && index + num_to_remove <= it.count);
+void array_remove_ordered(Array<T> *it, i64 index, i64 num_to_remove = 1) {
+  assert(index >= 0 && index < it->count);
+  assert(num_to_remove > 0 && index + num_to_remove <= it->count);
 
   u64 i = index + num_to_remove;
-  u64 remaining_count = it.count - i;
+  u64 remaining_count = it->count - i;
 
-  memory_move(&it.data[i], &it.data[index], sizeof(T) * remaining_count);
+  memory_move(&it->data[i], &it->data[index], sizeof(T) * remaining_count);
 
-  it.count -= num_to_remove;
+  it->count -= num_to_remove;
 }
 
 template <typename T>
-void array_free(Array<T> &it) {
-  if (it.data) {
-    allocator_free(it.allocator, it.data);
-    it.data = NULL;
+void array_free(Array<T> *it) {
+  if (it->data) {
+    allocator_free(it->allocator, it->data);
+    it->data = NULL;
   }
 
-  it.capacity = 0;
-  it.count = 0;
+  it->capacity = 0;
+  it->count = 0;
 }
 
 template <typename T>
-void array_reserve(Array<T> &it, u64 minimum_count) {
-  if (it.capacity < minimum_count) {
+void array_reserve(Array<T> *it, u64 minimum_count) {
+  if (it->capacity < minimum_count) {
     array_resize(it, minimum_count);
   }
 }
 
 template <typename T>
-T *array_push(Array<T> &it) {
-  if (it.count >= it.capacity) {
-    array_resize(it, it.capacity ? it.capacity * 2 : 16);
+T *array_push(Array<T> *it) {
+  if (it->count >= it->capacity) {
+    array_resize(it, it->capacity ? it->capacity * 2 : 16);
   }
 
-  memory_set(&it.data[it.count], 0, sizeof(T));
-  return &it.data[it.count ++];
+  memory_set(&it->data[it->count], 0, sizeof(T));
+  return &it->data[it->count ++];
 }
 
 template <typename T>
-T *array_push(Array<T> &it, T item) {
-  if (it.count >= it.capacity) {
-    array_resize(it, it.capacity ? it.capacity * 2 : 16);
+T *array_push(Array<T> *it, T item) {
+  if (it->count >= it->capacity) {
+    array_resize(it, it->capacity ? it->capacity * 2 : 16);
   }
 
-  it.data[it.count] = item;
-  return &it.data[it.count ++];
+  it->data[it->count] = item;
+  return &it->data[it->count ++];
 }
 
 template <typename T>
-void array_concat(Array<T> &it, T *data, u64 count) {
-  if (!count|| !data) return;
+T *array_push_elements(Array<T> *it, void *items, u64 count) {
+  if (it->count + count >= it->capacity) {
+    array_resize(it, it->capacity ? (it->capacity + count) * 2 : 16);
+  }
 
-  array_reserve(it, it.count + count);
-  memory_copy(data, &it.data[it.count], count * sizeof(T));
-  it.count += count;
+  T *result = it->data + it->count;
+  memory_copy(items, it->data, count * sizeof(T));
+  it->count += count;
+  return result;
 }
 
 template <typename T>
-void array_sort(Array<T> &it) {
+void array_concat(Array<T> *it, T *data, u64 count) {
+  array_push_elements(it, data, count);
+}
+
+template <typename T>
+void array_sort(Array<T> *it) {
   auto compare = [](void *a, void *b) -> i32 {
     if (*(T *)a == *(T *)b) return 0;
     return (*(T *)a < *(T *)b) ? -1 : 1;
   };
 
-  nja_sort(it.data, it.count, sizeof(T), compare);
+  nja_sort(it->data, it->count, sizeof(T), compare);
+}
+
+template <typename T>
+void array_sort(Array<T> *it, i32 (*compare)(T *a, T *b)) {
+  nja_sort(it->data, it->count, sizeof(T), cast(Compare_Proc *)compare);
+}
+
+String string_from_array(Array<u8> chars) {
+  return make_string(chars.data, chars.count);
+}
+
+String32 string32_from_array(Array<u32> chars) {
+  return make_string32(chars.data, chars.count);
 }
 
 //
@@ -3413,7 +4209,7 @@ u64 fnv64a(void const *data, isize len) {
 // Hash Table
 //
 
-#define For_Table(it, table) \
+#define For_Table(table) \
   for (auto it = (table).begin(); it < (table).end(); it++) \
     if (it->hash < TABLE_FIRST_VALID_HASH) continue; else
 
@@ -3424,35 +4220,39 @@ const int TABLE_FIRST_VALID_HASH = 2;
 const int TABLE_SIZE_MIN = 32;
 
 template <typename K>
-bool table_key_equals(const K &a, const K &b) {
-  return memory_equals(a, b, sizeof(K));
+bool table_key_equals(K a, K b) {
+  return memory_equals(&a, &b, sizeof(K));
 }
 
-bool table_key_equals(const char *&a, const char *&b) {
-  return cstr_equals((char *)a, (char *)b); 
+bool table_key_equals(u32 a, u32 b) {
+  return a == b; 
 }
 
-bool table_key_equals(const String &a, const String &b) {
+bool table_key_equals(char *a, char *b) {
+  return cstr_equals(a, b); 
+}
+
+bool table_key_equals(String a, String b) {
   return string_equals(a, b);
 }
 
 template <typename K>
-u32 table_key_hash(K key) {
-  return murmur32(&key, sizeof(K));
+u64 table_key_hash(K key) {
+  return murmur64(&key, sizeof(K));
 }
 
-u32 table_key_hash(char *key) {
-  return fnv32a(&key, cstr_length(key));
+u64 table_key_hash(char *key) {
+  return fnv64a(&key, cstr_length(key));
 }
 
-u32 table_key_hash(String key) {
-  return fnv32a(key.data, key.count);
+u64 table_key_hash(String key) {
+  return fnv64a(key.data, key.count);
 }
 
 template <typename K, typename V>
 struct Hash_Table {
   struct Entry {
-    u32 hash;
+    u64 hash;
     K key;
     V value;
   };
@@ -3478,59 +4278,57 @@ struct Hash_Table {
 };
 
 template <typename K, typename V>
-void table_init(Hash_Table<K, V> &it, u32 table_size) {
-  it.capacity = max_u32(nja_next_power_of_two(table_size), TABLE_SIZE_MIN);
-  it.count = 0;
-  it.slots_filled = 0;
+void table_init(Hash_Table<K, V> *it, u32 table_size) {
+  it->capacity = max_u32(nja_next_power_of_two(table_size), TABLE_SIZE_MIN);
+  it->count = 0;
+  it->slots_filled = 0;
 
   #if 0
-  it.add_collisions = 0;
-  it.find_collisions = 0;
+  it->add_collisions = 0;
+  it->find_collisions = 0;
   #endif
 
-  assert(nja_is_power_of_two(it.capacity)); // Must be a power of two!
+  assert(nja_is_power_of_two(it->capacity)); // Must be a power of two!
 
-  it.data = (typename Hash_Table<K, V>::Entry *)allocator_alloc(it.allocator, it.capacity * sizeof(typename Hash_Table<K, V>::Entry));
+  it->data = (typename Hash_Table<K, V>::Entry *)allocator_alloc(it->allocator, it->capacity * sizeof(typename Hash_Table<K, V>::Entry));
   table_reset(it); // @Speed: Can be removed if data is initialized to zero!
 }
 
 template <typename K, typename V>
-void table_reset(Hash_Table<K, V> &it) {
-  it.count = 0;
-  it.slots_filled = 0;
+void table_reset(Hash_Table<K, V> *it) {
+  it->count = 0;
+  it->slots_filled = 0;
 
-  if (it.data) {
-    for (u32 i = 0; i < it.capacity; i++) {
-      it.data[i].hash = 0;
+  if (it->data) {
+    for (u32 i = 0; i < it->capacity; i++) {
+      it->data[i].hash = 0;
     }
   }
 }
 
 template <typename K, typename V>
-void table_free(Hash_Table<K, V> &it) {
-  if (it.data) {
-    allocator_free(it.allocator, it.data);
-    it.data = NULL;
-    it.capacity = 0;
-    it.count = 0;
-    it.slots_filled = 0;
+void table_free(Hash_Table<K, V> *it) {
+  if (it->data) {
+    allocator_free(it->allocator, it->data);
+    it->data = NULL;
+    it->capacity = 0;
+    it->count = 0;
+    it->slots_filled = 0;
   }
 }
 
 template <typename K, typename V>
-void table_expand(Hash_Table<K, V> &it) {
-  u32 next_capacity = it.capacity ? it.capacity * 2 : TABLE_SIZE_MIN;
+void table_rehash(Hash_Table<K, V> *it, u32 next_capacity) {
+  assert(nja_is_power_of_two(it->capacity)); // Must be a power of two!
 
-  assert(nja_is_power_of_two(it.capacity)); // Must be a power of two!
-
-  auto *old_data = it.data;
-  u32 old_capacity = it.capacity;
+  auto *old_data = it->data;
+  u32 old_capacity = it->capacity;
 
   table_init(it, next_capacity);
 
   // count and slots_filled will be incremented by add.
-  it.count        = 0;
-  it.slots_filled = 0;
+  it->count        = 0;
+  it->slots_filled = 0;
 
   for (u32 i = 0; i < old_capacity; i++) {
     auto *entry = &old_data[i];
@@ -3540,70 +4338,73 @@ void table_expand(Hash_Table<K, V> &it) {
     }
   }
 
-  allocator_free(it.allocator, old_data);
+  allocator_free(it->allocator, old_data);
 }
 
 // Sets the key-value pair, replacing it if it already exists.
 template <typename K, typename V>
-V *table_set(Hash_Table<K, V> &it, K key, V value) {
-  if (it.data) {
-    auto result = table_find_pointer(key);
+V *table_set(Hash_Table<K, V> *it, K key, V value) {
+  if (it->data) {
+    auto result = table_find_pointer(it, key);
     if (result) {
       *result = value;
       return result;
     }
   }
 
-  return table_add(key, value);
+  return table_add(it, key, value);
 }
 
 // Adds the given key-value pair to the table, returns a pointer to the inserted item.
 template <typename K, typename V>
-V *table_add(Hash_Table<K, V> &it, K key, V value) {
+V *table_add(Hash_Table<K, V> *it, K key, V value) {
   // The + 1 is here to handle the weird case where the table size is 1 and you add the first item
   // slots_filled / capacity >= 7 / 10 ...therefore:
   // slots_filled * 10 >= capacity * 7
-  if ((it.slots_filled + 1) * 10 >= it.capacity * 7) table_expand(it);
+  if ((it->slots_filled + 1) * 10 >= it->capacity * 7) {
+    u32 next_capacity = it->capacity ? it->capacity * 2 : TABLE_SIZE_MIN;
+    table_rehash(it, next_capacity);
+  }
 
-  assert(it.slots_filled <= it.capacity);
+  assert(it->slots_filled <= it->capacity);
 
-  u32 hash = table_key_hash(key);
+  u64 hash = table_key_hash(key);
   if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
 
-  u32 index = hash & (it.capacity - 1);
+  u64 index = hash & (it->capacity - 1);
 
-  while (it.data[index].hash) {
+  while (it->data[index].hash) {
     #if 0
-    it.add_collisions += 1;
+    it->add_collisions += 1;
     #endif
 
     index += 1;
-    index &= (it.capacity - 1);
+    index &= (it->capacity - 1);
   }
 
-  it.count ++;
-  it.slots_filled ++;
-  it.data[index] = {hash, key, value};
+  it->count ++;
+  it->slots_filled ++;
+  it->data[index] = {hash, key, value};
 
-  return &it.data[index].value;
+  return &it->data[index].value;
 }
 
 template <typename K, typename V>
-V *table_find_pointer(Hash_Table<K, V> &it, K key) {
-  if (it.data) {
-    u32 hash = table_key_hash(key);
+V *table_find_pointer(Hash_Table<K, V> *it, K key) {
+  if (it->data) {
+    u64 hash = table_key_hash(key);
     if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
-    u32 index = hash & (it.capacity - 1);
+    u32 index = hash & (it->capacity - 1);
 
-    while (it.data[index].hash) {
-      auto entry = &it.data[index];
+    while (it->data[index].hash) {
+      auto entry = &it->data[index];
 
-      if (entry->hash == hash && table_key_equals(&entry->key, &key)) {
+      if (entry->hash == hash && table_key_equals(entry->key, key)) {
         return &entry->value;
       }
 
       index += 1;
-      index &= (it.capacity - 1);
+      index &= (it->capacity - 1);
     }
   }
 
@@ -3611,29 +4412,42 @@ V *table_find_pointer(Hash_Table<K, V> &it, K key) {
 }
 
 template <typename K, typename V>
-bool table_remove(Hash_Table<K, V> &it, K key) {
-  assert(it.data); // Must be initialized!
+bool table_remove(Hash_Table<K, V> *it, K key) {
+  assert(it->data); // Must be initialized!
 
-  u32 hash = table_key_hash(key);
+  u64 hash = table_key_hash(key);
   if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
-  u32 index = hash & (it.capacity - 1);
+  u32 index = hash & (it->capacity - 1);
 
-  while (it.data[index].hash) {
-    if (it.data[index].hash == hash) {
-      it.data[index].hash = TABLE_REMOVED_HASH; // No valid entry will ever hash to TABLE_REMOVED_HASH.
-      it.count --;
+  while (it->data[index].hash) {
+    if (it->data[index].hash == hash) {
+      it->data[index].hash = TABLE_REMOVED_HASH; // No valid entry will ever hash to TABLE_REMOVED_HASH.
+      it->count --;
       return true;
     }
 
     index += 1;
-    index &= (it.capacity - 1);
+    index &= (it->capacity - 1);
   }
 
   return false;
 }
 
 template <typename K, typename V>
-V table_find(Hash_Table<K, V> &it, K key) {
+bool table_delete(Hash_Table<K, V> *it, typename Hash_Table<K, V>::Entry *entry)
+{
+  if (entry->hash >= TABLE_FIRST_VALID_HASH)
+  {
+    it->count --;
+    entry->hash = TABLE_REMOVED_HASH;
+    return true;
+  }
+
+  return false;
+}
+
+template <typename K, typename V>
+V table_find(Hash_Table<K, V> *it, K key) {
   V *result = table_find_pointer(it, key);
 
   if (result) {
@@ -3644,7 +4458,7 @@ V table_find(Hash_Table<K, V> &it, K key) {
 }
 
 template <typename K, typename V>
-V table_contains(Hash_Table<K, V> &it, K key) {
+bool table_contains(Hash_Table<K, V> *it, K key) {
   return table_find_pointer(it, key) != NULL;
 }
 
@@ -3667,7 +4481,7 @@ String os_read_entire_file(Allocator allocator, String path) {
 }
 
 String os_read_entire_file(String path) {
-  return os_read_entire_file(arena_allocator(thread_get_temporary_arena()), path);
+  return os_read_entire_file(temp_allocator(), path);
 }
 
 bool os_write_entire_file(String path, String contents) {
@@ -3678,11 +4492,11 @@ bool os_write_entire_file(String path, String contents) {
 }
 
 File_Info os_get_file_info(String path) {
-  return os_get_file_info(thread_get_temporary_arena(), path);
+  return os_get_file_info(temp_arena(), path);
 }
 
 File_Lister os_file_list_begin(String path) {
-  return os_file_list_begin(thread_get_temporary_arena(), path);
+  return os_file_list_begin(temp_arena(), path);
 }
 
 void os_file_write(File *file, u64 offset, String str) {
@@ -3715,6 +4529,17 @@ String os_get_executable_directory() {
   return path_dirname(result);
 }
 
+nja_inline bool file_exists(File_Info info) { return info.name.count > 0; }
+
+nja_inline bool file_is_directory(File_Info info) { return (info.flags & File_IsDirectory) != 0; }
+nja_inline bool file_is_hidden(File_Info info)    { return (info.flags & File_IsHidden) != 0; }
+nja_inline bool file_is_system(File_Info info)    { return (info.flags & File_IsSystem) != 0; }
+
+nja_inline bool file_is_directory(File_Info *info) { return (info->flags & File_IsDirectory) != 0; }
+nja_inline bool file_is_hidden(File_Info *info)    { return (info->flags & File_IsHidden) != 0; }
+nja_inline bool file_is_system(File_Info *info)    { return (info->flags & File_IsSystem) != 0; }
+
+
 bool os_delete_entire_directory(String path) {
   auto scratch = begin_scratch_memory();
 
@@ -3726,7 +4551,7 @@ bool os_delete_entire_directory(String path) {
   while (os_file_list_next(&handle, &info)) {
     auto file_path = path_join(path, info.name);
 
-    if (info.is_directory) {
+    if (file_is_directory(info)) {
       // @Speed: is the recursive ever a problem?
       success |= os_delete_entire_directory(file_path);
     } else {
@@ -3742,12 +4567,8 @@ bool os_delete_entire_directory(String path) {
   return success;
 }
 
-nja_inline bool os_file_info_exists(File_Info info) {
-  return info.name.count > 0;
-}
-
 bool os_file_or_directory_exists(String path) {
-  return os_file_info_exists(os_get_file_info(path));
+  return file_exists(os_get_file_info(path));
 }
 
 bool os_make_directory_recursive(String path) {
@@ -3773,23 +4594,80 @@ bool os_make_directory_recursive(String path) {
   return true;
 }
 
-Array<File_Info *> os_scan_directory(Arena *arena, String path) {
-  Array<File_Info *> result = {};
-  result.allocator = arena_allocator(arena);
+i64 os_count_directory(String path) {
+  i64 result = 0;
+  Arena *arena = temp_arena();
 
-  array_init(result, 32); // 32 should be enough for anybody.
+  #if OS_WINDOWS
+  WCHAR *find_path = cast(WCHAR *)string16_from_string(arena, string_concat(path, S("\\*.*"))).data; // @Incomplete: use \\?\ prefix?
 
-  auto handle = os_file_list_begin(arena, path);
+  WIN32_FIND_DATAW data;
+  HANDLE handle = FindFirstFileExW(find_path, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+
+  if (handle != INVALID_HANDLE_VALUE) {
+    do {
+      result += 1;
+    } while (FindNextFileW(handle, &data));
+  }
+
+  FindClose(handle);
+  #endif
+
+  #if OS_MACOS || OS_LINUX
+  char *cpath = string_to_cstr(arena, path);
+
+  DIR *handle = opendir(cpath);
+  struct dirent *data = readdir(handle);
+
+  while (data) {
+    result += 1;
+    data = readdir(handle);
+  }
+  #endif
+
+  // NOTE(nick): Ignore . and .. "directories"
+  return result - 2;
+}
+
+Array<String> os_list_drives(Allocator allocator) {
+  Array<String> results = {};
+  results.allocator = allocator;
+
+  #if OS_WINDOWS
+  // @Incomplete: do we care about enumerating volumes with FindFirstVolume?
+  DWORD result = GetLogicalDrives();
+  for (int i = 0; i < 26; i ++)
+  {
+    char drive_letter = 65 + i;
+    bool drive_exists = result & 1;
+    result >>= 1;
+
+    if (drive_exists)
+    {
+      array_push(&results, sprint("%c:/", drive_letter));
+    }
+  }
+  #endif
+
+  #if OS_MACOS || OS_LINUX
+  array_push(&results, S("/"));
+  #endif
+
+  return results;
+}
+
+Array<File_Info> os_scan_directory(Allocator allocator, Arena *string_memory, String path) {
+  i64 count = os_count_directory(path);
+
+  Array<File_Info> result = {};
+  array_init_from_allocator(&result, allocator, count);
+
+  auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
 
   File_Info info = {};
   while (os_file_list_next(&handle, &info)) {
-    auto ptr = array_push(result);
-
-    auto it = push_struct(arena, File_Info);
-    memory_copy(&info, it, sizeof(File_Info));
-    it->name = string_copy(arena, info.name);
-
-    *ptr = it;
+    auto it = array_push(&result, info);
+    it->name = string_copy(string_memory, it->name);
   }
 
   os_file_list_end(&handle);
@@ -3797,18 +4675,37 @@ Array<File_Info *> os_scan_directory(Arena *arena, String path) {
   return result;
 }
 
-Array<File_Info *> os_scan_directory(String path) {
-  return os_scan_directory(thread_get_temporary_arena(), path);
+Array<File_Info> os_scan_directory(Allocator allocator, String path) {
+  i64 count = os_count_directory(path);
+
+  Array<File_Info> result = {};
+  array_init_from_allocator(&result, allocator, count);
+
+  auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
+
+  File_Info info = {};
+  while (os_file_list_next(&handle, &info)) {
+    auto it = array_push(&result, info);
+    it->name = string_alloc(allocator, it->name);
+  }
+
+  os_file_list_end(&handle);
+
+  return result;
 }
 
-Array<File_Info *> os_scan_files_recursive(Arena *arena, String path, i32 max_depth = 2048) {
-  Array<File_Info *> results = {};
+Array<File_Info> os_scan_directory(String path) {
+  return os_scan_directory(temp_allocator(), path);
+}
+
+Array<File_Info> os_scan_files_recursive(Allocator allocator, String path, i32 max_depth = 1024) {
+  Array<File_Info> results = {};
   Array<String> stack = {};
 
-  results.allocator = arena_allocator(arena);
-  stack.allocator   = arena_allocator(arena); // @Memory: these can be freed after the function ends
+  results.allocator = allocator;
+  stack.allocator   = allocator; // @Memory: these can be freed after the function ends
 
-  array_push(stack, S(""));
+  array_push(&stack, S(""));
 
   while (max_depth >= 0) {
     max_depth -= 1;
@@ -3817,29 +4714,29 @@ Array<File_Info *> os_scan_files_recursive(Arena *arena, String path, i32 max_de
 
     for (u32 i = 0; i < n; i++) {
       auto dir = stack[i];
-      auto infos = os_scan_directory(arena, path_join(path, dir));
+      auto infos = os_scan_directory(allocator, path_join(path, dir));
 
       For (infos) {
-        it->name = path_join(dir, it->name);
+        it.name = path_join(dir, it.name);
 
-        if (it->is_directory) {
-          array_push(stack, it->name);
+        if (file_is_directory(it)) {
+          array_push(&stack, it.name);
         } else {
-          array_push(results, it);
+          array_push(&results, it);
         }
       }
     }
 
     if (n > 0) {
-      array_remove_ordered(stack, 0, n);
+      array_remove_ordered(&stack, 0, n);
     }
   }
 
   return results;
 }
 
-Array<File_Info *> os_scan_files_recursive(String path, u32 max_depth = 1024) {
-  return os_scan_files_recursive(thread_get_temporary_arena(), path, max_depth);
+Array<File_Info> os_scan_files_recursive(String path, i32 max_depth = 1024) {
+  return os_scan_files_recursive(temp_allocator(), path, max_depth);
 }
 
 //
@@ -3858,7 +4755,7 @@ Array<String> string_split(Allocator allocator, String str, String split) {
     if (*at == split.data[0])
     {
       if (string_starts_with(string_range(at, str_end), split)) {
-        array_push(result, string_range(word_first, at));
+        array_push(&result, string_range(word_first, at));
         at += split.count - 1;
         word_first = at + 1;
         continue;
@@ -3866,13 +4763,13 @@ Array<String> string_split(Allocator allocator, String str, String split) {
     }
   }
 
-  array_push(result, string_range(word_first, str_end));
+  array_push(&result, string_range(word_first, str_end));
 
   return result;
 }
 
 Array<String> string_split(String str, String split) {
-  return string_split(arena_allocator(thread_get_temporary_arena()), str, split);
+  return string_split(temp_allocator(), str, split);
 }
 
 String string_join(Allocator allocator, Array<String> list, String join) {
@@ -3901,7 +4798,7 @@ String string_join(Allocator allocator, Array<String> list, String join) {
 }
 
 String string_join(Array<String> list, String join) {
-  return string_join(arena_allocator(thread_get_temporary_arena()), list, join);
+  return string_join(temp_allocator(), list, join);
 }
 
 //
