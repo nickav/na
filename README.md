@@ -5,6 +5,7 @@ single-file public domain libraries for C++
 library                         | latest version | category | description
 --------------------------------|----------------|----------|-------------
 [**nja.h**](./nja.h)            | 0.01           | misc     | Cross-platform helper library
+[**nja_math.h**](./nja_math.h)  | 0.01           | math     | Math helper library
 
 
 ## Credits
