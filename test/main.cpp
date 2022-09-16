@@ -1,4 +1,5 @@
-#include "../nja.h"
+#include "../na.h"
+#include "../na_math.h"
 
 #include <stdlib.h>
 
@@ -10,27 +11,18 @@ int main() {
   print("\n");
   print("Arena:\n");
   {
+    #if 0
     Arena a = arena_create_from_allocator(os_allocator(), 1024); 
 
     void *ptr1 = arena_alloc(&a, 32);
     print("ptr1: %p\n", ptr1);
-    assert(a.offset == 32 && a.prev_offset == 0);
-
-    ptr1 = arena_realloc(&a, 64, 32, ptr1);
-    print("ptr1: %p\n", ptr1);
-    assert(a.offset == 64 && a.prev_offset == 0);
-
-    arena_alloc(&a, 16);
-
-    void *ptr2 = arena_realloc(&a, 128, 64, ptr1);
-    print("ptr2: %p\n", ptr2);
-    assert(ptr2 != ptr1);
-    assert(a.offset == (64 + 16 + 128));
+    assert(a.offset == 32);
 
     print("\n");
+    #endif
     print("Virtual Memory:\n");
 
-    Arena b = arena_make_from_backing_memory(os_virtual_memory(), gigabytes(2), kilobytes(4));
+    Arena b = arena_make_from_memory(gigabytes(2));
 
     arena_alloc(&b, kilobytes(2));
     assert(b.commit_position == kilobytes(4));
@@ -105,20 +97,23 @@ int main() {
 
     assert(os_make_directory_recursive(path_join(cwd, S("this/is/a/recursive/test"))));
 
-    auto files = os_scan_files_recursive(cwd);
+    print("scan files...");
 
-    For (files) {
+    #if 0
+    auto files = os_scan_files_recursive(cwd);
+    Forp (files) {
       auto path = path_join(dir, it->name);
 
       print("%.*s\n", LIT(path));
       print("  name:         %.*s\n", LIT(it->name));
       print("  size:         %llu\n", it->size);
-      print("  date:         %llu\n", it->date);
-      print("  is_directory: %d\n", it->is_directory);
+      print("  created_at:   %llu\n", it->created_at);
+      print("  is_directory: %d\n", file_is_directory(it));
 
       auto contents = os_read_entire_file(path);
       print("  os_read_entire_file: %lld\n", contents.count);
     }
+    #endif
   }
 
   print("\n\n");
@@ -126,17 +121,17 @@ int main() {
   {
     Array<i32> my_array = {};
 
-    array_push(my_array, 0);
-    array_push(my_array, 1);
-    array_push(my_array, 2);
-    array_push(my_array, 3);
-    array_push(my_array, 4);
-    array_push(my_array, 5);
+    array_push(&my_array, 0);
+    array_push(&my_array, 1);
+    array_push(&my_array, 2);
+    array_push(&my_array, 3);
+    array_push(&my_array, 4);
+    array_push(&my_array, 5);
 
-    array_remove_ordered(my_array, 2, 3);
+    array_remove_ordered(&my_array, 2, 3);
 
     i32 stuff[] = {42, 41, 40, 39};
-    array_concat(my_array, stuff, count_of(stuff));
+    array_concat(&my_array, stuff, count_of(stuff));
 
     For (my_array) {
       print("%d\n", it);
@@ -144,7 +139,7 @@ int main() {
 
     print("\n");
     print("array_sort:\n");
-    array_sort(my_array);
+    array_sort(&my_array);
 
     For (my_array) { print("%d\n", it); }
 
@@ -162,10 +157,10 @@ int main() {
   {
     Hash_Table<i32, i32> my_table = {};
 
-    table_add(my_table, 42, 9);
-    table_add(my_table, 3,  99);
-    table_add(my_table, 23, 999);
-    table_add(my_table, 11, 9999);
+    table_add(&my_table, 42, 9);
+    table_add(&my_table, 3,  99);
+    table_add(&my_table, 23, 999);
+    table_add(&my_table, 11, 9999);
 
     For (my_table) {
       if (it.hash < TABLE_FIRST_VALID_HASH) continue;
@@ -174,7 +169,7 @@ int main() {
 
     print("\n");
 
-    For_Table (it, my_table) {
+    For_Table (my_table) {
       print("(key: %d, value: %d) ", it->key, it->value);
     }
 
@@ -194,7 +189,7 @@ int main() {
   print("time in ms: %f\n", os_time_in_miliseconds());
 
   auto dir = S("C:/Windows/System32");
-  os_scan_directory(thread_get_temporary_arena(), dir);
+  os_scan_directory(temp_allocator(), dir);
 
   print("time in ms: %f\n", os_time_in_miliseconds());
 

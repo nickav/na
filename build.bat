@@ -7,7 +7,7 @@ set project_root=%script_path%
 :: Config
 set build_folder=%project_root%\build\
 set src_file=%project_root%\test\main.cpp
-set exe_name=nja.exe
+set exe_name=na.exe
 
 :: Build executable
 if not exist %build_folder% (mkdir %build_folder%)
