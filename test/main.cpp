@@ -24,27 +24,24 @@ int main() {
     #endif
     print("Virtual Memory:\n");
 
-    Arena b = arena_make_from_memory(gigabytes(2));
+    Arena *b = arena_alloc_from_memory(gigabytes(2));
 
-    arena_alloc(&b, kilobytes(2));
-    assert(b.commit_position == kilobytes(4));
+    arena_alloc(b, kilobytes(2));
+    assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
 
-    arena_alloc(&b, kilobytes(1));
-    assert(b.commit_position == kilobytes(4));
-    arena_alloc(&b, kilobytes(1));
-    assert(b.commit_position == kilobytes(4));
+    arena_alloc(b, kilobytes(1));
+    assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
+    arena_alloc(b, kilobytes(1));
+    assert(b->commit_position == ARENA_COMMIT_BLOCK_SIZE);
 
-    arena_alloc(&b, 1);
-    assert(b.commit_position == kilobytes(8));
+    arena_alloc(b, ARENA_COMMIT_BLOCK_SIZE);
+    assert(b->commit_position == (ARENA_COMMIT_BLOCK_SIZE * 2));
 
-    arena_pop(&b, 1);
-    assert(b.commit_position == kilobytes(4));
+    arena_pop(b, ARENA_COMMIT_BLOCK_SIZE);
+    assert(b->commit_position == (ARENA_COMMIT_BLOCK_SIZE));
 
-    arena_pop(&b, kilobytes(4));
-    assert(b.commit_position == 0);
-
-    arena_reset(&b);
-    assert(b.commit_position == 0);
+    arena_reset(b);
+    assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
 
 
     #if 0

@@ -770,8 +770,12 @@ bool os_release(void *ptr, u64 size);
 #define DEFAULT_MEMORY_ALIGNMENT 16
 #endif
 
-#ifndef ARENA_BLOCK_SIZE
-#define ARENA_BLOCK_SIZE kilobytes(4)
+#ifndef ARENA_COMMIT_BLOCK_SIZE
+#define ARENA_COMMIT_BLOCK_SIZE megabytes(4)
+#endif
+
+#ifndef ARENA_INITIAL_COMMIT_SIZE
+#define ARENA_INITIAL_COMMIT_SIZE kilobytes(4)
 #endif
 
 #ifndef ARENA_RESERVE
@@ -794,10 +798,7 @@ struct Arena {
     u8 *data;
     u64 offset;
     u64 size;
-
     u64 commit_position;
-
-    bool has_backing;
 };
 
 struct Arena_Mark {
@@ -815,24 +816,24 @@ void arena_init(Arena *arena, u8 *data, u64 size) {
     *arena = {};
     arena->data = data;
     arena->size = size;
-    arena->has_backing = false;
+    arena->commit_position = U64_MAX;
 }
 
-void arena_init_from_memory(Arena *arena, u64 size) {
-    *arena = {};
+Arena *arena_alloc_from_memory(u64 size) {
+    Arena *result = 0;
 
-    u8 *data = cast(u8 *)ARENA_RESERVE(size);
-    if (data)
-    {
-        arena->has_backing = true;
-        arena->data = data;
-        arena->size = size;
+    if (size >= ARENA_INITIAL_COMMIT_SIZE) {
+        u8 *data = cast(u8 *)ARENA_RESERVE(size);
+        if (data && ARENA_COMMIT(data, ARENA_INITIAL_COMMIT_SIZE)) {
+            result = (Arena *)data;
+            result->data = data;
+            result->size = size;
+            result->offset = AlignUpPow2(sizeof(Arena), 64);
+            result->commit_position = ARENA_INITIAL_COMMIT_SIZE;
+        }
     }
-}
 
-Arena arena_make_from_memory(u64 size) {
-    Arena result = {};
-    arena_init_from_memory(&result, size);
+    assert(result != 0);
     return result;
 }
 
@@ -844,41 +845,40 @@ void arena_free(Arena *arena) {
 }
 
 void *arena_push(Arena *arena, u64 size) {
-    assert(arena->has_backing);
     void *result = NULL;
 
-    if (arena->offset + size < arena->size) {
-        result = &arena->data[arena->offset];
-        arena->offset += size;
+    if (arena->offset + size <= arena->size) {
+        void *result_on_success = arena->data + arena->offset;
 
-        if (arena->offset > arena->commit_position)
+        u64 p = arena->offset + size;
+        u64 commit_p = arena->commit_position;
+
+        if (arena->commit_position < U64_MAX && p > commit_p)
         {
-            u64 commit_size = AlignUpPow2(arena->offset - arena->commit_position, ARENA_BLOCK_SIZE);
-            u64 bytes_remaining = arena->size - arena->offset;
-            commit_size = ClampTop(commit_size, bytes_remaining);
+            u64 p_aligned = AlignUpPow2(p, ARENA_COMMIT_BLOCK_SIZE);
+            u64 next_commit_position = ClampTop(p_aligned, arena->size);
+            u64 commit_size = next_commit_position - commit_p;
 
             if (ARENA_COMMIT(arena->data + arena->commit_position, commit_size)) {
-                arena->commit_position += commit_size;
-            } else {
-                result = NULL;
+                commit_p = next_commit_position;
+                arena->commit_position = next_commit_position;
             }
         }
-    }
 
-    if (result)
-    {
-        memory_zero(result, size);
+        if (p <= commit_p) {
+            result = result_on_success;
+            arena->offset = p;
+        }
     }
 
     return result;
 }
 
-bool arena_write(Arena *arena, u8 *data, u64 size) {
-    bool result = false;
-    u8 *buffer = (u8 *)arena_push(arena, size);
-    if (buffer != NULL) {
-        memory_copy(data, buffer, size);
-        result = true;
+void *arena_push_zero(Arena *arena, u64 size) {
+    void *result = arena_push(arena, size);
+    if (result != NULL)
+    {
+        memory_zero(result, size);
     }
     return result;
 }
@@ -887,59 +887,86 @@ void arena_pop_to(Arena *arena, u64 pos) {
     if (pos < arena->offset) {
         arena->offset = pos;
 
-        u64 prev_commit_position = arena->commit_position;
-        u64 next_commit_position = AlignUpPow2(arena->offset, ARENA_BLOCK_SIZE);
+        // NOTE(nick): if arena has virtual backing
+        if (arena->commit_position < U64_MAX)
+        {
+            u64 prev_commit_position = arena->commit_position;
+            u64 next_commit_position = AlignUpPow2(arena->offset, ARENA_COMMIT_BLOCK_SIZE);
+            next_commit_position = ClampTop(next_commit_position, arena->size);
 
-        if (next_commit_position < prev_commit_position) {
-            u64 decommit_size = prev_commit_position - next_commit_position;
+            if (next_commit_position < prev_commit_position) {
+                u64 decommit_size = prev_commit_position - next_commit_position;
 
-            if (ARENA_DECOMMIT(arena->data + next_commit_position, decommit_size)) {
-                arena->commit_position = next_commit_position;
+                if (ARENA_DECOMMIT(arena->data + next_commit_position, decommit_size)) {
+                    arena->commit_position = next_commit_position;
+                }
             }
         }
     }
 }
 
 void arena_pop(Arena *arena, u64 size) {
-    assert(size <= arena->offset);
-    arena_pop_to(arena, arena->offset - size);
+    if (size <= arena->offset) {
+        arena_pop_to(arena, arena->offset - size);
+    } else {
+        arena_pop_to(arena, 0);
+    }
 }
 
 void arena_reset(Arena *arena) {
-    arena->offset = 0;
+    // NOTE(nick): if arena has virtual backing
+    if (arena->commit_position < U64_MAX) {
+        if (arena->commit_position > ARENA_INITIAL_COMMIT_SIZE) {
+            // @Incomplete: do we want to decommit on reset?
+            u64 decommit_size = arena->commit_position - ARENA_INITIAL_COMMIT_SIZE;
+            ARENA_DECOMMIT(arena->data + ARENA_INITIAL_COMMIT_SIZE, decommit_size);
+            arena->commit_position = ARENA_INITIAL_COMMIT_SIZE;
+        }
 
-    if (arena->commit_position > 0) {
-        ARENA_DECOMMIT(arena->data, arena->commit_position);
-        arena->commit_position = 0;
+        arena->offset = AlignUpPow2(sizeof(Arena), 64);
+    } else {
+        arena->offset = 0;
     }
 }
 
-void arena_set_alignment(Arena *arena, u64 alignment) {
-    u64 align_offset = na_align_offset(arena->data + arena->offset, alignment);
-    if (align_offset > 0) {
-        arena_push(arena, align_offset);
-
-        // NOTE(nick): make sure our data is aligned properly
-        assert((u64)(arena->data + arena->offset) % alignment == 0);
+void arena_align(Arena *arena, u64 pow2_align) {
+    u64 p = arena->offset;
+    u64 p_aligned = AlignUpPow2(p, pow2_align);
+    u64 z = p_aligned - p;
+    if (z > 0) {
+        arena_push(arena, z);
     }
 }
 
-void *arena_alloc_aligned(Arena *arena, u64 size, u64 alignment) {
-    arena_set_alignment(arena, alignment);
-    return arena_push(arena, size);
+void *arena_push_aligned(Arena *arena, u64 size, u64 pow2_align) {
+    arena_align(arena, pow2_align);
+    return arena_push_zero(arena, size);
 }
 
 void *arena_alloc(Arena *arena, u64 size) {
-    return arena_alloc_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
+    return arena_push_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
 }
 
 bool arena_contains_pointer(Arena *arena, void *ptr) {
     return ptr >= arena->data && ptr < arena->data + arena->size;
 }
 
-#define push_struct(arena, Struct) (Struct *)arena_push(arena, sizeof(Struct))
+bool arena_write(Arena *arena, u8 *data, u64 size) {
+    bool result = false;
 
-#define push_array(arena, Struct, count) (Struct *)arena_push(arena, (count) * sizeof(Struct))
+    u8 *buffer = (u8 *)arena_push(arena, size);
+    if (buffer != NULL) {
+        memory_copy(data, buffer, size);
+        result = true;
+    }
+
+    return result;
+}
+
+
+#define push_struct(arena, Struct) (Struct *)arena_push_zero(arena, sizeof(Struct))
+
+#define push_array(arena, Struct, count) (Struct *)arena_push_zero(arena, (count) * sizeof(Struct))
 
 #define push_array_zero(arena, Struct, count) push_array(arena, Struct, count)
 
@@ -1134,18 +1161,18 @@ inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
 }
 #endif // COMPILER_MSVC
 
-static thread_local Arena thread_temporary_storage = {};
+static thread_local Arena *thread_temporary_storage;
 
 void thread_context_init(u64 temporary_storage_size) {
-    arena_init_from_memory(&thread_temporary_storage, temporary_storage_size);
+    thread_temporary_storage = arena_alloc_from_memory(temporary_storage_size);
 }
 
 void thread_context_free() {
-    arena_free(&thread_temporary_storage);
+    arena_free(thread_temporary_storage);
 }
 
 Arena *temp_arena() {
-    return &thread_temporary_storage;
+    return thread_temporary_storage;
 }
 
 void *talloc(u64 size) {
@@ -2220,7 +2247,7 @@ String string_from_string32(Arena *arena, String32 str) {
 }
 
 String16 string16_from_string(Arena *arena, String str) {
-    arena_set_alignment(arena, sizeof(u16));
+    arena_align(arena, sizeof(u16));
     u16 *data = push_array(arena, u16, str.count * 2 + 1);
 
     u16 *at = data;
@@ -3248,7 +3275,7 @@ na_internal WCHAR * win32_UTF16FromUTF8(Arena *arena, char *buffer)
         return NULL;
     }
 
-    arena_set_alignment(arena, sizeof(WCHAR));
+    arena_align(arena, sizeof(WCHAR));
     WCHAR *result = cast(WCHAR *)arena_push(arena, count * sizeof(WCHAR));
 
     if (!MultiByteToWideChar(CP_UTF8, 0, buffer, -1, result, count))
@@ -4206,7 +4233,7 @@ ALLOCATOR_PROC(arena_allocator_proc) {
 
     switch (mode) {
         case ALLOCATOR_MODE_ALLOC: {
-            return arena_alloc_aligned(arena, requested_size, alignment);
+            return arena_push_aligned(arena, requested_size, alignment);
         }
 
         // @Speed: make this check pointer locations and potentially just extend previous allocation?
@@ -4214,7 +4241,7 @@ ALLOCATOR_PROC(arena_allocator_proc) {
         case ALLOCATOR_MODE_RESIZE: {
             u64 actual_size = requested_size + na_align_offset(0, alignment);
 
-            void *result = arena_alloc_aligned(arena, actual_size, alignment);
+            void *result = arena_push_aligned(arena, actual_size, alignment);
 
             if (result && old_memory_pointer && mode == ALLOCATOR_MODE_RESIZE) {
                 memory_copy(old_memory_pointer, result, Min(requested_size, old_size));
