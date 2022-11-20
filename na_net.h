@@ -1,6 +1,6 @@
 /*
     na_net.h - v0.01
-    Nick Aversano's C++ networking library
+    Nick Aversano's C++ networking library for TCP/UDP and HTTP
 ===========================================================================
 
 LICENSE
@@ -17,24 +17,6 @@ VERSION HISTORY
 
 #ifndef NA_NET_H
 #define NA_NET_H
-
-//
-// TODO(nick):
-// - handle chunked responses
-// - replace `select` calls with Linux epoll / win32 / MacOS kqueue solution
-//
-
-#ifdef __cplusplus
-#define NET_EXPORT extern "C"
-#else
-#define NET_EXPORT
-#endif
-
-#if !defined(__cplusplus) && !defined(bool)
-#define bool  int
-#define true  1
-#define false 0
-#endif
 
 //
 // Simple HTTP Example:
@@ -139,6 +121,24 @@ VERSION HISTORY
     }
 
     return 0;
+#endif
+
+//
+// TODO(nick):
+// - handle chunked responses
+// - replace `select` calls with Linux epoll / win32 / MacOS kqueue solution
+//
+
+#ifdef __cplusplus
+#define NET_EXPORT extern "C"
+#else
+#define NET_EXPORT
+#endif
+
+#if !defined(__cplusplus) && !defined(bool)
+#define bool  int
+#define true  1
+#define false 0
 #endif
 
 
@@ -1205,6 +1205,7 @@ String http_content_type_from_extension(String ext)
     else if (string_equals(ext, S(".bin")))  { result = S("application/octet-stream"); }
     else if (string_equals(ext, S(".exe")))  { result = S("application/octet-stream"); }
     else if (string_equals(ext, S(".pdf")))  { result = S("application/pdf"); }
+    
     return result;
 }
 

@@ -2602,34 +2602,42 @@ na_internal Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
     return result;
 }
 
-static u64 win32_ticks_per_second = 0;
-static u64 win32_counter_offset = 0;
-
 bool os_init() {
     thread_context_init(gigabytes(1));
-
-    LARGE_INTEGER perf_frequency = {};
-    if (QueryPerformanceFrequency(&perf_frequency)) {
-        win32_ticks_per_second = perf_frequency.QuadPart;
-    }
-    LARGE_INTEGER perf_counter = {};
-    if (QueryPerformanceCounter(&perf_counter)) {
-        win32_counter_offset = perf_counter.QuadPart;
-    }
-
+    f64 os_time();
+    os_time();
     return true;
 }
 
-f64 os_time_in_miliseconds() {
+f64 os_time() {
+    static u64 win32_ticks_per_second = 0;
+    static u64 win32_counter_offset = 0;
+
+    if (win32_ticks_per_second == 0)
+    {
+        LARGE_INTEGER perf_frequency = {};
+        if (QueryPerformanceFrequency(&perf_frequency)) {
+            win32_ticks_per_second = perf_frequency.QuadPart;
+        }
+        LARGE_INTEGER perf_counter = {};
+        if (QueryPerformanceCounter(&perf_counter)) {
+            win32_counter_offset = perf_counter.QuadPart;
+        }
+    }
+
     f64 result = 0;
 
     LARGE_INTEGER perf_counter;
     if (QueryPerformanceCounter(&perf_counter)) {
         perf_counter.QuadPart -= win32_counter_offset;
-        result = (f64)(perf_counter.QuadPart * 1000) / win32_ticks_per_second;
+        result = (f64)(perf_counter.QuadPart) / win32_ticks_per_second;
     }
 
     return result;
+}
+
+f64 os_time_in_miliseconds() {
+    return os_time() * 1000;
 }
 
 Date_Time os_get_current_time_in_utc() {
@@ -3406,28 +3414,38 @@ void os_exit(i32 code)
 
 #define PATH_MAX 1024 // #include <sys/syslimits.h>
 
-static f64 macos_perf_frequency = 0;
-static f64 macos_perf_counter = 0;
-
 static pthread_key_t macos_thread_local_key;
 
 bool os_init() {
-    mach_timebase_info_data_t rate_nsec;
-    mach_timebase_info(&rate_nsec);
-
-    macos_perf_frequency = 1000000LL * rate_nsec.numer / rate_nsec.denom;
-    macos_perf_counter = mach_absolute_time();
-
     pthread_key_create(&macos_thread_local_key, NULL);
 
     thread_context_init(gigabytes(1));
 
+    f64 os_time();
+    os_time();
+
     return true;
 }
 
-f64 os_time_in_miliseconds() {
+f64 os_time() {
+    static f64 macos_perf_frequency_inverse = 0;
+    static f64 macos_perf_counter = 0;
+
+    if (macos_perf_counter == 0)
+    {
+        mach_timebase_info_data_t rate_nsec;
+        mach_timebase_info(&rate_nsec);
+
+        macos_perf_frequency_inverse = rate_nsec.denom / (1000000000LL * rate_nsec.numer);
+        macos_perf_counter = mach_absolute_time();
+    }
+
     f64 now = mach_absolute_time();
-    return (now - macos_perf_counter) / macos_perf_frequency;
+    return (now - macos_perf_counter) * macos_perf_frequency_inverse;
+}
+
+f64 os_time_in_miliseconds() {
+    return os_time() * 1000;
 }
 
 // @Incomplete: is this correct?

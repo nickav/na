@@ -6,6 +6,8 @@
 int main() {
   os_init();
 
+  print("Init time: %fs\n", os_time());
+
   print("Hello, Sailor!\n");
 
   print("\n");

@@ -20,7 +20,7 @@ VERSION HISTORY
 #ifndef NA_MATH_H
 #define NA_MATH_H
 
-// NOTE(nick): shared with nja.h
+// NOTE(nick): shared with na.h
 #ifndef NA_FUNCTIONS
 #define NA_FUNCTIONS
 
