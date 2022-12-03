@@ -9,7 +9,7 @@ project_root=$script_path
 # Config
 build_folder="$project_root/build"
 bin_folder="$project_root/bin"
-src_file="$project_root/src/main.cpp"
+src_file="$project_root/test/main.cpp"
 exe_name="na"
 
 flags="-std=c++11 -Wno-deprecated-declarations -Wno-int-to-void-pointer-cast -Wno-writable-strings -Wno-dangling-else -Wno-switch -Wno-undefined-internal"

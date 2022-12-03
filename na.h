@@ -2650,6 +2650,8 @@ f64 os_time() {
         if (QueryPerformanceCounter(&perf_counter)) {
             win32_counter_offset = perf_counter.QuadPart;
         }
+
+        assert(win32_ticks_per_second != 0);
     }
 
     f64 result = 0;
@@ -3443,19 +3445,20 @@ void os_exit(i32 code)
 
 static pthread_key_t macos_thread_local_key;
 
+f64 os_time();
+
 bool os_init() {
     pthread_key_create(&macos_thread_local_key, NULL);
 
     thread_context_init(gigabytes(1));
 
-    f64 os_time();
     os_time();
 
     return true;
 }
 
 f64 os_time() {
-    static f64 macos_perf_frequency_inverse = 0;
+    static f64 macos_perf_frequency = 0;
     static f64 macos_perf_counter = 0;
 
     if (macos_perf_counter == 0)
@@ -3463,12 +3466,12 @@ f64 os_time() {
         mach_timebase_info_data_t rate_nsec;
         mach_timebase_info(&rate_nsec);
 
-        macos_perf_frequency_inverse = rate_nsec.denom / (1000000000LL * rate_nsec.numer);
+        macos_perf_frequency = 1000000000LL * rate_nsec.numer / rate_nsec.denom;
         macos_perf_counter = mach_absolute_time();
     }
 
     f64 now = mach_absolute_time();
-    return (now - macos_perf_counter) * macos_perf_frequency_inverse;
+    return (now - macos_perf_counter) / macos_perf_frequency;
 }
 
 f64 os_time_in_miliseconds() {
@@ -5121,11 +5124,14 @@ i64 os_count_directory(String path) {
     char *cpath = string_to_cstr(arena, path);
 
     DIR *handle = opendir(cpath);
-    struct dirent *data = readdir(handle);
+    if (handle != NULL)
+    {
+        struct dirent *data = readdir(handle);
 
-    while (data) {
-        result += 1;
-        data = readdir(handle);
+        while (data) {
+            result += 1;
+            data = readdir(handle);
+        }
     }
     #endif
 

@@ -42,21 +42,6 @@ int main() {
 
     arena_reset(b);
     assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
-
-
-    #if 0
-    u8 *result = cast(u8 *)os_memory_reserve(kilobytes(16));
-    //result[0] = 42; // BOOM!
-    os_memory_commit(result, 2);
-    result[0] = 42;
-    result[1] = 42;
-
-    os_memory_commit(result + kilobytes(4) + 1, 2); // or no + 1
-    result[kilobytes(4) + 1] = 42; // BOOM!
-
-    os_memory_commit(result + kilobytes(4) + 2, kilobytes(4)); // or no + 1
-    result[kilobytes(8) + 2] = 42; // BOOM!
-    #endif
   }
 
   print("\n\n");
