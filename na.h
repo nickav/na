@@ -180,25 +180,25 @@ VERSION HISTORY
 #endif
 
 #if DEBUG
-#ifndef debug_breakpoint
+#ifndef DebugBreakpoint
     #if defined(_MSC_VER)
         #if _MSC_VER < 1300
-        #define debug_breakpoint() __asm int 3 /* Trap to debugger! */
+        #define DebugBreakpoint() __asm int 3 /* Trap to debugger! */
         #else
-        #define debug_breakpoint() __debugbreak()
+        #define DebugBreakpoint() __debugbreak()
         #endif
     #else
-        #define debug_breakpoint() __builtin_trap()
+        #define DebugBreakpoint() __builtin_trap()
     #endif
 #endif
 #else
-    #define debug_breakpoint()
+    #define DebugBreakpoint()
 #endif
 
 #ifndef assert
 #ifdef DEBUG
-    #ifndef assert_break
-    #define assert_break debug_breakpoint
+    #ifndef AssertBreak
+    #define AssertBreak DebugBreakpoint
     #endif
 
     void na_assert_handler(const char *prefix, const char *expr, const char *file, long int line, char *msg) {
@@ -212,7 +212,7 @@ VERSION HISTORY
         print("\n");
     }
 
-    #define assert(expr) do { if (!(expr)) { na_assert_handler("Assertion Failed", #expr, __FILE__, __LINE__, NULL); assert_break(); } } while (0)
+    #define assert(expr) do { if (!(expr)) { na_assert_handler("Assertion Failed", #expr, __FILE__, __LINE__, NULL); AssertBreak(); } } while (0)
 #else
     #define assert(...)
 #endif
@@ -313,9 +313,8 @@ VERSION HISTORY
 #define read_only
 #endif
 
-#ifndef FOUR_CC
-#define FOUR_CC(a, b, c, d) \
-    (((u32)(a) << 0) | ((u32)(b) << 8) | ((u32)(c) << 16) | ((u32)(d) << 24))
+#ifndef FourCC
+#define FourCC(a, b, c, d) (((u32)(a) << 0) | ((u32)(b) << 8) | ((u32)(c) << 16) | ((u32)(d) << 24))
 #endif
 
 #define Swap(Type, a, b) do { Type tmp = (a); (a) = (b); (b) = tmp; } while (0)
@@ -351,8 +350,8 @@ public:
 #define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
 #endif
 
-#ifndef set_flag
-#define set_flag(flags, mask, enable) do { if (enable) { flags |= (mask); } else { flags &= ~(mask); } } while(0)
+#ifndef SetFlag
+#define SetFlag(flags, mask, enable) do { if (enable) { flags |= (mask); } else { flags &= ~(mask); } } while(0)
 #endif
 
 //
