@@ -137,49 +137,49 @@ inline f32 unlerp(f32 a, f32 b, f32 v) {
 #define EPSILON_F32 (1.1920929e-7f)
 #define EPSILON_F64 (2.220446e-16)
 
-na_inline f32 sqrt_f32(f32 x) {
+force_inline f32 sqrt_f32(f32 x) {
   return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));
 }
 
-na_inline i32 round_i32(f32 x) {
+force_inline i32 round_i32(f32 x) {
   return (x >= 0) ? (i32)(x + 0.5) : (i32)(x - 0.5);
 }
 
-na_inline i64 round_i64(f64 x) {
+force_inline i64 round_i64(f64 x) {
   return (x >= 0) ? (i64)(x + 0.5) : (i64)(x - 0.5);
 }
 
-na_inline f32 round_f32(f32 x) { return (f32)round_i32(x); }
-na_inline f64 round_f64(f64 x) { return (f64)round_i64(x); }
+force_inline f32 round_f32(f32 x) { return (f32)round_i32(x); }
+force_inline f64 round_f64(f64 x) { return (f64)round_i64(x); }
 
-na_inline i32 floor_i32(f32 x) {
+force_inline i32 floor_i32(f32 x) {
   return (i32)x - (x < 0);
 }
 
-na_inline i64 floor_i64(f64 x) {
+force_inline i64 floor_i64(f64 x) {
   return (i64)x - (x < 0);
 }
 
-na_inline f32 floor_f32(f32 x) { return (f32)floor_i32(x); }
-na_inline f64 floor_f64(f64 x) { return (f64)floor_i64(x); }
+force_inline f32 floor_f32(f32 x) { return (f32)floor_i32(x); }
+force_inline f64 floor_f64(f64 x) { return (f64)floor_i64(x); }
 
-na_inline i32 ceil_i32(f32 x) {
+force_inline i32 ceil_i32(f32 x) {
   return (i32)(x + 1 - EPSILON_F64);
 }
 
-na_inline i64 ceil_i64(f64 x) {
+force_inline i64 ceil_i64(f64 x) {
   return (i64)(x + 1 - EPSILON_F64);
 }
 
-na_inline f32 ceil_f32(f32 x) { return (f32)ceil_i32(x); }
-na_inline f64 ceil_f64(f64 x) { return (f64)ceil_i64(x); }
+force_inline f32 ceil_f32(f32 x) { return (f32)ceil_i32(x); }
+force_inline f64 ceil_f64(f64 x) { return (f64)ceil_i64(x); }
 
 f32 mod_f32(f32 a, f32 b) {
   return a - (i32)(a / b) * b;
 }
 
 // fast sin function; maximum error is 0.001
-na_inline f32 sin_f32(f32 x) {
+force_inline f32 sin_f32(f32 x) {
   x = x * (1 / PI);
   i32 k = (i32)round_i32(x);
   x = x - k;
@@ -191,15 +191,15 @@ na_inline f32 sin_f32(f32 x) {
   return (k & 1) ? -y : y;
 }
 
-na_inline f32 cos_f32(f32 x) {
+force_inline f32 cos_f32(f32 x) {
   return sin_f32((PI / 2) - x);
 }
 
-na_inline f32 tan_f32(f32 x) {
+force_inline f32 tan_f32(f32 x) {
   return sin_f32(x) / cos_f32(x);
 }
 
-na_inline f32 atan2_f32(f32 y, f32 x) {
+force_inline f32 atan2_f32(f32 y, f32 x) {
   // http://pubs.opengroup.org/onlinepubs/009695399/functions/atan2.html
   // Volkan SALMA
 
@@ -219,7 +219,7 @@ na_inline f32 atan2_f32(f32 y, f32 x) {
   return y < 0 ? -angle : angle;
 }
 
-na_inline f32 acos_f32(f32 x) {
+force_inline f32 acos_f32(f32 x) {
   f32 negate = f32(x < 0);
   x = abs_f32(x);
   f32 ret = -0.0187293f;
@@ -238,19 +238,19 @@ na_inline f32 acos_f32(f32 x) {
 
 
 // @Incomplete: do we want to use these intrinsics?
-na_inline u32 round_f32_to_u32(f32 x) {
+force_inline u32 round_f32_to_u32(f32 x) {
   return cast(u32)_mm_cvtss_si32(_mm_set_ss(x));
 }
 
-na_inline f32 lengthdir_x(f32 length, f32 angle) {
+force_inline f32 lengthdir_x(f32 length, f32 angle) {
   return cos_f32(angle) * length;
 }
 
-na_inline f32 lengthdir_y(f32 length, f32 angle) {
+force_inline f32 lengthdir_y(f32 length, f32 angle) {
   return -sin_f32(angle) * length;
 }
 
-na_inline f32 snap(f32 value, f32 grid) {
+force_inline f32 snap(f32 value, f32 grid) {
   return round_f32(value / grid) * grid;
 }
 
@@ -561,19 +561,19 @@ inline Vector2i &operator*=(Vector2i &a, f32 b) {
 // Vector2
 //
 
-na_inline Vector2 make_vector2(f32 x, f32 y) {
+force_inline Vector2 make_vector2(f32 x, f32 y) {
   return {x, y};
 }
 
-na_inline Vector2 make_vector2(Vector2 v) {
+force_inline Vector2 make_vector2(Vector2 v) {
   return {v.x, v.y};
 }
 
-na_inline Vector2 make_vector2(Vector2u v) {
+force_inline Vector2 make_vector2(Vector2u v) {
   return {cast(f32)v.x, cast(f32)v.y};
 }
 
-na_inline Vector2 make_vector2(Vector2i v) {
+force_inline Vector2 make_vector2(Vector2i v) {
   return {cast(f32)v.x, cast(f32)v.y};
 }
 
@@ -661,19 +661,19 @@ inline Vector2 clamp(Vector2 a, Vector2 min, Vector2 max) {
   return {clamp(a.x, min.x, max.x), clamp(a.y, min.y, max.y)};
 }
 
-na_inline f32 angle_between(Vector2 p0, Vector2 p1) {
+force_inline f32 angle_between(Vector2 p0, Vector2 p1) {
   return atan2(p1.y - p0.y, p1.x - p0.x);
 }
 
-na_inline f32 direction(Vector2 p0) {
+force_inline f32 direction(Vector2 p0) {
   return -atan2(-p0.y, p0.x);
 }
 
-na_inline f32 distance(Vector2 p0, Vector2 p1) {
+force_inline f32 distance(Vector2 p0, Vector2 p1) {
   return length(p0 - p1);
 }
 
-na_inline f32 distance_squared(Vector2 p0, Vector2 p1) {
+force_inline f32 distance_squared(Vector2 p0, Vector2 p1) {
   return length_squared(p0 - p1);
 }
 #endif
@@ -890,27 +890,27 @@ inline Vector3i &operator+=(Vector3i &a, Vector3i b) {
 // Vector4
 //
 
-na_inline Vector4 make_vector4(f32 x, f32 y, f32 z, f32 w) {
+force_inline Vector4 make_vector4(f32 x, f32 y, f32 z, f32 w) {
   return {x, y, z, w};
 }
 
-na_inline Vector4 make_vector4(Vector2 v, f32 z, f32 w) {
+force_inline Vector4 make_vector4(Vector2 v, f32 z, f32 w) {
   return {v.x, v.y, z, w};
 }
 
-na_inline Vector4 make_vector4(Vector2 a, Vector2 b) {
+force_inline Vector4 make_vector4(Vector2 a, Vector2 b) {
   return {a.x, a.y, b.x, b.y};
 }
 
-na_inline Vector4 make_vector4(Vector3 v, f32 w) {
+force_inline Vector4 make_vector4(Vector3 v, f32 w) {
   return {v.x, v.y, v.z, w};
 }
 
-na_inline Vector4 make_vector4(Vector4 v, f32 w) {
+force_inline Vector4 make_vector4(Vector4 v, f32 w) {
   return {v.x, v.y, v.z, w};
 }
 
-na_inline Vector4 make_vector4(Rectangle2 r) {
+force_inline Vector4 make_vector4(Rectangle2 r) {
   return *cast(Vector4 *)&r;
 }
 
@@ -919,23 +919,23 @@ inline bool vector4_equals(Vector4 a, Vector4 b) {
 }
 
 
-na_inline f32 dot(Vector4 a, Vector4 b) {
+force_inline f32 dot(Vector4 a, Vector4 b) {
   return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
 }
 
-na_inline Vector4 hadamard(Vector4 a, Vector4 b) {
+force_inline Vector4 hadamard(Vector4 a, Vector4 b) {
   return {a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w};
 }
 
-na_inline f32 length_squared(Vector4 a) {
+force_inline f32 length_squared(Vector4 a) {
   return dot(a, a);
 }
 
-na_inline f32 length(Vector4 a) {
+force_inline f32 length(Vector4 a) {
   return sqrt_f32(length_squared(a));
 }
 
-na_inline Vector4 normalize(Vector4 a) {
+force_inline Vector4 normalize(Vector4 a) {
   f32 f = 1.0f / length(a);
   return {
     a.x * f,
@@ -945,7 +945,7 @@ na_inline Vector4 normalize(Vector4 a) {
   };
 }
 
-na_inline Vector4 lerp(Vector4 a, Vector4 b, f32 t) {
+force_inline Vector4 lerp(Vector4 a, Vector4 b, f32 t) {
   return {
     lerp(a.x, b.x, t),
     lerp(a.y, b.y, t),
@@ -999,7 +999,7 @@ Rectangle2 make_rectangle2(Vector2 min, Vector2 max) {
   return {min, max};
 }
 
-na_inline Rectangle2 make_rectangle2(Vector4 v) {
+force_inline Rectangle2 make_rectangle2(Vector4 v) {
   return *cast(Rectangle2 *)&v;
 }
 
@@ -1020,10 +1020,10 @@ Vector2 rect_center(Rectangle2 r) {
   return {r.x0 + size.x / 2, r.y0 + size.y / 2};
 }
 
-na_inline f32 width(Rectangle2 r) { return rect_width(r); }
-na_inline f32 height(Rectangle2 r) { return rect_height(r); }
-na_inline Vector2 size(Rectangle2 r) { return rect_size(r); }
-na_inline Vector2 center(Rectangle2 r) { return rect_center(r); }
+force_inline f32 width(Rectangle2 r) { return rect_width(r); }
+force_inline f32 height(Rectangle2 r) { return rect_height(r); }
+force_inline Vector2 size(Rectangle2 r) { return rect_size(r); }
+force_inline Vector2 center(Rectangle2 r) { return rect_center(r); }
 
 bool rect_contains(Vector2 rp0, Vector2 rp1, Vector2 p) {
   return (p.x >= rp0.x && p.x < rp1.x && p.y >= rp0.y && p.y < rp1.y);
@@ -1095,12 +1095,12 @@ inline Rectangle2 operator+(Vector2 b, Rectangle2 a) {
 // Matrix4
 //
 
-na_inline Vector4 matrix4_col(Matrix4 &it, u32 i) {
+force_inline Vector4 matrix4_col(Matrix4 &it, u32 i) {
   assert(i >= 0 && i < 4);
   return {it.e[0][i], it.e[1][i], it.e[2][i], it.e[3][i]};
 }
 
-na_inline Matrix4 matrix4_identity() {
+force_inline Matrix4 matrix4_identity() {
   return {{
     {1, 0, 0, 0},
     {0, 1, 0, 0},
@@ -1381,7 +1381,7 @@ inline Matrix4 orthographic_proj(f32 aspect_width_over_height, f32 near_clip_pla
   }};
 }
 
-na_inline Matrix4 orthographic_proj2d(f32 left, f32 right, f32 bottom, f32 top, f32 zNear = -1.0f, f32 zFar = 1.0f) {
+force_inline Matrix4 orthographic_proj2d(f32 left, f32 right, f32 bottom, f32 top, f32 zNear = -1.0f, f32 zFar = 1.0f) {
   Matrix4 result = matrix4_identity();
   result.e[0][0] = f32(2) / (right - left);
   result.e[1][1] = f32(2) / (top - bottom);
@@ -1530,14 +1530,14 @@ inline String to_string(Quaternion a) {
 // Packing
 //
 
-na_inline u32 vector2_pack_u32(Vector2 unpacked) {
+force_inline u32 vector2_pack_u32(Vector2 unpacked) {
   return (
     (round_f32_to_u32(unpacked.y * U16_MAX) << 16) |
     (round_f32_to_u32(unpacked.x * U16_MAX) << 0)
   );
 }
 
-na_inline u32 vector4_pack_u32(Vector4 unpacked) {
+force_inline u32 vector4_pack_u32(Vector4 unpacked) {
   // @Speed: this could be made wide
   // @Cleanup: make some math functions for these
   //unpacked *= 255.0f;

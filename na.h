@@ -230,15 +230,15 @@ VERSION HISTORY
 #define StaticAssert(expr) static_assert(expr, "")
 #endif
 
-#ifndef na_inline
+#ifndef force_inline
     #if defined(__GNUC__) && (__GNUC__ >= 4)
-        #define na_inline __attribute__((always_inline)) inline
+        #define force_inline __attribute__((always_inline)) inline
     #elif defined(__llvm__)
-        #define na_inline __attribute__((always_inline)) inline
+        #define force_inline __attribute__((always_inline)) inline
     #elif defined(_MSC_VER)
-        #define na_inline __forceinline
+        #define force_inline __forceinline
     #else
-        #define na_inline inline
+        #define force_inline inline
     #endif
 #endif
 
@@ -246,13 +246,13 @@ VERSION HISTORY
     #define na_extern extern "C"
 #endif
 
-#ifndef na_dll_export
+#ifndef dll_export
 #if defined(_WIN32)
-    #define na_dll_export na_extern __declspec(dllexport)
-    #define na_dll_import na_extern __declspec(dllimport)
+    #define dll_export na_extern __declspec(dllexport)
+    #define dll_import na_extern __declspec(dllimport)
 #else
-    #define na_dll_export na_extern __attribute__((visibility("default")))
-    #define na_dll_import na_extern
+    #define dll_export na_extern __attribute__((visibility("default")))
+    #define dll_import na_extern
 #endif
 #endif
 
@@ -290,17 +290,10 @@ VERSION HISTORY
 #define align_of(Type) ((isize)alignof(Type))
 #endif
 
-#ifndef na_global
-#define na_global        static // Global variables
-#define na_internal      static // Internal linkage
-#define na_local_persist static // Local Persisting variables
-#endif
-
 #ifndef global
 #define global        static // Global variables
-// @Cleanup: this causes problems on MacOS
-// #define internal      static // Internal linkage
-#define local_persist static // Local Persisting variables
+#define local         static // Local Persisting variables
+#define function      static // Internal linkage
 #endif
 
 #define fallthrough
@@ -1256,31 +1249,31 @@ enum
 
 #define LIT(str) (int)str.count, (char *)str.data
 
-na_inline bool char_is_alpha(char ch) {
+force_inline bool char_is_alpha(char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
 }
 
-na_inline bool char_is_digit(char ch) {
+force_inline bool char_is_digit(char ch) {
     return ch >= '0' && ch <= '9';
 }
 
-na_inline bool char_is_whitespace(char ch) {
+force_inline bool char_is_whitespace(char ch) {
     return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
 }
 
-na_inline bool char_is_lower(char ch) {
+force_inline bool char_is_lower(char ch) {
     return ch >= 'a' && ch <= 'z';
 }
 
-na_inline bool char_is_upper(char ch) {
+force_inline bool char_is_upper(char ch) {
     return ch >= 'A' && ch <= 'Z';
 }
 
-na_inline char char_to_upper(char ch) {
+force_inline char char_to_upper(char ch) {
     return ch >= 'a' && ch <= 'z' ? ch - ('a' - 'A') : ch;
 }
 
-na_inline char char_to_lower(char ch) {
+force_inline char char_to_lower(char ch) {
     return ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch;
 }
 
@@ -1886,7 +1879,7 @@ String path_join(Arena *arena, String path1, String path2) {
     return string_print(arena, "%.*s/%.*s", path1.count, path1.data, path2.count, path2.data);
 }
 
-na_inline String path_join(String path1, String path2) {
+force_inline String path_join(String path1, String path2) {
     return path_join(temp_arena(), path1, path2);
 }
 
@@ -1901,7 +1894,7 @@ String path_join(Arena *arena, String path1, String path2, String path3) {
     return string_print(arena, "%.*s/%.*s/%.*s", path1.count, path1.data, path2.count, path2.data, path3.count, path3.data);
 }
 
-na_inline String path_join(String path1, String path2, String path3) {
+force_inline String path_join(String path1, String path2, String path3) {
     return path_join(temp_arena(), path1, path2, path3);
 }
 
@@ -2598,7 +2591,7 @@ struct File_Lister {
     WIN32_FIND_DATAW data;
 };
 
-na_internal Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
+function Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
     Date_Time result = {};
 
     result.year = in->wYear;
@@ -2612,7 +2605,7 @@ na_internal Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
     return result;
 }
 
-na_internal SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
+function SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
     SYSTEMTIME result = {};
 
     result.wYear = in->year;
@@ -2626,7 +2619,7 @@ na_internal SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
     return result;
 }
 
-na_internal Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
+function Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
     SYSTEMTIME system_time = {};
     FileTimeToSystemTime(file_time, &system_time);
     Date_Time date_time = win32_date_time_from_system_time(&system_time);
@@ -3009,7 +3002,7 @@ String string_from_wstr(Arena *arena, WCHAR *wstr) {
 }
 
 
-na_internal u32 win32_flags_from_attributes(DWORD attributes) {
+function u32 win32_flags_from_attributes(DWORD attributes) {
     u32 result = 0;
 
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
@@ -3027,7 +3020,7 @@ na_internal u32 win32_flags_from_attributes(DWORD attributes) {
     return result;
 }
 
-na_internal u32 win32_access_from_attributes(DWORD attributes) {
+function u32 win32_access_from_attributes(DWORD attributes) {
     u32 result = FileAccess_Read | FileAccess_Execute;
 
     if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
@@ -3255,7 +3248,7 @@ String os_get_current_directory() {
     return result;
 }
 
-na_internal char * win32_UTF8FromUTF16(Arena *arena, WCHAR *buffer)
+function char * win32_UTF8FromUTF16(Arena *arena, WCHAR *buffer)
 {
     int size = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
     if (!size)
@@ -3274,7 +3267,7 @@ na_internal char * win32_UTF8FromUTF16(Arena *arena, WCHAR *buffer)
     return result;
 }
 
-na_internal WCHAR * win32_UTF16FromUTF8(Arena *arena, char *buffer)
+function WCHAR * win32_UTF16FromUTF8(Arena *arena, char *buffer)
 {
     int count = MultiByteToWideChar(CP_UTF8, 0, buffer, -1, NULL, 0);
     if (!count)
@@ -3722,12 +3715,12 @@ bool os_file_rename(String from, String to) {
     return rename(from_cstr, to_cstr) == 0;
 }
 
-na_internal u64 unix_date_from_time(time_t time) {
+function u64 unix_date_from_time(time_t time) {
     // @Incomplete
     return cast(u64)time;
 }
 
-na_internal u32 unix_flags_from_mode(mode_t mode, String name) {
+function u32 unix_flags_from_mode(mode_t mode, String name) {
     u32 result = 0;
 
     if (S_ISDIR(mode)) {
@@ -3748,7 +3741,7 @@ na_internal u32 unix_flags_from_mode(mode_t mode, String name) {
     return result;
 }
 
-na_internal u32 unix_access_from_mode(mode_t mode) {
+function u32 unix_access_from_mode(mode_t mode) {
     u32 result = FileAccess_Read | FileAccess_Execute;
 
     // @Incomplete
@@ -5041,15 +5034,15 @@ String os_get_executable_directory() {
     return path_dirname(result);
 }
 
-na_inline bool file_exists(File_Info info) { return info.name.count > 0; }
+force_inline bool file_exists(File_Info info) { return info.name.count > 0; }
 
-na_inline bool file_is_directory(File_Info info) { return (info.flags & File_IsDirectory) != 0; }
-na_inline bool file_is_hidden(File_Info info)    { return (info.flags & File_IsHidden) != 0; }
-na_inline bool file_is_system(File_Info info)    { return (info.flags & File_IsSystem) != 0; }
+force_inline bool file_is_directory(File_Info info) { return (info.flags & File_IsDirectory) != 0; }
+force_inline bool file_is_hidden(File_Info info)    { return (info.flags & File_IsHidden) != 0; }
+force_inline bool file_is_system(File_Info info)    { return (info.flags & File_IsSystem) != 0; }
 
-na_inline bool file_is_directory(File_Info *info) { return (info->flags & File_IsDirectory) != 0; }
-na_inline bool file_is_hidden(File_Info *info)    { return (info->flags & File_IsHidden) != 0; }
-na_inline bool file_is_system(File_Info *info)    { return (info->flags & File_IsSystem) != 0; }
+force_inline bool file_is_directory(File_Info *info) { return (info->flags & File_IsDirectory) != 0; }
+force_inline bool file_is_hidden(File_Info *info)    { return (info->flags & File_IsHidden) != 0; }
+force_inline bool file_is_system(File_Info *info)    { return (info->flags & File_IsSystem) != 0; }
 
 
 bool os_delete_entire_directory(String path) {
@@ -5519,7 +5512,7 @@ void mutex_destroy(Mutex *mutex) {
 #endif // OS_MACOS
 
 
-na_internal bool do_next_work_queue_entry(Work_Queue *queue) {
+function bool do_next_work_queue_entry(Work_Queue *queue) {
     bool we_should_sleep = false;
 
     u32 original_next_entry_to_read = queue->next_entry_to_read;
@@ -5541,7 +5534,7 @@ na_internal bool do_next_work_queue_entry(Work_Queue *queue) {
     return we_should_sleep;
 }
 
-na_internal u32 worker_thread_proc(void *data) {
+function u32 worker_thread_proc(void *data) {
     Worker_Params *params = (Worker_Params *)data;
     Work_Queue *queue = params->queue;
 
