@@ -356,19 +356,6 @@ public:
 #endif
 
 //
-// Build Constants
-// @Cleanup: move these elsewhere? :0
-//
-
-#ifndef DEBUG
-#define DEBUG 0
-#endif
-
-#ifndef SHIP_MODE
-#define SHIP_MODE 0
-#endif
-
-//
 // Types
 //
 
@@ -441,6 +428,41 @@ StaticAssert(sizeof(u8)  == 1);
 StaticAssert(sizeof(u16) == 2);
 StaticAssert(sizeof(u32) == 4);
 StaticAssert(sizeof(u64) == 8);
+
+//
+// Linked List Helpers
+//
+
+#define IsZero(x) (x==0)
+
+#define DLLPushBack_NPZ(f,l,n,next,prev,zcheck) (zcheck(f) ? (f)=(l)=(n), ((n)->next=(n)->prev=0) : ((n)->prev=(l), (l)->next=(n), (l)=(n), (n)->next=0))
+#define DLLPushBack_NP(f,l,n,next,prev) DLLPushBack_NPZ(f,l,n,next,prev,IsZero)
+#define DLLPushBack(f,l,n) DLLPushBack_NPZ(f,l,n,next,prev,IsZero)
+
+#define DLLPushFront(f,l,n) DLLPushBack_NPZ(l,f,n,prev,next,IsZero)
+
+#define DLLRemove_NP(f,l,n,next,prev) ((f)==(n)?\
+((f)==(l) ? ((f)=(l)=(0)) : ((f)=(f)->next,(f)->prev=0)):\
+((l)==(n) ? ((l)=(l)->prev,(l)->next=0) : ((n)->next->prev=(n)->prev, (n)->prev->next=(n)->next)))
+#define DLLRemove(f,l,n) DLLRemove_NP(f,l,n,next,prev)
+
+#define SLLQueuePushBack_NZ(f,l,n,next,zcheck) (zcheck(f) ? ((f)=(l)=(n), (n)->next=0) : ((l)->next=(n), (n)->next=0, (l)=(n)))
+#define SLLQueuePushBack_N(f,l,n,next) SLLQueuePushBack_NZ(f,l,n,next,IsZero)
+#define SLLQueuePushBack(f,l,n) SLLQueuePushBack_NZ(f,l,n,next,IsZero)
+
+#define SLLQueuePushFront_NZ(f,l,n,next,zcheck) (zcheck(f) ? ((f)=(l)=(n), (n)->next=0) : ((n)->next=(f), (f)=(n)))
+#define SLLQueuePushFront_N(f,l,n,next) SLLQueuePushFront_NZ(f,l,n,next,IsZero)
+#define SLLQueuePushFront(f,l,n) SLLQueuePushFront_NZ(f,l,n,next,IsZero)
+
+#define SLLQueuePop_N(f,l,next) ((f)==(l) ? (f)=(l)=0 : (f)=(f)->next)
+#define SLLQueuePop(f,l) SLLQueuePop_N(f,l,next)
+
+#define SLLStackPush_N(f,n,next) ((n)->next=(f), (f)=(n))
+#define SLLStackPush(f,n) SLLStackPush_N(f,n,next)
+
+#define SLLStackPop_NZ(f,next,zcheck) (zcheck(f) ? 0 : (f)=(f)->next)
+#define SLLStackPop_N(f,next) SLLStackPop_NZ(f,next,IsZero)
+#define SLLStackPop(f) SLLStackPop_NZ(f,next,IsZero)
 
 //
 // Helpers
@@ -1642,22 +1664,6 @@ String string_eat_until(String *str, String token) {
 String string_eat_until_newline(String *str)
 {
     return string_eat_until(str, S("\n"));
-}
-
-void string_strip_nulls(String *str) {
-    for (i64 i = 0; i < str->count; i ++)
-    {
-        if (str->data[i] == '\0')
-        {
-            i64 run_count = 1;
-            while(str->data[i + run_count] == '\0') {
-                run_count += 1;
-            }
-
-            memory_move(str->data + i + run_count, str->data + i, str->count - (i + run_count));
-            str->count -= run_count;
-        }
-    }
 }
 
 String string_printv(Arena *arena, const char *format, va_list args) {

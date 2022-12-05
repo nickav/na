@@ -3,6 +3,15 @@
 
 #include <stdlib.h>
 
+
+struct Node {
+  int data;
+
+  Node *next;
+  Node *prev;
+};
+
+
 int main() {
   os_init();
 
@@ -10,18 +19,9 @@ int main() {
 
   print("Hello, Sailor!\n");
 
-  print("\n");
+  print("\n\n");
   print("Arena:\n");
   {
-    #if 0
-    Arena a = arena_create_from_allocator(os_allocator(), 1024); 
-
-    void *ptr1 = arena_alloc(&a, 32);
-    print("ptr1: %p\n", ptr1);
-    assert(a.offset == 32);
-
-    print("\n");
-    #endif
     print("Virtual Memory:\n");
 
     Arena *b = arena_alloc_from_memory(gigabytes(2));
@@ -170,12 +170,107 @@ int main() {
     print("%.*s\n", LIT(result));
   }
 
-  print("time in ms: %f\n", os_time_in_miliseconds());
+  print("\n\n");
+  print("Linked List Helpers:\n");
+  {
+    Node *sll_first = NULL;
+    Node *sll_last = NULL;
 
-  auto dir = S("C:/Windows/System32");
-  os_scan_directory(temp_allocator(), dir);
+    Node n1 = {4};
+    SLLQueuePushBack(sll_first, sll_last, &n1);
 
-  print("time in ms: %f\n", os_time_in_miliseconds());
+    Node n2 = {2};
+    SLLQueuePushBack(sll_first, sll_last, &n2);
 
+    Node n3 = {42};
+    SLLQueuePushFront(sll_first, sll_last, &n3);
+
+    print("linked list items: ");
+    {
+      Node *it = sll_first;
+      while (it != NULL) {
+        print("%d, ", it->data);
+        it = it->next;
+      }
+    }
+    print("\n");
+
+    SLLQueuePop(sll_first, sll_last);
+    SLLQueuePop(sll_first, sll_last);
+    SLLQueuePop(sll_first, sll_last);
+    assert(sll_first == 0);
+
+
+    Node *dll_first = NULL;
+    Node *dll_last = NULL;
+
+    Node d1 = {55};
+    DLLPushBack(dll_first, dll_last, &d1);
+
+    Node d2 = {511};
+    DLLPushBack(dll_first, dll_last, &d2);
+
+    Node d3 = {5199};
+    DLLPushBack(dll_first, dll_last, &d3);
+
+    Node d4 = {59192};
+    DLLPushBack(dll_first, dll_last, &d4);
+
+    print("doubly-linked list items (forwards): ");
+    {
+      Node *it = dll_first;
+      while (it != NULL) {
+        print("%d, ", it->data);
+        it = it->next;
+      }
+    }
+    print("\n");
+
+    DLLRemove(dll_first, dll_last, &d2);
+
+    print("doubly-linked list items (backwards): ");
+    {
+      Node *it = dll_last;
+      while (it != NULL) {
+        print("%d, ", it->data);
+        it = it->prev;
+      }
+    }
+    print("\n");
+
+    DLLRemove(dll_first, dll_last, &d1);
+    DLLRemove(dll_first, dll_last, &d3);
+    DLLRemove(dll_first, dll_last, &d4);
+    assert(dll_first == 0);
+
+
+    Node *stack = 0;
+
+    Node s1 = {99};
+    SLLStackPush(stack, &s1);
+
+    Node s2 = {7};
+    SLLStackPush(stack, &s2);
+
+    Node s3 = {2};
+    SLLStackPush(stack, &s3);
+
+    print("stack items: ");
+    {
+      Node *it = stack;
+      while (it != NULL) {
+        print("%d, ", it->data);
+        it = it->next;
+      }
+    }
+    print("\n");
+
+    SLLStackPop(stack);
+    SLLStackPop(stack);
+    SLLStackPop(stack);
+    assert(stack == 0);
+  }
+
+  print("Done! time in ms: %f\n", os_time_in_miliseconds());
   return 0;
 }
