@@ -322,25 +322,27 @@ VERSION HISTORY
 #define STRINGIFY(x) STRINGIFY2(x)
 #endif
 
-#ifndef defer
-// Defer macro/thing.
-template<typename T>
-struct ExitScope {
-    T lambda;
-    ExitScope(T lambda) : lambda(lambda) {}
-    ~ExitScope() { lambda(); }
-    ExitScope(const ExitScope&);
-private:
-    ExitScope& operator =(const ExitScope&);
-};
-
-class ExitScopeHelp {
-public:
+#if LANG_CPP
+    #ifndef defer
+    // Defer macro/thing.
     template<typename T>
-    ExitScope<T> operator+(T t) { return t; }
-};
+    struct ExitScope {
+        T lambda;
+        ExitScope(T lambda) : lambda(lambda) {}
+        ~ExitScope() { lambda(); }
+        ExitScope(const ExitScope&);
+    private:
+        ExitScope& operator =(const ExitScope&);
+    };
 
-#define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
+    class ExitScopeHelp {
+    public:
+        template<typename T>
+        ExitScope<T> operator+(T t) { return t; }
+    };
+
+    #define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
+    #endif
 #endif
 
 #ifndef SetFlag
@@ -356,7 +358,17 @@ public:
 #endif
 
 #ifndef null
-    #define null nullptr
+    #if LANG_C
+        #define null 0
+    #else
+        #define null nullptr
+    #endif
+#endif
+
+#if LANG_C
+#define true 1
+#define false 0
+typedef int bool;
 #endif
 
 typedef uint8_t   u8;
@@ -764,7 +776,9 @@ void memory_swap(void *i, void *j, isize size) {
 // Arenas
 //
 
-enum Allocator_Mode {
+typedef u32 Allocator_Mode;
+enum
+{
     ALLOCATOR_MODE_ALLOC    = 0,
     ALLOCATOR_MODE_RESIZE   = 1,
     ALLOCATOR_MODE_FREE     = 2,
@@ -774,7 +788,9 @@ enum Allocator_Mode {
 #define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data, u32 alignment)
 typedef ALLOCATOR_PROC(Allocator_Proc);
 
-struct Allocator {
+typedef struct Allocator Allocator;
+struct Allocator
+{
     Allocator_Proc *proc;
     void *data;
 };
@@ -815,26 +831,30 @@ bool os_release(void *ptr, u64 size);
 #define ARENA_RELEASE os_release
 #endif
 
-struct Arena {
+typedef struct Arena Arena;
+struct Arena
+{
     u8 *data;
     u64 offset;
     u64 size;
     u64 commit_position;
 };
 
-struct Arena_Mark {
+typedef struct Arena_Mark Arena_Mark;
+struct Arena_Mark
+{
     u64 offset;
 };
 
 Arena arena_make(u8 *data, u64 size) {
-    Arena result = {};
+    Arena result = {0};
     result.data = data;
     result.size = size;
     return result;
 }
 
 void arena_init(Arena *arena, u8 *data, u64 size) {
-    *arena = {};
+    memory_zero(arena, sizeof(Arena));
     arena->data = data;
     arena->size = size;
     arena->commit_position = U64_MAX;
@@ -984,7 +1004,6 @@ bool arena_write(Arena *arena, u8 *data, u64 size) {
     return result;
 }
 
-
 #define push_struct(arena, Struct) (Struct *)arena_push_zero(arena, sizeof(Struct))
 
 #define push_array(arena, Struct, count) (Struct *)arena_push_zero(arena, (count) * sizeof(Struct))
@@ -992,7 +1011,7 @@ bool arena_write(Arena *arena, u8 *data, u64 size) {
 #define push_array_zero(arena, Struct, count) push_array(arena, Struct, count)
 
 Arena_Mark arena_get_position(Arena *arena) {
-    Arena_Mark result = {};
+    Arena_Mark result = {0};
     result.offset = arena->offset;
     return result;
 }
@@ -1208,13 +1227,15 @@ void reset_temporary_storage() {
     arena_reset(temp_arena());
 }
 
-struct Scratch_Memory {
+typedef struct Scratch_Memory Scratch_Memory;
+struct Scratch_Memory
+{
     Arena *arena;
     Arena_Mark restore_point;
 };
 
 Scratch_Memory begin_scratch_memory() {
-    Scratch_Memory result = {};
+    Scratch_Memory result = {0};
 
     Arena *arena = temp_arena();
 
@@ -1233,14 +1254,18 @@ void end_scratch_memory(Scratch_Memory scratch) {
 // String
 //
 
-struct String {
+typedef struct String String;
+struct String
+{
     i64 count;
     u8 *data;
 
+    #if LANG_CPP
     u8 &operator[](i64 i) {
         assert(i >= 0 && i < count);
         return data[i];
     }
+    #endif
 };
 
 typedef u32 Match_Flags;
@@ -1252,7 +1277,7 @@ enum
     MatchFlags_RightSideSloppy = 1 << 2,
 };
 
-#define S(x) String{sizeof(x) - 1, cast(u8 *)x}
+#define S(x) ((String){sizeof(x) - 1, cast(u8 *)x})
 
 #define LIT(str) (int)str.count, (char *)str.data
 
@@ -1285,11 +1310,7 @@ force_inline char char_to_lower(char ch) {
 }
 
 String make_string(u8 *data, i64 count) {
-    return String{count, cast(u8 *)data};
-}
-
-String make_string(char *data, i64 count) {
-    return String{count, cast(u8 *)data};
+    return (String){count, cast(u8 *)data};
 }
 
 char *string_to_cstr(Arena *arena, String str) {
@@ -1301,10 +1322,6 @@ char *string_to_cstr(Arena *arena, String str) {
     memory_copy(str.data, result, str.count);
     result[str.count] = 0;
     return result;
-}
-
-char *string_to_cstr(String str) {
-    return string_to_cstr(temp_arena(), str);
 }
 
 i64 cstr_length(char *str) {
@@ -1330,11 +1347,11 @@ bool cstr_equals(char *a, char *b) {
 }
 
 String string_from_cstr(char *data) {
-    String result = {};
+    String result = {0};
     i64 length = cstr_length(data);
 
     if (length > 0) {
-        result = String{(i64)length, (u8 *)data};
+        result = (String){(i64)length, (u8 *)data};
     }
 
     return result;
@@ -1397,10 +1414,6 @@ String string_slice(String str, i64 start_index, i64 end_index) {
     return make_string(str.data + start_index, end_index - start_index);
 }
 
-String string_slice(String str, i64 start_index) {
-    return string_slice(str, start_index, str.count);
-}
-
 String string_skip(String str, i64 offset) {
     return string_slice(str, offset, str.count);
 }
@@ -1422,7 +1435,7 @@ String string_range(u8 *at, u8 *end) {
     return make_string(at, (end - at));
 }
 
-i64 string_find(String str, String search, i64 start_index = 0, Match_Flags flags = 0)
+i64 string_find(String str, String search, i64 start_index, Match_Flags flags)
 {
     i64 result = str.count;
 
@@ -1440,7 +1453,7 @@ i64 string_find(String str, String search, i64 start_index = 0, Match_Flags flag
     return result;
 }
 
-i64 string_index(String str, String search, i64 start_index = 0) {
+i64 string_index(String str, String search, i64 start_index) {
     for (i64 i = start_index; i < str.count; i += 1) {
         if (memory_equals(str.data + i, search.data, search.count)) {
             return i;
@@ -1450,7 +1463,7 @@ i64 string_index(String str, String search, i64 start_index = 0) {
     return -1;
 }
 
-i64 string_index(String str, char search, i64 start_index = 0) {
+i64 string_char_index(String str, char search, i64 start_index) {
     return string_index(str, make_string(&search, 1), start_index);
 }
 
@@ -1466,10 +1479,10 @@ i64 string_last_index(String str, String search) {
 }
 
 bool string_contains(String str, String search) {
-    return string_index(str, search) >= 0;
+    return string_index(str, search, 0) >= 0;
 }
 
-i64 string_count_occurances(String str, String search, i64 start_index = 0) {
+i64 string_count_occurances(String str, String search, i64 start_index) {
     i64 result = 0;
 
     for (i64 i = start_index; i < str.count; i += 1) {
@@ -1485,7 +1498,7 @@ i64 string_count_occurances(String str, String search, i64 start_index = 0) {
 #define push_string_copy string_copy
 
 String string_copy(Arena *arena, String other) {
-    String copy = {};
+    String copy = {0};
     u8 *data = push_array(arena, u8, other.count);
 
     if (data) {
@@ -1498,9 +1511,9 @@ String string_copy(Arena *arena, String other) {
 
 String string_temp(String other) { return string_copy(temp_arena(), other); }
 
-String string_write(String str, char *buffer, u64 limit)
+String string_write(String str, u8 *buffer, u64 limit)
 {
-    String result = {};
+    String result = {0};
 
     if (str.count && buffer)
     {
@@ -1513,10 +1526,6 @@ String string_write(String str, char *buffer, u64 limit)
     return result;
 }
 
-String string_write(String str, u8 *buffer, u64 limit) {
-    return string_write(str, (char *)buffer, limit);
-}
-
 String string_push(Arena *arena, i64 count)
 {
     u8 *buffer = push_array(arena, u8, count);
@@ -1524,7 +1533,7 @@ String string_push(Arena *arena, i64 count)
 }
 
 String string_alloc(Allocator allocator, String other) {
-    String copy = {};
+    String copy = {0};
     u8 *data = cast(u8 *)allocator_alloc(allocator, sizeof(u8) * other.count);
 
     if (data) {
@@ -1555,7 +1564,7 @@ String string_concat(Arena *arena, String a, String b) {
     return make_string(data, count);
 }
 
-String string_concat(Arena *arena, String a, String b, String c) {
+String string_concat3(Arena *arena, String a, String b, String c) {
     u64 count = a.count + b.count + c.count;
     u8 *data = push_array(arena, u8, count);
 
@@ -1568,7 +1577,7 @@ String string_concat(Arena *arena, String a, String b, String c) {
     return make_string(data, count);
 }
 
-String string_concat(Arena *arena, String a, String b, String c, String d) {
+String string_concat4(Arena *arena, String a, String b, String c, String d) {
     u64 count = a.count + b.count + c.count + d.count;
     u8 *data = push_array(arena, u8, count);
 
@@ -1580,18 +1589,6 @@ String string_concat(Arena *arena, String a, String b, String c, String d) {
     }
 
     return make_string(data, count);
-}
-
-String string_concat(String a, String b) {
-    return string_concat(temp_arena(), a, b);
-}
-
-String string_concat(String a, String b, String c) {
-    return string_concat(temp_arena(), a, b, c);
-}
-
-String string_concat(String a, String b, String c, String d) {
-    return string_concat(temp_arena(), a, b, c, d);
 }
 
 void string_to_lower(String *str) {
@@ -1630,16 +1627,10 @@ void string_trim_whitespace(String *str) {
     }
 }
 
-String string_trim_whitespace(String str) {
-    String copy = str;
-    string_trim_whitespace(&copy);
-    return copy;
-}
-
 bool string_eat_whitespace(String *str) {
     u64 start_count = str->count;
 
-    while (str->count > 0 && char_is_whitespace((*str)[0])) {
+    while (str->count > 0 && char_is_whitespace(str->data[0])) {
         string_advance(str, 1);
     }
 
@@ -1666,7 +1657,7 @@ String string_eat_until_newline(String *str)
 }
 
 String string_printv(Arena *arena, const char *format, va_list args) {
-    String result = {};
+    String result = {0};
     
     // in case we need to try a second time
     va_list args2;
@@ -1708,7 +1699,7 @@ String string_printv(Arena *arena, const char *format, va_list args) {
 }
 
 String string_print(Arena *arena, const char *format, ...) {
-    String result = {};
+    String result = {0};
 
     va_list args;
     va_start(args, format);
@@ -1719,7 +1710,7 @@ String string_print(Arena *arena, const char *format, ...) {
 }
 
 char *cstr_print(Arena *arena, const char *format, ...) {
-    String result = {};
+    String result = {0};
 
     va_list args;
     va_start(args, format);
@@ -1768,7 +1759,7 @@ i64 print_to_memory(u8 *buffer, i64 limit, const char *format, ...)
 }
 
 
-void arena_write(Arena *arena, char *format, ...)
+void arena_print(Arena *arena, char *format, ...)
 {
     va_list args;
     va_start(args, format);
@@ -1776,17 +1767,12 @@ void arena_write(Arena *arena, char *format, ...)
     va_end(args);
 }
 
-void arena_write(Arena *arena, String string)
-{
-    arena_write(arena, string.data, string.count);
-}
-
 String arena_to_string(Arena *arena) {
     return make_string(arena->data, arena->offset);
 }
 
 
-i64 string_to_i64(String str, int base = 10) {
+i64 string_to_i64(String str, int base) {
     i64 result = 0;
     i64 fact = 1;
 
@@ -1852,7 +1838,7 @@ f64 string_to_f64(String str) {
     }
 
     if (e_seen) {
-        i64 int_value = string_to_i64(string_slice(str, i, str.count));
+        i64 int_value = string_to_i64(string_slice(str, i, str.count), 10);
         f64 multiple = 10.0f;
         if (int_value < 0) {
             int_value *= -1;
@@ -1869,9 +1855,16 @@ f64 string_to_f64(String str) {
 
 String string_pluralize(i64 count, String singular, String plural)
 {
-    auto numstr = sprint("%d ", count);
-    return string_concat(numstr, count == 1 ? singular : plural);
+    String numstr = sprint("%d ", count);
+    return string_concat(temp_arena(), numstr, count == 1 ? singular : plural);
 }
+
+void arena_write_string(Arena *arena, String string)
+{
+    arena_write(arena, string.data, string.count);
+}
+
+
 
 
 // NOTE(nick): The path_* functions assume that we are working with a normalized (unix-like) path string.
@@ -1886,14 +1879,10 @@ String path_join(Arena *arena, String path1, String path2) {
     return string_print(arena, "%.*s/%.*s", path1.count, path1.data, path2.count, path2.data);
 }
 
-force_inline String path_join(String path1, String path2) {
-    return path_join(temp_arena(), path1, path2);
-}
-
-String path_join(Arena *arena, String path1, String path2, String path3) {
-    if (!path1.count) return path_join(path2, path3);
-    if (!path2.count) return path_join(path1, path3);
-    if (!path3.count) return path_join(path2, path3);
+String path_join3(Arena *arena, String path1, String path2, String path3) {
+    if (!path1.count) return path_join(arena, path2, path3);
+    if (!path2.count) return path_join(arena, path1, path3);
+    if (!path3.count) return path_join(arena, path2, path3);
 
     if (path1.data[path1.count - 1] == '/') path1.count -= 1;
     if (path2.data[path2.count - 1] == '/') path2.count -= 1;
@@ -1901,15 +1890,11 @@ String path_join(Arena *arena, String path1, String path2, String path3) {
     return string_print(arena, "%.*s/%.*s/%.*s", path1.count, path1.data, path2.count, path2.data, path3.count, path3.data);
 }
 
-force_inline String path_join(String path1, String path2, String path3) {
-    return path_join(temp_arena(), path1, path2, path3);
-}
-
 bool path_is_absolute(String path) {
     return (
-        (path.count > 0 && path[0] == '/') ||
+        (path.count > 0 && path.data[0] == '/') ||
         // Windows drive root:
-        (path.count > 2 && char_is_alpha(path[0]) && path[1] == ':' && (path.count == 2 || path[2] == '/'))
+        (path.count > 2 && char_is_alpha(path.data[0]) && path.data[1] == ':' && (path.count == 2 || path.data[2] == '/'))
     );
 }
 
@@ -1917,9 +1902,9 @@ bool path_is_absolute(String path) {
 bool path_is_root(String path) {
     return (
         // Unix root:
-        (path.count == 1 && path[0] == '/') ||
+        (path.count == 1 && path.data[0] == '/') ||
         // Windows drive root:
-        ((path.count == 2 || path.count == 3) && char_is_alpha(path[0]) && path[1] == ':' && (path.count == 2 || path[2] == '/'))
+        ((path.count == 2 || path.count == 3) && char_is_alpha(path.data[0]) && path.data[1] == ':' && (path.count == 2 || path.data[2] == '/'))
     );
 }
 
@@ -1939,7 +1924,7 @@ String path_dirname(String path) {
 String path_resolve(String base_folder, String subpath)
 {
     if (path_is_absolute(subpath)) return subpath;
-    return path_join(base_folder, subpath);
+    return path_join(temp_arena(), base_folder, subpath);
 }
 
 String path_filename(String path) {
@@ -1975,9 +1960,10 @@ String path_get_extension(String path) {
         }
     }
 
-    return {};
+    return (String){0};
 }
 
+#if LANG_CPP
 String to_string(bool x)   { return x ? S("true") : S("false"); }
 String to_string(char x)   { return sprint("%c", x); }
 String to_string(char *x)  { return string_from_cstr(x); }
@@ -1997,32 +1983,39 @@ String to_string(f32 x)    { return sprint("%.2f", x); }
 String to_string(f64 x)    { return sprint("%.4f", x); }
 String to_string(void *x)  { return sprint("%p", x); }
 String to_string(String x) { return x; }
+#endif
 
 //
 // String conversions
 //
 
-struct String16 {
+typedef struct String16 String16;
+struct String16
+{
     i64 count;
     u16 *data;
 };
 
-struct String32 {
+typedef struct String32 String32;
+struct String32
+{
     i64 count;
     u32 *data;
 };
 
-struct String_Decode {
+typedef struct String_Decode String_Decode;
+struct String_Decode
+{
     u32 codepoint;
     u8 size; // 1 - 4
 };
 
 String16 make_string16(void *data, i64 count) {
-    return String16{count, (u16 *)data};
+    return (String16){count, (u16 *)data};
 }
 
 String32 make_string32(u32 *data, i64 count) {
-    return String32{count, data};
+    return (String32){count, data};
 }
 
 String32 string32_slice(String32 str, i64 start_index, i64 end_index) {
@@ -2031,12 +2024,8 @@ String32 string32_slice(String32 str, i64 start_index, i64 end_index) {
     return make_string32(str.data + start_index, end_index - start_index);
 }
 
-String32 string32_slice(String32 str, i64 start_index) {
-    return string32_slice(str, start_index, str.count);
-}
-
 String32 string32_alloc(Allocator allocator, String32 other) {
-    String32 copy = {};
+    String32 copy = {0};
     u32 *data = cast(u32 *)allocator_alloc(allocator, sizeof(u32) * other.count);
 
     if (data) {
@@ -2129,7 +2118,7 @@ u32 string_encode_utf8(u8 *dest, u32 codepoint) {
 }
 
 u8 string_seek_right_utf8(u8 *data, u32 capacity) {
-    auto decode = string_decode_utf8(data, capacity);
+    String_Decode decode = string_decode_utf8(data, capacity);
     return Min(decode.size, capacity);
 }
 
@@ -2210,7 +2199,7 @@ String32 string32_from_string(Arena *arena, String str) {
     u8 *p1 = str.data + str.count;
 
     while (p0 < p1) {
-        auto decode = string_decode_utf8(p0, cast(u64)(p1 - p0));
+        String_Decode decode = string_decode_utf8(p0, cast(u64)(p1 - p0));
 
         *at = decode.codepoint;
         p0 += decode.size;
@@ -2260,7 +2249,7 @@ String16 string16_from_string(Arena *arena, String str) {
     u8 *p1 = str.data + str.count;
 
     while (p0 < p1) {
-        auto decode = string_decode_utf8(p0, (u64)(p1 - p0));
+        String_Decode decode = string_decode_utf8(p0, (u64)(p1 - p0));
         u32 encode_size = string_encode_utf16(at, decode.codepoint);
 
         p0 += decode.size;
@@ -2280,7 +2269,7 @@ String16 string16_from_string(Arena *arena, String str) {
 }
 
 String string_from_string16(Arena *arena, String16 str) {
-    String result = {};
+    String result = {0};
     result.data = push_array(arena, u8, str.count * 3 + 1);
 
     u16 *p0 = str.data;
@@ -2288,7 +2277,7 @@ String string_from_string16(Arena *arena, String16 str) {
     u8 *at = result.data;
 
     while (p0 < p1) {
-        auto decode = string_decode_utf16(p0, cast(u64)(p1 - p0));
+        String_Decode decode = string_decode_utf16(p0, cast(u64)(p1 - p0));
         u32 encode_size = string_encode_utf8(at, decode.codepoint);
 
         p0 += decode.size;
@@ -2312,7 +2301,9 @@ String string_from_string16(Arena *arena, String16 str) {
  
 typedef u64 Dense_Time;
 
-struct Date_Time {
+typedef struct Date_Time Date_Time;
+struct Date_Time
+{
     u16 msec; // [0,999]
     u8 sec;   // [0,60]
     u8 min;   // [0,59]
@@ -2322,7 +2313,9 @@ struct Date_Time {
     i16 year; // 1 = 1 CE; 2020 = 2020 CE; 0 = 1 BCE; -100 = 101 BCE; etc.
 };
 
-enum Month {
+typedef u32 Month;
+enum
+{
     Month_Jan = 1,
     Month_Feb,
     Month_Mar,
@@ -2337,7 +2330,9 @@ enum Month {
     Month_Dec
 };
 
-enum DayOfWeek {
+typedef u32 DayOfWeek;
+enum
+{
     DayOfWeek_Sunday,
     DayOfWeek_Monday,
     DayOfWeek_Tuesday,
@@ -2369,7 +2364,7 @@ Dense_Time dense_time_from_date_time(Date_Time *in) {
 }
 
 Date_Time date_time_from_dense_time(Dense_Time in) {
-    Date_Time result = {};
+    Date_Time result = {0};
 
     result.msec = in%1000;
     in /= 1000;
@@ -2432,16 +2427,20 @@ String string_from_day_of_week(DayOfWeek day_of_week) {
     return result;
 }
 
+#if LANG_CPP
 String to_string(Date_Time it) {
-    auto month = string_from_month(cast(Month)it.mon);
+    String month = string_from_month(cast(Month)it.mon);
     return sprint("%S %02d %d %02d:%02d:%02d", month, it.day, it.year, it.hour, it.min, it.sec);
 }
+#endif
 
 //
 // Random
 //
 
-struct Random_Lcg {
+typedef struct Random_Lcg Random_Lcg;
+struct Random_Lcg
+{
     u32 state;
 };
 
@@ -2451,28 +2450,30 @@ inline f32 random_lerp(f32 a, f32 b, f32 t) {
 
 
 inline Random_Lcg random_seed_lcg(u32 state) {
-    return {state};
+    return (Random_Lcg){state};
 }
 
-inline u32 random_next_u32(Random_Lcg *series) {
+inline u32 randoml_next_u32(Random_Lcg *series) {
     return series->state = (series->state * 1103515245 + 12345) & U32_MAX;
 }
 
-inline f32 random(Random_Lcg *series) {
+inline f32 randoml_f32(Random_Lcg *series) {
     f32 divisor = 1.0f / (f32)U32_MAX;
-    return divisor * (f32)random_next_u32(series);
+    return divisor * (f32)random_lcg_next_u32(series);
 }
 
-inline f32 random_between(Random_Lcg *series, f32 min, f32 max) {
+inline f32 randoml_between(Random_Lcg *series, f32 min, f32 max) {
     return random_lerp(min, max, random(series));
 }
 
-inline i32 random_int_between(Random_Lcg *series, i32 min, i32 max) {
+inline i32 randoml_int_between(Random_Lcg *series, i32 min, i32 max) {
     assert(max >= min);
-    return min + (i32)(random_next_u32(series) % (max - min + 1));
+    return min + (i32)(randoml_next_u32(series) % (max - min + 1));
 }
 
-struct Random_Pcg {
+typedef struct Random_Pcg Random_Pcg;
+struct Random_Pcg
+{
     u64 state;
     u64 selector;
 };
@@ -2497,7 +2498,7 @@ inline u32 random_next_u32(Random_Pcg *series) {
     return result;
 }
 
-inline f32 random(Random_Pcg *series) {
+inline f32 random_f32(Random_Pcg *series) {
     f32 divisor = 1.0f / (f32)U32_MAX;
     return divisor * (f32)random_next_u32(series);
 }
@@ -2531,25 +2532,32 @@ void na_shuffle(void *base, isize count, isize size) {
 // OS
 //
 
-struct File {
+typedef struct File File;
+struct File
+{
     void *handle;
     bool has_errors;
     u64 offset;
 };
 
-enum File_Attribute_Flag {
+typedef u32 File_Attribute_Flag;
+enum
+{
     File_IsDirectory = 0x01,
     File_IsHidden    = 0x02,
     File_IsSystem    = 0x04,
 };
 
-enum File_Access_Flag {
+typedef u32 File_Access_Flag;
+enum {
     FileAccess_Read    = 0x01,
     FileAccess_Write   = 0x02,
     FileAccess_Execute = 0x04,
 };
 
-struct File_Info {
+typedef struct File_Info File_Info;
+struct File_Info
+{
     String name;
     u64 size;
     Dense_Time created_at;
@@ -2559,7 +2567,8 @@ struct File_Info {
     u32 access;
 };
 
-enum File_Mode {
+typedef u32 File_Mode;
+enum {
     FILE_MODE_READ   = 0x1,
     FILE_MODE_WRITE  = 0x2,
     FILE_MODE_APPEND = 0x4,
@@ -2570,12 +2579,16 @@ struct File_Lister;
 #define THREAD_PROC(name) u32 name(void *data)
 typedef THREAD_PROC(Thread_Proc);
 
-struct Thread {
+typedef struct Thread Thread;
+struct Thread
+{
     u32 id;
     void *handle;
 };
 
-struct Thread_Params {
+typedef struct Thread_Params Thread_Params;
+struct Thread_Params
+{
     Thread_Proc *proc;
     void *data;
 };
@@ -2589,7 +2602,9 @@ struct Thread_Params {
 
 #pragma comment(lib, "user32")
 
-struct File_Lister {
+typedef struct File_Lister File_Lister;
+struct File_Lister
+{
     Arena *arena;
 
     bool is_first_file;
@@ -2599,7 +2614,7 @@ struct File_Lister {
 };
 
 function Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
-    Date_Time result = {};
+    Date_Time result = {0};
 
     result.year = in->wYear;
     result.mon  = cast(u8)in->wMonth;
@@ -2613,7 +2628,7 @@ function Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
 }
 
 function SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
-    SYSTEMTIME result = {};
+    SYSTEMTIME result = {0};
 
     result.wYear = in->year;
     result.wMonth = in->mon;
@@ -2627,7 +2642,7 @@ function SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
 }
 
 function Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
-    SYSTEMTIME system_time = {};
+    SYSTEMTIME system_time = {0};
     FileTimeToSystemTime(file_time, &system_time);
     Date_Time date_time = win32_date_time_from_system_time(&system_time);
     Dense_Time result = dense_time_from_date_time(&date_time);
@@ -2647,11 +2662,11 @@ f64 os_time() {
 
     if (win32_ticks_per_second == 0)
     {
-        LARGE_INTEGER perf_frequency = {};
+        LARGE_INTEGER perf_frequency = {0};
         if (QueryPerformanceFrequency(&perf_frequency)) {
             win32_ticks_per_second = perf_frequency.QuadPart;
         }
-        LARGE_INTEGER perf_counter = {};
+        LARGE_INTEGER perf_counter = {0};
         if (QueryPerformanceCounter(&perf_counter)) {
             win32_counter_offset = perf_counter.QuadPart;
         }
@@ -2697,7 +2712,7 @@ void os_sleep(f64 miliseconds) {
     {
         HMODULE libwinmm = LoadLibraryA("winmm.dll");
         typedef UINT (WINAPI * timeBeginPeriod_t)(UINT);
-        auto timeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(libwinmm, "timeBeginPeriod");
+        timeBeginPeriod_t timeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(libwinmm, "timeBeginPeriod");
         if (timeBeginPeriod) {
             win32_sleep_is_granular = timeBeginPeriod(1) == 0 /* TIMERR_NOERROR */;
         }
@@ -2730,16 +2745,16 @@ void *os_reserve(u64 size) {
 }
 
 bool os_commit(void *ptr, u64 size) {
-    return VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE) != NULL;
+    return VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE) != 0;
 }
 
 bool os_decommit(void *ptr, u64 size) {
-    return VirtualFree(ptr, size, MEM_DECOMMIT) != NULL;
+    return VirtualFree(ptr, size, MEM_DECOMMIT) != 0;
 }
 
 bool os_release(void *ptr, u64 size) {
     // According to the docs, the size should be 0 when using MEM_RELEASE
-    return VirtualFree(ptr, 0, MEM_RELEASE) != NULL;
+    return VirtualFree(ptr, 0, MEM_RELEASE) != 0;
 }
 
 void *os_alloc(u64 size) {
@@ -2755,7 +2770,7 @@ void os_free(void *ptr) {
 }
 
 bool os_file_rename(String from, String to) {
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
 
     String16 from16 = string16_from_string(scratch.arena, from);
     String16 to16   = string16_from_string(scratch.arena, to);
@@ -2765,7 +2780,7 @@ bool os_file_rename(String from, String to) {
     return result;
 }
 
-void win32_file_error(File *file, const char *message, String file_name = {}) {
+void win32_file_error(File *file, const char *message, String file_name) {
 #if DEBUG
     if (file_name.data) {
         print("[file] %s: %.*s\n", message, LIT(file_name));
@@ -2779,9 +2794,9 @@ void win32_file_error(File *file, const char *message, String file_name = {}) {
 
 String os_read_entire_file(Allocator allocator, String path)
 {
-    String result = {};
+    String result = {0};
 
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 path_w = string16_from_string(scratch.arena, path);
     HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
     end_scratch_memory(scratch);
@@ -2828,7 +2843,7 @@ bool os_write_entire_file(String path, String contents)
 {
     bool result = false;
 
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 path_w = string16_from_string(scratch.arena, path);
     HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
     end_scratch_memory(scratch);
@@ -2862,7 +2877,7 @@ bool os_write_entire_file(String path, String contents)
 }
 
 File os_file_open(String path, u32 mode_flags) {
-    File result = {};
+    File result = {0};
 
     DWORD permissions = 0;
     DWORD creation = 0;
@@ -2882,7 +2897,7 @@ File os_file_open(String path, u32 mode_flags) {
         creation = CREATE_ALWAYS;
     }
 
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
 
     String16 path_w = string16_from_string(scratch.arena, path);
     HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, permissions, FILE_SHARE_READ, 0, creation, 0, 0);
@@ -2914,7 +2929,7 @@ void os_file_read(File *file, u64 offset, u64 size, void *dest) {
     assert(size <= U32_MAX);
     u32 size32 = cast(u32)size;
 
-    OVERLAPPED overlapped = {};
+    OVERLAPPED overlapped = {0};
     overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
     overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
 
@@ -2922,7 +2937,7 @@ void os_file_read(File *file, u64 offset, u64 size, void *dest) {
     if (ReadFile(handle, dest, size32, &bytes_read, &overlapped) && (size32 == bytes_read)) {
         // Success!
     } else {
-        win32_file_error(file, "Failed to read file");
+        win32_file_error(file, "Failed to read file", (String){0});
     }
 }
 
@@ -2935,7 +2950,7 @@ void os_file_write(File *file, u64 offset, u64 size, void *data) {
     assert(size <= U32_MAX);
     u32 size32 = cast(u32)(size);
 
-    OVERLAPPED overlapped = {};
+    OVERLAPPED overlapped = {0};
     overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
     overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
 
@@ -2943,7 +2958,7 @@ void os_file_write(File *file, u64 offset, u64 size, void *data) {
     if (WriteFile(handle, data, size32, &bytes_written, &overlapped) && (size32 == bytes_written)) {
         // Success!
     } else {
-        win32_file_error(file, "Failed to write file");
+        win32_file_error(file, "Failed to write file", (String){0});
     }
 }
 
@@ -2964,13 +2979,13 @@ void os_file_close(File *file) {
         file->handle = NULL;
 
         if (!success) {
-            win32_file_error(file, "Failed to close file");
+            win32_file_error(file, "Failed to close file", (String){0});
         }
     }
 }
 
 bool os_delete_file(String path) {
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 str = string16_from_string(scratch.arena, path);
     BOOL success = DeleteFileW(cast(WCHAR *)str.data);
     end_scratch_memory(scratch);
@@ -2979,7 +2994,7 @@ bool os_delete_file(String path) {
 }
 
 bool os_make_directory(String path) {
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 str = string16_from_string(scratch.arena, path);
     BOOL success = CreateDirectoryW(cast(WCHAR *)str.data, NULL);
     end_scratch_memory(scratch);
@@ -2988,7 +3003,7 @@ bool os_make_directory(String path) {
 }
 
 bool os_delete_directory(String path) {
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 str = string16_from_string(scratch.arena, path);
     BOOL success = RemoveDirectoryW(cast(WCHAR *)str.data);
     end_scratch_memory(scratch);
@@ -3038,14 +3053,14 @@ function u32 win32_access_from_attributes(DWORD attributes) {
 }
 
 File_Lister os_file_list_begin(Arena *arena, String path) {
-    File_Lister result = {};
+    File_Lister result = {0};
 
     result.arena         = arena;
     result.handle        = 0;
     result.is_first_file = true;
 
-    auto mark = arena_get_position(arena);
-    String find_path = string_concat(path, S("\\*.*")); // @Incomplete: use \\?\ prefix?
+    Arena_Mark mark = arena_get_position(arena);
+    String find_path = string_concat(arena, path, S("\\*.*")); // @Incomplete: use \\?\ prefix?
     WCHAR *find_path_w = cast(WCHAR *)string16_from_string(arena, find_path).data;
     // FindExInfoStandard
     result.handle = FindFirstFileExW(find_path_w, FindExInfoBasic, &result.data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
@@ -3077,9 +3092,8 @@ bool os_file_list_next(File_Lister *iter, File_Info *info) {
             name = string_from_wstr(iter->arena, iter->data.cFileName);
         }
 
-        auto data = iter->data;
+        WIN32_FIND_DATAW data = iter->data;
 
-        *info = {};
         info->name             = name;
         info->size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
         info->created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
@@ -3104,9 +3118,9 @@ void os_file_list_end(File_Lister *iter) {
 }
 
 File_Info os_get_file_info(Arena *arena, String path) {
-    File_Info info = {};
+    File_Info info = {0};
 
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 str = string16_from_string(scratch.arena, path);
 
     WIN32_FILE_ATTRIBUTE_DATA data;
@@ -3148,7 +3162,7 @@ Thread os_create_thread(u64 stack_size, Thread_Proc *proc, void *data) {
     DWORD thread_id;
     HANDLE handle = CreateThread(0, stack_size, win32_thread_proc, params, 0, &thread_id);
 
-    Thread result = {};
+    Thread result = {0};
     result.handle = handle;
     result.id = thread_id;
     return result;
@@ -3163,7 +3177,7 @@ Thread os_create_thread_with_params(u64 stack_size, Thread_Proc *proc, void *dat
     DWORD thread_id;
     HANDLE handle = CreateThread(0, stack_size, win32_thread_proc, params, 0, &thread_id);
 
-    Thread result = {};
+    Thread result = {0};
     result.handle = handle;
     result.id = thread_id;
     return result;
@@ -3197,13 +3211,14 @@ void win32_normalize_path(String path) {
 
 String os_get_executable_path() {
     Arena *arena = temp_arena();
+    String result = {0};
 
     u64 buffer_size = 2048;
     WCHAR *buffer = push_array(arena, WCHAR, buffer_size);
 
     DWORD length = GetModuleFileNameW(NULL, buffer, buffer_size);
     if (length == 0) {
-        return {};
+        return result;
     }
 
     if (length == buffer_size && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
@@ -3223,33 +3238,34 @@ String os_get_executable_path() {
         }
 
         if (!success) {
-            return {};
+            return result;
         }
     }
 
     arena_pop(arena, (buffer_size - length) * sizeof(WCHAR));
 
-    String result = string_from_string16(arena, make_string16(buffer, length));
+    result = string_from_string16(arena, make_string16(buffer, length));
     win32_normalize_path(result);
 
     return result;
 }
 
 String os_get_current_directory() {
+    String result = {0};
     Arena *arena = temp_arena();
 
     DWORD length = GetCurrentDirectoryW(0, NULL);
     if (length == 0) {
-        return {};
+        return result;
     }
 
     WCHAR *buffer = push_array(arena, WCHAR, length);
     DWORD bytes_written = GetCurrentDirectoryW(length, buffer);
     if (bytes_written + 1 != length) {
-        return {};
+        return result;
     }
 
-    String result = string_from_string16(arena, make_string16(buffer, length));
+    result = string_from_string16(arena, make_string16(buffer, length));
     win32_normalize_path(result);
 
     return result;
@@ -3299,20 +3315,21 @@ bool os_clipboard_set_text(String str) {
     HANDLE handle;
     WCHAR* buffer;
 
-    auto scratch = begin_scratch_memory();
-    defer { end_scratch_memory(scratch); };
+    Scratch_Memory scratch = begin_scratch_memory();
 
     char *cstr = string_to_cstr(scratch.arena, str);
 
     count = MultiByteToWideChar(CP_UTF8, 0, cstr, -1, NULL, 0);
 
     if (!count) {
+        end_scratch_memory(scratch);
         return false;
     }
 
     handle = GlobalAlloc(GMEM_MOVEABLE, count * sizeof(WCHAR));
     if (!handle) {
         print("[clipboard] Failed to allocate global handle for clipboard.");
+        end_scratch_memory(scratch);
         return false;
     }
 
@@ -3320,6 +3337,7 @@ bool os_clipboard_set_text(String str) {
     if (!buffer) {
         print("[clipboard] Failed to lock global handle.");
         GlobalFree(handle);
+        end_scratch_memory(scratch);
         return false;
     }
 
@@ -3329,6 +3347,7 @@ bool os_clipboard_set_text(String str) {
     if (!OpenClipboard(NULL)) {
         print("[clipboard] Failed to open clipboard.");
         GlobalFree(handle);
+        end_scratch_memory(scratch);
         return false;
     }
 
@@ -3338,33 +3357,37 @@ bool os_clipboard_set_text(String str) {
 
     GlobalFree(handle);
 
+    end_scratch_memory(scratch);
+
     return true;
 }
 
 
 String os_clipboard_get_text() {
+    String result = {0};
+
     if (!OpenClipboard(NULL)) {
         print("[clipboard] Failed to open clipboard.");
-        return {};
+        return result;
     }
 
     HANDLE handle = GetClipboardData(CF_UNICODETEXT);
     if (!handle) {
         print("[clipboard] Failed to convert clipboard to string.");
         CloseClipboard();
-        return {};
+        return result;
     }
 
     WCHAR *buffer = (WCHAR *)GlobalLock(handle);
     if (!buffer) {
         print("[clipboard] Failed to lock global handle.");
         CloseClipboard();
-        return {};
+        return result;
     }
 
     // @Cleanup @Speed: make this just return a string!
     char *str = win32_UTF8FromUTF16(temp_arena(), buffer);
-    String result = string_from_cstr(str);
+    result = string_from_cstr(str);
 
     GlobalUnlock(handle);
     CloseClipboard();
@@ -3390,7 +3413,7 @@ bool os_shell_open(String path) {
         }
     }
 
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 path_w = string16_from_string(scratch.arena, path);
     // If the function succeeds, it returns a value greater than 32.
     bool success = (INT_PTR)_ShellExecuteW(0, 0, cast(WCHAR *)path_w.data, 0, 0 , SW_SHOW) > 32;
@@ -3399,7 +3422,7 @@ bool os_shell_open(String path) {
     return success;
 }
 
-bool os_shell_execute(String cmd, String arguments, bool admin = false) {
+bool os_shell_execute(String cmd, String arguments, bool admin) {
     if (!_ShellExecuteW)
     {
         HMODULE libshell32 = LoadLibraryA("shell32.dll");
@@ -3411,7 +3434,7 @@ bool os_shell_execute(String cmd, String arguments, bool admin = false) {
         }
     }
 
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
     String16 cmd_w = string16_from_string(scratch.arena, cmd);
     String16 arguments_w = string16_from_string(scratch.arena, arguments);
 
@@ -3769,7 +3792,7 @@ File_Info os_get_file_info(Arena *arena, String path) {
     struct stat64 stat_info;
     bool file_exists = stat64(cpath, &stat_info) == 0;
 
-    File_Info info = {};
+    File_Info info = {0};
 
     if (file_exists) {
         info.name             = path_filename(path);
@@ -3786,7 +3809,7 @@ File_Info os_get_file_info(Arena *arena, String path) {
     return info;
 }
 
-void unix_file_error(File *file, char *message, String file_name = {}) {
+void unix_file_error(File *file, char *message, String file_name) {
 #if DEBUG
     if (file_name.data) {
         print("[file] %s: %.*s\n", message, LIT(file_name));
@@ -3799,9 +3822,9 @@ void unix_file_error(File *file, char *message, String file_name = {}) {
 }
 
 File os_file_open(String path, u32 mode_flags) {
-    File result = {};
+    File result = {0};
 
-    char mode[4] = {};
+    char mode[4] = {0};
     if ((mode_flags & FILE_MODE_READ) && (mode_flags & FILE_MODE_WRITE)) {
         mode[0] = 'r';
         mode[1] = 'b';
@@ -3895,7 +3918,7 @@ String os_read_entire_file(Allocator allocator, String path) {
     auto file = os_file_open(path, FILE_MODE_READ);
     auto size = os_file_get_size(&file);
 
-    String result = {};
+    String result = {0};
     result.data = cast(u8 *)allocator_alloc(allocator, size);
     result.count = size;
 
@@ -3916,7 +3939,7 @@ bool os_write_entire_file(String path, String contents) {
 }
 
 File_Lister os_file_list_begin(Arena *arena, String path) {
-    File_Lister result = {};
+    File_Lister result = {0};
 
     char *cpath = string_to_cstr(arena, path);
     DIR *handle = opendir(cpath);
@@ -4031,7 +4054,7 @@ Thread os_create_thread(u64 stack_size, Thread_Proc *proc, void *data) {
     pthread_t thread_id;
     pthread_create(&thread_id, &attr, unix_thread_proc, params);
 
-    Thread result = {};
+    Thread result = {0};
     result.handle = (void *)thread_id;
     return result;
 }
@@ -4063,7 +4086,9 @@ void os_set_high_process_priority(bool enable) {
 // DLLs
 //
 
-struct OS_Library {
+typedef struct OS_Library OS_Library;
+struct OS_Library
+{
     void *handle;
 };
 
@@ -4071,7 +4096,8 @@ typedef void (*OS_Library_Proc)(void);
 
 OS_Library os_library_load(String path);
 void os_library_unload(OS_Library lib);
-OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name);
+OS_Library_Proc os_library_get_cstr(OS_Library lib, char *proc_name);
+OS_Library_Proc os_library_get_string(OS_Library lib, String proc_name);
 
 
 bool os_library_is_loaded(OS_Library lib)
@@ -4082,9 +4108,9 @@ bool os_library_is_loaded(OS_Library lib)
 #if OS_WINDOWS
 
 OS_Library os_library_load(String path) {
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
 
-    OS_Library result = {};
+    OS_Library result = {0};
     result.handle     = LoadLibraryW((WCHAR *)string16_from_string(scratch.arena, path).data);
 
     end_scratch_memory(scratch);
@@ -4099,7 +4125,7 @@ inline void os_library_unload(OS_Library lib) {
     }
 }
 
-inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
+inline OS_Library_Proc os_library_get_cstr(OS_Library lib, char *proc_name) {
     return (OS_Library_Proc)GetProcAddress((HMODULE)lib.handle, proc_name);
 }
 
@@ -4110,7 +4136,7 @@ inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
 OS_Library os_library_load(String path) {
     auto scratch = begin_scratch_memory();
 
-    OS_Library result = {};
+    OS_Library result = {0};
     // TODO(bill): Should this be RTLD_LOCAL?
     result.handle     = dlopen(string_to_cstr(scratch.arena, path), RTLD_LAZY | RTLD_GLOBAL);
 
@@ -4126,15 +4152,15 @@ inline void os_library_unload(OS_Library lib) {
     }
 }
 
-inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
+inline OS_Library_Proc os_library_get_string(OS_Library lib, char *proc_name) {
     return (OS_Library_Proc)dlsym(lib.handle, proc_name);
 }
 
 #endif
 
-inline OS_Library_Proc os_library_get_proc(OS_Library lib, String proc_name) {
-    auto scratch = begin_scratch_memory();
-    auto result = os_library_get_proc(lib, string_to_cstr(scratch.arena, proc_name));
+inline OS_Library_Proc os_library_get_string(OS_Library lib, String proc_name) {
+    Scratch_Memory scratch = begin_scratch_memory();
+    OS_Library_Proc result = os_library_get_cstr(lib, string_to_cstr(scratch.arena, proc_name));
     end_scratch_memory(scratch);
     return result;
 }
@@ -4231,7 +4257,7 @@ ALLOCATOR_PROC(os_allocator_proc) {
 }
 
 Allocator os_allocator() {
-    return Allocator{os_allocator_proc, 0};
+    return (Allocator){os_allocator_proc, 0};
 }
 
 Allocator default_allocator() { return os_allocator(); }
@@ -4274,11 +4300,11 @@ ALLOCATOR_PROC(arena_allocator_proc) {
 }
 
 Allocator arena_allocator(Arena *arena) {
-    return Allocator{arena_allocator_proc, arena};
+    return (Allocator){arena_allocator_proc, arena};
 }
 
 Arena arena_create_from_allocator(Allocator allocator, u64 size) {
-    Arena result = {};
+    Arena result = {0};
     result.data = cast(u8 *)allocator_alloc(allocator, size);
     result.size = size;
     return result;
@@ -4289,7 +4315,7 @@ ALLOCATOR_PROC(null_allocator_proc) {
 }
 
 Allocator null_allocator() {
-    return Allocator{null_allocator_proc, NULL};
+    return (Allocator){null_allocator_proc, NULL};
 }
 
 Allocator temp_allocator() {
@@ -4299,6 +4325,8 @@ Allocator temp_allocator() {
 //
 // Array
 //
+
+#if LANG_CPP
 
 #define For(array) for (auto &it : array)
 
@@ -4375,7 +4403,7 @@ void array_init_from_allocator(Array<T> *it, Allocator allocator, u64 capacity) 
 
 template <typename T>
 Array<T> array_make(u64 initial_capacity = 16) {
-    Array<T> result = {};
+    Array<T> result = {0};
     array_init(result, initial_capacity);
     return result;
 }
@@ -4542,9 +4570,13 @@ String32 string32_from_array(Array<u32> chars) {
     return make_string32(chars.data, chars.count);
 }
 
+#endif // LANG_CPP
+
 //
 // Slice
 //
+
+#if LANG_CPP
 
 template <typename T>
 struct Slice {
@@ -4593,6 +4625,8 @@ Slice<T> slice_from_array(Array<T> &array) {
 
     return result;
 }
+
+#endif // LANG_CPP
 
 //
 // Hash
@@ -4732,6 +4766,8 @@ u64 fnv64a(void const *data, isize len) {
 //
 // Hash Table
 //
+
+#if LANG_CPP
 
 #define For_Table(table) \
     for (auto it = (table).begin(); it < (table).end(); it++) \
@@ -5006,27 +5042,17 @@ String to_string(Hash_Table<K, V> table) {
     return sprint("{%S}", string_join(temp_allocator(), list, S(", ")));
 }
 
+#endif // LANG_CPP
+
 //
 // Extended OS Functions
 //
 
-String os_read_entire_file(String path) {
-    return os_read_entire_file(temp_allocator(), path);
-}
-
-File_Info os_get_file_info(String path) {
-    return os_get_file_info(temp_arena(), path);
-}
-
-File_Lister os_file_list_begin(String path) {
-    return os_file_list_begin(temp_arena(), path);
-}
-
-void os_file_write(File *file, u64 offset, String str) {
+void os_file_write_string(File *file, u64 offset, String str) {
     os_file_write(file, offset, str.count, str.data);
 }
 
-void os_file_append(File *file, u64 size, void *data) {
+void os_file_append_data(File *file, u64 size, void *data) {
     os_file_write(file, file->offset, size, data);
     file->offset += size;
 }
@@ -5047,21 +5073,23 @@ force_inline bool file_is_directory(File_Info info) { return (info.flags & File_
 force_inline bool file_is_hidden(File_Info info)    { return (info.flags & File_IsHidden) != 0; }
 force_inline bool file_is_system(File_Info info)    { return (info.flags & File_IsSystem) != 0; }
 
+#if LANG_CPP
 force_inline bool file_is_directory(File_Info *info) { return (info->flags & File_IsDirectory) != 0; }
 force_inline bool file_is_hidden(File_Info *info)    { return (info->flags & File_IsHidden) != 0; }
 force_inline bool file_is_system(File_Info *info)    { return (info->flags & File_IsSystem) != 0; }
+#endif // LANG_CPP
 
 
 bool os_delete_entire_directory(String path) {
-    auto scratch = begin_scratch_memory();
+    Scratch_Memory scratch = begin_scratch_memory();
 
     bool success = true;
 
-    auto handle = os_file_list_begin(scratch.arena, path);
+    File_Lister handle = os_file_list_begin(scratch.arena, path);
 
-    File_Info info = {};
+    File_Info info;
     while (os_file_list_next(&handle, &info)) {
-        auto file_path = path_join(path, info.name);
+        String file_path = path_join(scratch.arena, path, info.name);
 
         if (file_is_directory(info)) {
             // @Speed: is the recursive ever a problem?
@@ -5080,17 +5108,17 @@ bool os_delete_entire_directory(String path) {
 }
 
 bool os_file_or_directory_exists(String path) {
-    return file_exists(os_get_file_info(path));
+    return file_exists(os_get_file_info(temp_arena(), path));
 }
 
 bool os_make_directory_recursive(String path) {
-    i64 index = string_index(path, S("/"));
+    i64 index = string_index(path, S("/"), 0);
 
     while (true) {
         index = string_index(path, S("/"), index + 1);
         if (index < 0) break;
 
-        auto slice = string_slice(path, 0, index);
+        String slice = string_slice(path, 0, index);
 
         if (!os_file_or_directory_exists(slice)) {
             bool success = os_make_directory(slice);
@@ -5111,7 +5139,7 @@ i64 os_count_directory(String path) {
     Arena *arena = temp_arena();
 
     #if OS_WINDOWS
-    WCHAR *find_path = cast(WCHAR *)string16_from_string(arena, string_concat(path, S("\\*.*"))).data; // @Incomplete: use \\?\ prefix?
+    WCHAR *find_path = cast(WCHAR *)string16_from_string(arena, string_concat(arena, path, S("\\*.*"))).data; // @Incomplete: use \\?\ prefix?
 
     WIN32_FIND_DATAW data;
     HANDLE handle = FindFirstFileExW(find_path, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
@@ -5142,6 +5170,21 @@ i64 os_count_directory(String path) {
 
     // NOTE(nick): Ignore . and .. "directories"
     return result - 2;
+}
+
+
+#if LANG_CPP
+
+String os_read_entire_file(String path) {
+    return os_read_entire_file(temp_allocator(), path);
+}
+
+File_Info os_get_file_info(String path) {
+    return os_get_file_info(temp_arena(), path);
+}
+
+File_Lister os_file_list_begin(String path) {
+    return os_file_list_begin(temp_arena(), path);
 }
 
 Array<File_Info> os_scan_directory(Allocator allocator, Arena *string_memory, String path) {
@@ -5227,11 +5270,14 @@ Array<File_Info> os_scan_files_recursive(String path, i32 max_depth = 1024) {
     return os_scan_files_recursive(temp_allocator(), path, max_depth);
 }
 
+#endif // LANG_CPP
+
+
 bool os_copy_entire_file(String from, String to)
 {
     bool result = false;
 
-    auto contents = os_read_entire_file(from);
+    String contents = os_read_entire_file(temp_allocator(), from);
     if (contents.count)
     {
         result = os_write_entire_file(to, contents);
@@ -5252,6 +5298,8 @@ bool os_copy_entire_file(String from, String to)
 //
 // Extended Strings
 //
+
+#if LANG_CPP
 
 Array<String> string_split(Allocator allocator, String str, String split) {
     Array<String> result = {};
@@ -5316,11 +5364,15 @@ String string_join(Array<String> list, String join) {
     return string_join(temp_allocator(), list, join);
 }
 
+#endif // LANG_CPP
+
 //
 // Threading Primitives
 //
 
-struct Semaphore {
+typedef struct Semaphore Semaphore;
+struct Semaphore
+{
     void *handle;
 };
 
@@ -5329,11 +5381,14 @@ void semaphore_signal(Semaphore *sem);
 void semaphore_wait_for(Semaphore *sem, bool infinite);
 void semaphore_destroy(Semaphore *sem);
 
-struct Mutex {
+
+typedef struct Mutex Mutex;
+struct Mutex
+{
     void *handle;
 };
 
-Mutex mutex_create(u32 spin_count = 0);
+Mutex mutex_create(u32 spin_count);
 void  aquire_lock(Mutex *mutex);
 bool  try_aquire_lock(Mutex *mutex);
 void  release_lock(Mutex *mutex);
@@ -5342,12 +5397,17 @@ void  mutex_destroy(Mutex *mutex);
 #define WORKER_PROC(name) void name(void *data)
 typedef WORKER_PROC(Worker_Proc);
 
-struct Work_Entry {
+
+typedef struct Work_Entry Work_Entry;
+struct Work_Entry
+{
     Worker_Proc *callback;
     void *data;
 };
 
-struct Work_Queue {
+typedef struct Work_Queue Work_Queue;
+struct Work_Queue
+{
     u32 volatile completion_goal;
     u32 volatile completion_count;
 
@@ -5358,7 +5418,10 @@ struct Work_Queue {
     Work_Entry entries[256];
 };
 
-struct Worker_Params {
+
+typedef struct Worker_Params Worker_Params;
+struct Worker_Params
+{
     Work_Queue *queue;
 };
 
@@ -5369,7 +5432,7 @@ void work_queue_complete_all_work(Work_Queue *queue);
 #if OS_WINDOWS
 
 Semaphore semaphore_create(u32 max_count) {
-    Semaphore result = {};
+    Semaphore result = {0};
     result.handle = CreateSemaphoreEx(0, 0, max_count, 0, 0, SEMAPHORE_ALL_ACCESS);
     return result;
 }
@@ -5397,7 +5460,7 @@ void semaphore_destroy(Semaphore *sem) {
 }
 
 Mutex mutex_create(u32 spin_count) {
-    Mutex result = {};
+    Mutex result = {0};
 
     result.handle = os_alloc(sizeof(CRITICAL_SECTION));
     assert(result.handle);
@@ -5487,7 +5550,7 @@ void semaphore_destroy(Semaphore *sem) {
 }
 
 Mutex mutex_create(u32 spin_count) {
-    Mutex result = {};
+    Mutex result = {0};
 
     result.handle = os_alloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(cast(pthread_mutex_t *)result.handle, NULL);

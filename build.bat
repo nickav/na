@@ -6,7 +6,7 @@ set project_root=%script_path%
 
 :: Config
 set build_folder=%project_root%\build\
-set src_file=%project_root%\test\main.cpp
+set src_file=%project_root%\test\main.c
 set exe_name=na.exe
 
 :: Build executable

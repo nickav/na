@@ -34,6 +34,7 @@ int main() {
     arena_alloc(b, kilobytes(1));
     assert(b->commit_position == ARENA_COMMIT_BLOCK_SIZE);
 
+    #if 0
     arena_alloc(b, ARENA_COMMIT_BLOCK_SIZE);
     assert(b->commit_position == (ARENA_COMMIT_BLOCK_SIZE * 2));
 
@@ -42,6 +43,7 @@ int main() {
 
     arena_reset(b);
     assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
+    #endif
   }
 
   print("\n\n");
