@@ -985,11 +985,11 @@ bool arena_write(Arena *arena, u8 *data, u64 size) {
 }
 
 
-#define push_struct(arena, Struct) (Struct *)arena_push_zero(arena, sizeof(Struct))
+#define PushStruct(arena, Struct) (Struct *)arena_push_zero(arena, sizeof(Struct))
 
-#define push_array(arena, Struct, count) (Struct *)arena_push_zero(arena, (count) * sizeof(Struct))
+#define PushArray(arena, Struct, count) (Struct *)arena_push_zero(arena, (count) * sizeof(Struct))
 
-#define push_array_zero(arena, Struct, count) push_array(arena, Struct, count)
+#define PushArrayZero(arena, Struct, count) PushArray(arena, Struct, count)
 
 Arena_Mark arena_get_position(Arena *arena) {
     Arena_Mark result = {};
@@ -1297,7 +1297,7 @@ char *string_to_cstr(Arena *arena, String str) {
         return NULL;
     }
 
-    char *result = push_array(arena, char, str.count + 1); // size for null character
+    char *result = PushArray(arena, char, str.count + 1); // size for null character
     memory_copy(str.data, result, str.count);
     result[str.count] = 0;
     return result;
@@ -1482,11 +1482,11 @@ i64 string_count_occurances(String str, String search, i64 start_index = 0) {
     return result;
 }
 
-#define push_string_copy string_copy
+#define PushStringCopy string_copy
 
 String string_copy(Arena *arena, String other) {
     String copy = {};
-    u8 *data = push_array(arena, u8, other.count);
+    u8 *data = PushArray(arena, u8, other.count);
 
     if (data) {
         copy = make_string(data, other.count);
@@ -1519,7 +1519,7 @@ String string_write(String str, u8 *buffer, u64 limit) {
 
 String string_push(Arena *arena, i64 count)
 {
-    u8 *buffer = push_array(arena, u8, count);
+    u8 *buffer = PushArray(arena, u8, count);
     return make_string(buffer, count);
 }
 
@@ -1545,7 +1545,7 @@ void string_free(Allocator allocator, String *string) {
 
 String string_concat(Arena *arena, String a, String b) {
     u64 count = a.count + b.count;
-    u8 *data = push_array(arena, u8, count);
+    u8 *data = PushArray(arena, u8, count);
 
     if (data) {
         memory_copy(a.data, data + 0,       a.count);
@@ -1557,7 +1557,7 @@ String string_concat(Arena *arena, String a, String b) {
 
 String string_concat(Arena *arena, String a, String b, String c) {
     u64 count = a.count + b.count + c.count;
-    u8 *data = push_array(arena, u8, count);
+    u8 *data = PushArray(arena, u8, count);
 
     if (data) {
         memory_copy(a.data, data + 0,                 a.count);
@@ -1570,7 +1570,7 @@ String string_concat(Arena *arena, String a, String b, String c) {
 
 String string_concat(Arena *arena, String a, String b, String c, String d) {
     u64 count = a.count + b.count + c.count + d.count;
-    u8 *data = push_array(arena, u8, count);
+    u8 *data = PushArray(arena, u8, count);
 
     if (data) {
         memory_copy(a.data, data + 0,                           a.count);
@@ -1673,7 +1673,7 @@ String string_printv(Arena *arena, const char *format, va_list args) {
     va_copy(args2, args);
 
     i64 buffer_size = 1024;
-    u8 *buffer = push_array(arena, u8, buffer_size);
+    u8 *buffer = PushArray(arena, u8, buffer_size);
 
     if (buffer != NULL)
     {
@@ -1691,7 +1691,7 @@ String string_printv(Arena *arena, const char *format, va_list args) {
             else
             {
                 arena_pop(arena, buffer_size);
-                u8 *fixed_buffer = push_array(arena, u8, actual_size);
+                u8 *fixed_buffer = PushArray(arena, u8, actual_size);
 
                 if (fixed_buffer != NULL)
                 {
@@ -2203,7 +2203,7 @@ u32 string_encode_utf16(u16 *dest, u32 codepoint) {
 }
 
 String32 string32_from_string(Arena *arena, String str) {
-    u32 *memory = push_array(arena, u32, str.count);
+    u32 *memory = PushArray(arena, u32, str.count);
 
     u32 *at = memory;
     u8 *p0 = str.data;
@@ -2228,7 +2228,7 @@ String32 string32_from_string(Arena *arena, String str) {
 }
 
 String string_from_string32(Arena *arena, String32 str) {
-    u8 *memory = push_array(arena, u8, str.count * 4);
+    u8 *memory = PushArray(arena, u8, str.count * 4);
 
     u32 *p0 = str.data;
     u32 *p1 = str.data + str.count;
@@ -2253,7 +2253,7 @@ String string_from_string32(Arena *arena, String32 str) {
 
 String16 string16_from_string(Arena *arena, String str) {
     arena_align(arena, sizeof(u16));
-    u16 *data = push_array(arena, u16, str.count * 2 + 1);
+    u16 *data = PushArray(arena, u16, str.count * 2 + 1);
 
     u16 *at = data;
     u8 *p0 = str.data;
@@ -2281,7 +2281,7 @@ String16 string16_from_string(Arena *arena, String str) {
 
 String string_from_string16(Arena *arena, String16 str) {
     String result = {};
-    result.data = push_array(arena, u8, str.count * 3 + 1);
+    result.data = PushArray(arena, u8, str.count * 3 + 1);
 
     u16 *p0 = str.data;
     u16 *p1 = str.data + str.count;
@@ -3199,7 +3199,7 @@ String os_get_executable_path() {
     Arena *arena = temp_arena();
 
     u64 buffer_size = 2048;
-    WCHAR *buffer = push_array(arena, WCHAR, buffer_size);
+    WCHAR *buffer = PushArray(arena, WCHAR, buffer_size);
 
     DWORD length = GetModuleFileNameW(NULL, buffer, buffer_size);
     if (length == 0) {
@@ -3213,7 +3213,7 @@ String os_get_executable_path() {
             arena_pop(arena, buffer_size * sizeof(WCHAR));
 
             buffer_size *= 2;
-            buffer = push_array(arena, WCHAR, buffer_size);
+            buffer = PushArray(arena, WCHAR, buffer_size);
             length = GetModuleFileNameW(NULL, buffer, buffer_size);
 
             if (!(length == buffer_size && GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
@@ -3243,7 +3243,7 @@ String os_get_current_directory() {
         return {};
     }
 
-    WCHAR *buffer = push_array(arena, WCHAR, length);
+    WCHAR *buffer = PushArray(arena, WCHAR, length);
     DWORD bytes_written = GetCurrentDirectoryW(length, buffer);
     if (bytes_written + 1 != length) {
         return {};
@@ -3766,19 +3766,20 @@ File_Info os_get_file_info(Arena *arena, String path) {
 
     char *cpath = string_to_cstr(scratch.arena, path);
 
-    struct stat64 stat_info;
-    bool file_exists = stat64(cpath, &stat_info) == 0;
+    struct stat64 st;
+    bool file_exists = stat64(cpath, &st) == 0;
 
     File_Info info = {};
 
     if (file_exists) {
         info.name             = path_filename(path);
-        info.last_accessed_at = unix_date_from_time(stat_info.st_atime);
-        info.updated_at       = unix_date_from_time(stat_info.st_mtime);
+        info.size             = st.st_size;
+        info.last_accessed_at = unix_date_from_time(st.st_atime);
+        info.updated_at       = unix_date_from_time(st.st_mtime);
          // NOTE(nick): not really created time, but UNIX doesn't have this concept
-        info.created_at       = unix_date_from_time(stat_info.st_ctime);
-        info.flags            = unix_flags_from_mode(stat_info.st_mode, info.name);
-        info.access           = unix_access_from_mode(stat_info.st_mode);
+        info.created_at       = unix_date_from_time(st.st_ctime);
+        info.flags            = unix_flags_from_mode(st.st_mode, info.name);
+        info.access           = unix_access_from_mode(st.st_mode);
     }
 
     end_scratch_memory(scratch);
@@ -5036,6 +5037,16 @@ void os_file_append(File *file, String str) {
     file->offset += str.count;
 }
 
+void os_file_print(File *file, char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    String result = string_printv(temp_arena(), format, args);
+    va_end(args);
+
+    os_file_append(file, result);
+}
+
 String os_get_executable_directory() {
     String result = os_get_executable_path();
     return path_dirname(result);
@@ -5148,17 +5159,20 @@ Array<File_Info> os_scan_directory(Allocator allocator, Arena *string_memory, St
     i64 count = os_count_directory(path);
 
     Array<File_Info> result = {};
-    array_init_from_allocator(&result, allocator, count);
+    if (count > 0)
+    {
+        array_init_from_allocator(&result, allocator, count);
 
-    auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
+        auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
 
-    File_Info info = {};
-    while (os_file_list_next(&handle, &info)) {
-        auto it = array_push(&result, info);
-        it->name = string_copy(string_memory, it->name);
+        File_Info info = {};
+        while (os_file_list_next(&handle, &info)) {
+            auto it = array_push(&result, info);
+            it->name = string_copy(string_memory, it->name);
+        }
+
+        os_file_list_end(&handle);
     }
-
-    os_file_list_end(&handle);
 
     return result;
 }
@@ -5167,17 +5181,20 @@ Array<File_Info> os_scan_directory(Allocator allocator, String path) {
     i64 count = os_count_directory(path);
 
     Array<File_Info> result = {};
-    array_init_from_allocator(&result, allocator, count);
+    if (count > 0)
+    {
+        array_init_from_allocator(&result, allocator, count);
 
-    auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
+        auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
 
-    File_Info info = {};
-    while (os_file_list_next(&handle, &info)) {
-        auto it = array_push(&result, info);
-        it->name = string_alloc(allocator, it->name);
+        File_Info info = {};
+        while (os_file_list_next(&handle, &info)) {
+            auto it = array_push(&result, info);
+            it->name = string_alloc(allocator, it->name);
+        }
+
+        os_file_list_end(&handle);
     }
-
-    os_file_list_end(&handle);
 
     return result;
 }
