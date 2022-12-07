@@ -425,36 +425,43 @@ StaticAssert(sizeof(u64) == 8);
 // Linked List Helpers
 //
 
-#define IsZero(x) (x==0)
+#define CheckNull(p) ((p)==0)
+#define SetNull(p) ((p)=0)
 
-#define DLLPushBack_NPZ(f,l,n,next,prev,zcheck) (zcheck(f) ? (f)=(l)=(n), ((n)->next=(n)->prev=0) : ((n)->prev=(l), (l)->next=(n), (l)=(n), (n)->next=0))
-#define DLLPushBack_NP(f,l,n,next,prev) DLLPushBack_NPZ(f,l,n,next,prev,IsZero)
-#define DLLPushBack(f,l,n) DLLPushBack_NPZ(f,l,n,next,prev,IsZero)
+#define QueuePush_NZ(f,l,n,next,zchk,zset) (zchk(f)?\
+(((f)=(l)=(n)), zset((n)->next)):\
+((l)->next=(n),(l)=(n),zset((n)->next)))
+#define QueuePushFront_NZ(f,l,n,next,zchk,zset) (zchk(f) ? (((f) = (l) = (n)), zset((n)->next)) :\
+((n)->next = (f)), ((f) = (n)))
+#define QueuePop_NZ(f,l,next,zset) ((f)==(l)?\
+(zset(f),zset(l)):\
+(f)=(f)->next)
+#define StackPush_N(f,n,next) ((n)->next=(f),(f)=(n))
+#define StackPop_NZ(f,next,zchk) (zchk(f)?0:((f)=(f)->next))
 
-#define DLLPushFront(f,l,n) DLLPushBack_NPZ(l,f,n,prev,next,IsZero)
+#define DLLInsert_NPZ(f,l,p,n,next,prev,zchk,zset) \
+(zchk(f) ? (((f) = (l) = (n)), zset((n)->next), zset((n)->prev)) :\
+zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n))), (f) = (n)) :\
+((zchk((p)->next) ? (0) : (((p)->next->prev) = (n))), (n)->next = (p)->next, (n)->prev = (p), (p)->next = (n),\
+((p) == (l) ? (l) = (n) : (0))))
+#define DLLPushBack_NPZ(f,l,n,next,prev,zchk,zset) DLLInsert_NPZ(f,l,l,n,next,prev,zchk,zset)
+#define DLLRemove_NPZ(f,l,n,next,prev,zchk,zset) (((f)==(n))?\
+((f)=(f)->next, (zchk(f) ? (zset(l)) : zset((f)->prev))):\
+((l)==(n))?\
+((l)=(l)->prev, (zchk(l) ? (zset(f)) : zset((l)->next))):\
+((zchk((n)->next) ? (0) : ((n)->next->prev=(n)->prev)),\
+(zchk((n)->prev) ? (0) : ((n)->prev->next=(n)->next))))
 
-#define DLLRemove_NP(f,l,n,next,prev) ((f)==(n)?\
-((f)==(l) ? ((f)=(l)=(0)) : ((f)=(f)->next,(f)->prev=0)):\
-((l)==(n) ? ((l)=(l)->prev,(l)->next=0) : ((n)->next->prev=(n)->prev, (n)->prev->next=(n)->next)))
-#define DLLRemove(f,l,n) DLLRemove_NP(f,l,n,next,prev)
 
-#define SLLQueuePushBack_NZ(f,l,n,next,zcheck) (zcheck(f) ? ((f)=(l)=(n), (n)->next=0) : ((l)->next=(n), (n)->next=0, (l)=(n)))
-#define SLLQueuePushBack_N(f,l,n,next) SLLQueuePushBack_NZ(f,l,n,next,IsZero)
-#define SLLQueuePushBack(f,l,n) SLLQueuePushBack_NZ(f,l,n,next,IsZero)
-
-#define SLLQueuePushFront_NZ(f,l,n,next,zcheck) (zcheck(f) ? ((f)=(l)=(n), (n)->next=0) : ((n)->next=(f), (f)=(n)))
-#define SLLQueuePushFront_N(f,l,n,next) SLLQueuePushFront_NZ(f,l,n,next,IsZero)
-#define SLLQueuePushFront(f,l,n) SLLQueuePushFront_NZ(f,l,n,next,IsZero)
-
-#define SLLQueuePop_N(f,l,next) ((f)==(l) ? (f)=(l)=0 : (f)=(f)->next)
-#define SLLQueuePop(f,l) SLLQueuePop_N(f,l,next)
-
-#define SLLStackPush_N(f,n,next) ((n)->next=(f), (f)=(n))
-#define SLLStackPush(f,n) SLLStackPush_N(f,n,next)
-
-#define SLLStackPop_NZ(f,next,zcheck) (zcheck(f) ? 0 : (f)=(f)->next)
-#define SLLStackPop_N(f,next) SLLStackPop_NZ(f,next,IsZero)
-#define SLLStackPop(f) SLLStackPop_NZ(f,next,IsZero)
+#define QueuePush(f,l,n)         QueuePush_NZ(f,l,n,next,CheckNull,SetNull)
+#define QueuePushFront(f,l,n)    QueuePushFront_NZ(f,l,n,next,CheckNull,SetNull)
+#define QueuePop(f,l)            QueuePop_NZ(f,l,next,SetNull)
+#define StackPush(f,n)           StackPush_N(f,n,next)
+#define StackPop(f)              StackPop_NZ(f,next,CheckNull)
+#define DLLPushBack(f,l,n)       DLLPushBack_NPZ(f,l,n,next,prev,CheckNull,SetNull)
+#define DLLPushFront(f,l,n)      DLLPushBack_NPZ(l,f,n,prev,next,CheckNull,SetNull)
+#define DLLInsert(f,l,p,n)       DLLInsert_NPZ(f,l,p,n,next,prev,CheckNull,SetNull)
+#define DLLRemove(f,l,n)         DLLRemove_NPZ(f,l,n,next,prev,CheckNull,SetNull)
 
 //
 // Helpers

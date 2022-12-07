@@ -177,13 +177,13 @@ int main() {
     Node *sll_last = NULL;
 
     Node n1 = {4};
-    SLLQueuePushBack(sll_first, sll_last, &n1);
+    QueuePush(sll_first, sll_last, &n1);
 
     Node n2 = {2};
-    SLLQueuePushBack(sll_first, sll_last, &n2);
+    QueuePush(sll_first, sll_last, &n2);
 
     Node n3 = {42};
-    SLLQueuePushFront(sll_first, sll_last, &n3);
+    QueuePushFront(sll_first, sll_last, &n3);
 
     print("linked list items: ");
     {
@@ -195,9 +195,9 @@ int main() {
     }
     print("\n");
 
-    SLLQueuePop(sll_first, sll_last);
-    SLLQueuePop(sll_first, sll_last);
-    SLLQueuePop(sll_first, sll_last);
+    QueuePop(sll_first, sll_last);
+    QueuePop(sll_first, sll_last);
+    QueuePop(sll_first, sll_last);
     assert(sll_first == 0);
 
 
@@ -247,13 +247,13 @@ int main() {
     Node *stack = 0;
 
     Node s1 = {99};
-    SLLStackPush(stack, &s1);
+    StackPush(stack, &s1);
 
     Node s2 = {7};
-    SLLStackPush(stack, &s2);
+    StackPush(stack, &s2);
 
     Node s3 = {2};
-    SLLStackPush(stack, &s3);
+    StackPush(stack, &s3);
 
     print("stack items: ");
     {
@@ -265,9 +265,9 @@ int main() {
     }
     print("\n");
 
-    SLLStackPop(stack);
-    SLLStackPop(stack);
-    SLLStackPop(stack);
+    StackPop(stack);
+    StackPop(stack);
+    StackPop(stack);
     assert(stack == 0);
   }
 
