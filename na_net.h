@@ -77,6 +77,32 @@ VERSION HISTORY
 #endif
 
 //
+// Simple TCP Example
+//
+#if 0
+    Socket socket = socket_create_tcp_server(socket_make_address_from_url(S("127.0.0.1:3000")));
+    Socket client;
+
+    while (1)
+    {
+        reset_temporary_storage();
+
+        Socket client;
+        Socket_Address client_address;
+        if (socket_accept(&socket, &client, &client_address))
+        {
+            print("Got request from %S:%d\n", socket_get_address_name(client_address), client_address.port);
+            
+            auto request = socket_recieve_entire_stream(temp_arena(), &client);
+            socket_send(&client, {}, S("HTTP/1.1 200 OK\r\n\r\nHello, World!\r\n\r\n"));
+            socket_close(&client);
+        }
+
+        os_sleep(1);
+    }
+#endif
+
+//
 // UDP Client/Server Example
 //
 #if 0
@@ -182,6 +208,8 @@ enum
 typedef struct Http Http;
 struct Http
 {
+    Http *next;
+
     Socket      socket;
     Http_Status status;
 
@@ -202,6 +230,8 @@ struct Http
 typedef struct Http_Header Http_Header;
 struct Http_Header
 {
+    Http_Header *next;
+
     String key;
     String value;
 };
@@ -217,7 +247,9 @@ struct Http_Request
 typedef struct Http_Manager Http_Manager;
 struct Http_Manager
 {
-    Array<Http> requests;
+    Arena *arena;
+    Http *first_request;
+    Http *last_request;
 };
 
 
@@ -263,13 +295,14 @@ Http http_delete(String url);
 void http_process(Http *http);
 
 
-Array<Http_Header> http_parse_headers(String headers);
+Http_Header *http_parse_headers(Arena *arena, String headers);
 Http_Request http_parse_request(String request);
 
 void http_manager_init(Http_Manager *manager);
 void http_manager_add(Http_Manager *manager, Http *request);
 void http_manager_update(Http_Manager *manager);
 Http *http_manager_get_completed(Http_Manager *manager);
+
 
 
 #endif // NA_NET_H
@@ -370,7 +403,7 @@ Socket_Address socket_make_address(const char *host, u16 port)
     return result;
 }
 
-na_internal Url_Parts socket_parse_url(String url)
+static Url_Parts socket_parse_url(String url)
 {
     Url_Parts result = {};
 
@@ -775,12 +808,14 @@ Socket_Address socket_make_address_from_url(String url)
 
 Socket socket_create_udp_server(Socket_Address address)
 {
+    socket_init();
+
     Socket result = socket_open(SocketType_UDP);
 
     if (!socket_bind(&result, address))
     {
         String url = socket_get_address_name(address);
-        print("[socket] Failed to bind to address: %S\n", url);
+        print("[socket] Failed to bind to address: %.*s\n", LIT(url));
         socket_close(&result);
         return result;
     }
@@ -790,6 +825,8 @@ Socket socket_create_udp_server(Socket_Address address)
 
 Socket socket_create_udp_client(Socket_Address address)
 {
+    socket_init();
+
     Socket result = socket_open(SocketType_UDP);
 
     //socket_bind(&result, socket_make_address(0, 0));
@@ -797,7 +834,7 @@ Socket socket_create_udp_client(Socket_Address address)
     if (!socket_connect(&result, address))
     {
         String url = socket_get_address_name(address);
-        print("[socket] Failed to connect to server address: %S\n", url);
+        print("[socket] Failed to connect to server address: %.*s\n", LIT(url));
         socket_close(&result);
         return result;
     }
@@ -808,6 +845,8 @@ Socket socket_create_udp_client(Socket_Address address)
 
 Http http_request(String verb, String url, String headers, String data)
 {
+    socket_init();
+
     Http result = {};
 
     auto parts = socket_parse_url(url);
@@ -818,7 +857,7 @@ Http http_request(String verb, String url, String headers, String data)
 
     if (parts.protocol.count > 0 && !string_equals(parts.protocol, S("http")))
     {
-        print("[http] Protocol not supported: %S\n", parts.protocol);
+        print("[http] Protocol not supported: %.*s\n", LIT(parts.protocol));
         result.status = HttpStatus_Failed;
         return result;
     }
@@ -847,7 +886,7 @@ Http http_request(String verb, String url, String headers, String data)
     // If you print anything at all into temp_arena() during this section, then you
     // will mess up the request!
 
-    String request_data = sprint("%S %S HTTP/1.0\r\nHost: %S:%d\r\n", verb, parts.path, parts.host, parts.port);
+    String request_data = sprint("%.*s %.*s HTTP/1.0\r\nHost: %.*s:%d\r\n", LIT(verb), LIT(parts.path), LIT(parts.host), parts.port);
 
     if (data.count)
     {
@@ -856,14 +895,14 @@ Http http_request(String verb, String url, String headers, String data)
 
     if (headers.count)
     {
-        request_data.count += sprint("%S", headers).count;
+        request_data.count += sprint("%.*s", LIT(headers)).count;
     }
 
     request_data.count += sprint("\r\n\r\n").count;
 
     if (data.count)
     {
-        request_data.count += sprint("%S", data).count;
+        request_data.count += sprint("%.*s", LIT(data)).count;
     }
 
     result.request_data = string_alloc(os_allocator(), request_data);
@@ -892,24 +931,38 @@ Http http_delete(String url)
     return http_request(S("DELETE"), url, {}, {});
 }
 
-Array<Http_Header> http_parse_headers(String headers)
+Http_Header *http_parse_headers(Arena *arena, String headers)
 {
-    Array<Http_Header> results = {};
-    results.allocator = temp_allocator();
+    Http_Header *results = NULL;
+    Http_Header *last_result = NULL;
 
-    auto lines = string_split(headers, S("\r\n"));
-    array_init_from_allocator(&results, temp_allocator(), lines.count);
+    i64 prev_index = 0;
+    i64 index = string_find(headers, S("\r\n"), 0, 0);
 
-    for (i64 i = 0; i < lines.count; i += 1)
+    while (index < headers.count)
     {
-        auto line = lines[i];
-        i64 index = string_find(line, S(":"));
-        if (index < line.count)
+        String line = string_slice(headers, prev_index, index);
+        i64 i = string_find(line, S(":"), 0, 0);
+        if (i < line.count)
         {
-            auto it   = array_push(&results);
-            it->key   = string_slice(line, 0, index);
-            it->value = string_trim_whitespace(string_slice(line, index + 1));
+            Http_Header *it = PushStruct(arena, Http_Header);
+            it->key   = string_slice(line, 0, i);
+            it->value = string_trim_whitespace(string_slice(line, i + 1));
+            QueuePush(results, last_result, it);
         }
+
+        prev_index = index + S("\r\n").count;
+        index = string_find(headers, S("\r\n"), prev_index + 1, 0);
+    }
+
+    String line = string_slice(headers, prev_index, index);
+    i64 i = string_find(line, S(":"), 0, 0);
+    if (i < line.count)
+    {
+        Http_Header *it = PushStruct(arena, Http_Header);
+        it->key   = string_slice(line, 0, i);
+        it->value = string_trim_whitespace(string_slice(line, i + 1));
+        QueuePush(results, last_result, it);
     }
 
     return results;
@@ -1026,16 +1079,19 @@ void http_process(Http *http)
 
 void http_init(Http_Manager *manager)
 {
-    array_init_from_allocator(&manager->requests, os_allocator(), 16);
+    manager->arena = arena_alloc_from_memory(gigabytes(1));
 }
 
 void http_add(Http_Manager *manager, Http request)
 {
-    array_push(&manager->requests, request);
+    // @Incomplete!
+    //array_push(&manager->requests, request);
 }
 
 void http_update(Http_Manager *manager)
 {
+    // @Incomplete!
+    /*
     For_Index (manager->requests)
     {
         auto it = &manager->requests[index];
@@ -1050,6 +1106,7 @@ void http_update(Http_Manager *manager)
     {
         http_process(it);
     }
+    */
 }
 
 
@@ -1087,7 +1144,7 @@ Socket socket_create_tcp_server(Socket_Address address)
     if (!socket_bind(&result, address))
     {
         String url = socket_get_address_name(address);
-        print("[socket] Failed to bind to address: %S:%d\n", url, address.port);
+        print("[socket] Failed to bind to address: %.*s:%d\n", LIT(url), address.port);
         socket_close(&result);
         return result;
     }
@@ -1241,11 +1298,11 @@ THREAD_PROC(http_responder_thread)
 
 
     auto status_name = http_status_name_from_code(response.status_code);
-    String response_data = sprint("HTTP/1.0 %d %S\r\n", response.status_code, status_name);
+    String response_data = sprint("HTTP/1.0 %d %.*s\r\n", response.status_code, LIT(status_name));
 
     if (response.content_type.count)
     {
-        response_data.count += sprint("Content-Type: %S\r\n", response.content_type).count;
+        response_data.count += sprint("Content-Type: %.*s\r\n", LIT(response.content_type)).count;
     }
 
     if (response.body.count)
@@ -1257,7 +1314,7 @@ THREAD_PROC(http_responder_thread)
     {
         For (response.headers)
         {
-            response_data.count += sprint("%S: %S\r\n", it.key, it.value).count;
+            response_data.count += sprint("%.*s: %.*s\r\n", LIT(it.key), LIT(it.value)).count;
         }
     }
 
@@ -1311,7 +1368,7 @@ void http_server_run(String server_url, Http_Request_Callback request_handler)
     Http_Server server = http_server_init(server_url);
     if (!socket_is_valid(server.socket))
     {
-        print("Failed to start HTTP server at %S\n", server_url);
+        print("Failed to start HTTP server at %.*s\n", LIT(server_url));
         return;
     }
 
@@ -1322,28 +1379,5 @@ void http_server_run(String server_url, Http_Request_Callback request_handler)
         os_sleep(1);
     }
 }
-
-#if 0
-    Socket socket = socket_create_tcp_server(socket_make_address_from_url(S("127.0.0.1:3000")));
-    Socket client;
-
-    while (1)
-    {
-        reset_temporary_storage();
-
-        Socket client;
-        Socket_Address client_address;
-        if (socket_accept(&socket, &client, &client_address))
-        {
-            print("Got request from %S:%d\n", socket_get_address_name(client_address), client_address.port);
-            
-            auto request = socket_recieve_entire_stream(temp_arena(), &client);
-            socket_send(&client, {}, S("HTTP/1.1 200 OK\r\n\r\nHello, World!\r\n\r\n"));
-            socket_close(&client);
-        }
-
-        os_sleep(1);
-    }
-#endif
 
 #endif // NA_NET_IMPLEMENTATION

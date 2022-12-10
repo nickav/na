@@ -27,21 +27,40 @@ int main() {
     Arena *b = arena_alloc_from_memory(gigabytes(2));
 
     arena_alloc(b, kilobytes(2));
-    assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
+    assert(b->commit_pos == ARENA_INITIAL_COMMIT_SIZE);
 
     arena_alloc(b, kilobytes(1));
-    assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
+    assert(b->commit_pos == ARENA_INITIAL_COMMIT_SIZE);
     arena_alloc(b, kilobytes(1));
-    assert(b->commit_position == ARENA_COMMIT_BLOCK_SIZE);
+    assert(b->commit_pos == 2 * ARENA_COMMIT_SIZE);
 
-    arena_alloc(b, ARENA_COMMIT_BLOCK_SIZE);
-    assert(b->commit_position == (ARENA_COMMIT_BLOCK_SIZE * 2));
+    arena_alloc(b, ARENA_COMMIT_SIZE);
+    assert(b->commit_pos == (ARENA_COMMIT_SIZE * 3));
 
-    arena_pop(b, ARENA_COMMIT_BLOCK_SIZE);
-    assert(b->commit_position == (ARENA_COMMIT_BLOCK_SIZE));
+    Arena *arena = arena_alloc_from_memory(gigabytes(2));
 
-    arena_reset(b);
-    assert(b->commit_position == ARENA_INITIAL_COMMIT_SIZE);
+    arena_push(arena, kilobytes(128));
+    assert(arena->commit_pos == kilobytes(132));
+    arena_pop(arena, kilobytes(32));
+    assert(arena->commit_pos == kilobytes(132));
+    arena_pop(arena, kilobytes(32));
+    assert(arena->commit_pos == kilobytes(68));
+
+    Arena *c = arena_alloc_from_memory(megabytes(1));
+
+    u8 *byte = (u8 *)arena_push(c, 1);
+    *byte = 'H';
+    assert(byte == c->data);
+    print("arena->pos: %lld\n", c->pos);
+    arena_print(c, "Hello, Sailor!");
+    print("arena->pos: %lld\n", c->pos);
+
+    String str = arena_to_string(c);
+    print("arena_to_string: %.*s, %lld bytes\n", LIT(str), str.count);
+
+    print("Done!\n");
+
+    return 0;
   }
 
   print("\n\n");
