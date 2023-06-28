@@ -1,10 +1,15 @@
 /*
-    na.h - v0.03
+    na.h - v0.04
     Nick Aversano's C++ helper library
 
     This is a single header file with a bunch of useful stuff
     to replace the C++ standard library.
 ===========================================================================
+
+USAGE
+    Define this in your source file:
+
+    #include "na.h"
 
 LICENSE
     This software is dual-licensed to the public domain and under the following
@@ -13,8 +18,10 @@ LICENSE
 
 CREDITS
     Written by Nick Aversano
+    Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.04  - breaking API changes, lots of new stuff!
     0.03  - arena improvements
     0.02  - replace nja with na, arena and thread clean up
     0.01  - Initial version
@@ -23,205 +30,133 @@ VERSION HISTORY
 #ifndef NA_H
 #define NA_H
 
-#include <stdarg.h>
-#include <stdint.h>
-#include <stddef.h>
+#ifndef BASE_CTX_CRACK_H
+#define BASE_CTX_CRACK_H
 
 //
-// Environment
+// OS
 //
 
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(_WIN32)
     #define OS_WINDOWS 1
 #elif defined(__APPLE__)
     #define OS_MACOS 1
-#elif defined(__unix__)
-    #if defined(__linux__)
-        #define OS_LINUX 1
-    #else
-        #error This UNIX operating system is not supported!
-    #endif
-#else
-    #error [OS] Unsupported operating system!
+#elif defined(__linux__)
+    #define OS_LINUX 1
 #endif
 
-#ifndef OS_WINDOWS
-#define OS_WINDOWS 0
+#if !defined(OS_WINDOWS)
+    #define OS_WINDOWS 0
+#endif
+#if !defined(OS_LINUX)
+    #define OS_LINUX 0
+#endif
+#if !defined(OS_MACOS)
+    #define OS_MACOS 0
 #endif
 
-#ifndef OS_MACOS
-#define OS_MACOS 0
-#endif
-
-#ifndef OS_LINUX
-#define OS_LINUX 0
-#endif
-
-#if defined(_MSC_VER)
-    #define COMPILER_MSVC 1
-#elif defined(__GNUC__)
-    #define COMPILER_GCC 1
-#elif defined(__clang__)
-    #define COMPILER_CLANG 1
-#else
-    #error Unknown compiler!
-#endif
-
-#ifndef COMPILER_MSVC
-#define COMPILER_MSVC 0
-#endif
-
-#ifndef COMPILER_GCC
-#define COMPILER_GCC 0
-#endif
-
-#ifndef COMPILER_CLANG
-#define COMPILER_CLANG 0
-#endif
+//
+// Language
+//
 
 #if defined(__cplusplus)
-#define LANG_CPP 1
+    #define LANG_CPP 1
 #else
-#define LANG_C 1
+    #define LANG_C 1
 #endif
 
-#ifndef LANG_CPP
-#define LANG_CPP 0
+#if !defined(LANG_CPP)
+    #define LANG_CPP 0
 #endif
-
-#ifndef LANG_C
-#define LANG_C 0
-#endif
-
-#if LANG_C
-    #define BYTE_ORDER_LITTLE_ENDIAN (!*(u8*)&(u16){1})
-    #define BYTE_ORDER_BIG_ENDIAN    (!BYTE_ORDER_LITTLE_ENDIAN)
-#else
-    static const int __endian_check_num = 1; 
-
-    #define BYTE_ORDER_LITTLE_ENDIAN (*(char *)&__endian_check_num == 1)
-    #define BYTE_ORDER_BIG_ENDIAN  (!BYTE_ORDER_LITTLE_ENDIAN)
+#if !defined(LANG_C)
+    #define LANG_C 0
 #endif
 
 //
-// Print
+// Compiler
 //
+
+#if defined(_MSC_VER)
+    #define COMPILER_CL 1
+#elif defined(__clang__)
+    #define COMPILER_CLANG 1
+#elif defined(__GNUC__) || defined(__GNUG__)
+    #define COMPILER_GCC 1
+#endif
+
+#if !defined(COMPILER_CL)
+    #define COMPILER_CL 0
+#endif
+#if !defined(COMPILER_GCC)
+    #define COMPILER_GCC 0
+#endif
+#if !defined(COMPILER_CLANG)
+    #define COMPILER_CLANG 0
+#endif
+
+//
+// Arch
+//
+
+// TODO(nick): implement!
+
+#endif // BASE_CTX_CRACK_H
+
+#ifndef BASE_TYPES_H
+#define BASE_TYPES_H
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+//
+// Keywords
+//
+
+#define global         static
+#define function       static
+#define local_persist  static
+
+#if LANG_CPP
+    #if OS_WINDOWS
+        #define import extern "C" __declspec(dllimport)
+        #define export extern "C" __declspec(dllexport)
+    #else
+        #define import extern "C"
+        #define export extern "C"
+    #endif
+#else
+    #if OS_WINDOWS
+        #define import __declspec(dllimport)
+        #define export __declspec(dllexport)
+    #else
+        #define import
+        #define export
+    #endif
+#endif
+
+#if COMPILER_CL
+    #define thread_local __declspec(thread)
+#elif COMPILER_CLANG
+    #define thread_local __thread
+#elif COMPILER_GCC
+    #define thread_local __thread
+#endif
+
+#if COMPILER_CL && _MSC_VER < 1900 // COMPILER_CL_YEAR < 2015
+    #define __function__ "unknown"
+#else
+    #define __function__ __func__
+#endif
+
+#define fallthrough
 
 #if OS_WINDOWS
-    #define WIN32_LEAN_AND_MEAN
-    #define VC_EXTRALEAN
-    #define NOMINMAX
-    #include <windows.h>
-
-    #include <intrin.h>
-#elif OS_MACOS
-    #include <xmmintrin.h>
-#endif
-
-#if defined(STB_SPRINTF_IMPLEMENTATION) && !defined(print)
-    void na__stb_printf(const char *format, ...);
-
-    #define print na__stb_printf
-    #define print_to_buffer stbsp_vsnprintf
-
-
-    #if OS_WINDOWS
-    char *na__print_callback(const char *buf, void *user, int len) {
-        DWORD bytes_written;
-
-        HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        WriteFile(handle, buf, len, &bytes_written, 0);
-
-        return (char *)buf;
-    }
-    #else
-    #include <stdio.h>
-    char *na__print_callback(const char *buf, void *user, int len) {
-        fprintf(stdout, "%.*s", len, buf);
-        return (char *)buf;
-    }
-    #endif
-
-    void na__stb_printf(const char *format, ...) {
-        #if OS_WINDOWS
-        static bool did_init_print = false;
-        if (!did_init_print)
-        {
-            static HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-            if (!stdout_handle) {
-                AttachConsole(ATTACH_PARENT_PROCESS);
-            }
-        }
-        #endif
-
-        char na__output_buffer[STB_SPRINTF_MIN];
-
-        va_list args;
-        va_start(args, format);
-        stbsp_vsprintfcb(na__print_callback, 0, na__output_buffer, format, args);
-        va_end(args);
-    }
-#endif
-
-#ifndef print
-    #include <stdio.h>
-    #define print(...) do { printf(__VA_ARGS__); fflush(stdout); } while(0)
-#endif
-
-#ifndef print_to_buffer
-    #include <stdio.h>
-    #define print_to_buffer(data, max_length, format, args) vsnprintf(data, max_length, format, args)
-#endif
-
-#if DEBUG
-#ifndef DebugBreakpoint
-    #if defined(_MSC_VER)
-        #if _MSC_VER < 1300
-        #define DebugBreakpoint() __asm int 3 /* Trap to debugger! */
-        #else
-        #define DebugBreakpoint() __debugbreak()
-        #endif
-    #else
-        #define DebugBreakpoint() __builtin_trap()
-    #endif
-#endif
+    #pragma section(".roglob", read)
+    #define read_only __declspec(allocate(".roglob"))
 #else
-    #define DebugBreakpoint()
-#endif
-
-#ifndef assert
-#ifdef DEBUG
-    #ifndef AssertBreak
-    #define AssertBreak DebugBreakpoint
-    #endif
-
-    void na_assert_handler(const char *prefix, const char *expr, const char *file, long int line, char *msg) {
-        print("%s(%ld): %s: ", file, line, prefix);
-        if (expr) {
-            print( "`%s` ", expr);
-        }
-        if (msg) {
-            print("- %s", msg);
-        }
-        print("\n");
-    }
-
-    #define assert(expr) do { if (!(expr)) { na_assert_handler("Assertion Failed", #expr, __FILE__, __LINE__, NULL); AssertBreak(); } } while (0)
-#else
-    #define assert(...)
-#endif
-#endif
-
-#ifndef dump
-#if DEBUG
-    #define dump(var) print("%s: %s\n", #var, string_to_cstr(to_string(var)))
-#else
-    #define dump(...)
-#endif
-#endif
-
-#ifndef StaticAssert
-#define StaticAssert(expr) static_assert(expr, "")
+    #define read_only
 #endif
 
 #ifndef force_inline
@@ -236,172 +171,60 @@ VERSION HISTORY
     #endif
 #endif
 
-#ifndef na_extern
-    #define na_extern extern "C"
-#endif
+//
+// Helper Macros
+//
 
-#ifndef dll_export
-#if defined(_WIN32)
-    #define dll_export na_extern __declspec(dllexport)
-    #define dll_import na_extern __declspec(dllimport)
-#else
-    #define dll_export na_extern __attribute__((visibility("default")))
-    #define dll_import na_extern
-#endif
-#endif
+#define MemoryCopy(d,s,size) memcpy(d,s,size)
+#define MemoryMove(d,s,size) memmove(d,s,size)
+#define MemorySet(ptr,x,size) memset(ptr,x,size)
 
-#if !defined(thread_local)
-    #if defined(_MSC_VER) && _MSC_VER >= 1300
-        #define thread_local __declspec(thread)
-    #elif defined(__GNUC__)
-        #define thread_local __thread
-    #else
-        #define thread_local thread_local
-    #endif
-#endif
+#define MemoryCompare(a, b, s) memcmp(a, b, s)
+#define MemoryEquals(a, b, s) (memcmp(a, b, s) == 0)
 
-#define cast(type) (type)
+#define MemoryCopyStruct(d,s) do { assert((d)!=NULL && (s)!=NULL); Assert(sizeof(*(d))==sizeof(*(s))); MemoryCopy((d),(s),sizeof(*(d))); } while(0)
+#define MemoryCopyArray(d,s) do{ assert((d)!=NULL && (s)!=NULL); Assert(sizeof(d)==sizeof(s)); MemoryCopy((d),(s),sizeof(s)); }while(0)
 
-#define size_of(x) ((isize)sizeof(x))
+#define MemoryZero(p,s) do { assert((p)!=NULL); MemorySet((p), 0, (s)); } while(0)
+#define MemoryZeroStruct(p) MemoryZero((p), sizeof(*(p)))
+#define MemoryZeroArray(a) MemoryZero((a), sizeof(a))
 
-#define count_of(array) (sizeof(array) / sizeof((array)[0]))
-
-#define offset_of(Type, member) ((uint64_t) & (((Type *)0)->member))
-
-#define member_from_offset(ptr, Type, offset) (*(Type *)((u8 *)ptr + offset))
-
-#define align_of(Type) ((isize)alignof(Type))
-
+#define ArrayCount(a) (sizeof(a) / sizeof((a)[0]))
 #define IntFromPtr(p) (u64)(((u8*)p) - 0)
 #define PtrFromInt(i) (void*)(((u8*)0) + i)
+#define Member(S,m) ((S*)0)->m
+#define OffsetOf(S,m) IntFromPtr(&Member(S,m))
+#define CastFromMember(S,m,p) (S*)(((u8*)p) - OffsetOf(S,m))
+#define MemberFromOffset(ptr, off, type) *(type *)((u8 *)(ptr) + off)
+#define UnusedVariable(name) (void)name
 
-#define global        static // Global variables
-#define local         static // Local Persisting variables
-#define function      static // Internal linkage
+#define Bytes(n)      (n)
+#define Kilobytes(n)  (n << 10)
+#define Megabytes(n)  (n << 20)
+#define Gigabytes(n)  (((u64)n) << 30)
+#define Terabytes(n)  (((u64)n) << 40)
 
-#define fallthrough
+#define Thousand(x) ((x)*1000)
+#define Million(x) ((x)*1000000)
+#define Billion(x) ((x)*1000000000LL)
 
-#if OS_WINDOWS
-#pragma section(".roglob", read)
-#define read_only __declspec(allocate(".roglob"))
-#else
-// TODO(rjf): figure out if this benefit is possible on non-Windows
-#define read_only
-#endif
+#define HasFlag(fl,fi) ((fl)&(fi))
+#define SetFlag(fl,fi) ((fl)|=(fi))
+#define RemFlag(fl,fi) ((fl)&=~(fi))
+#define ToggleFlag(fl,fi) ((fl)^=(fi))
+#define SetFlagState(fl,fi,set) do { if (set) SetFlag(fl,fi); else RemFlag(fl,fi); } while (0)
 
-#define FourCC(a, b, c, d) (((u32)(a) << 0) | ((u32)(b) << 8) | ((u32)(c) << 16) | ((u32)(d) << 24))
+#define Swap(T,a,b) do{ T t__ = a; a = b; b = t__; }while(0)
 
-#define Swap(Type, a, b) do { Type tmp = (a); (a) = (b); (b) = tmp; } while (0)
+#define FourCC(a, b, c, d) \
+    (((u32)(a) << 0) | ((u32)(b) << 8) | ((u32)(c) << 16) | ((u32)(d) << 24))
 
-#ifndef CONCAT
-#define CONCAT_HELPER(x, y) x##y
-#define CONCAT(x, y) CONCAT_HELPER(x, y)
-#endif
-
-#ifndef STRINGIFY
-#define STRINGIFY2(x) #x
-#define STRINGIFY(x) STRINGIFY2(x)
-#endif
-
-#if !defined(defer) && LANG_CPP
-// Defer macro/thing.
-template<typename T>
-struct ExitScope {
-    T lambda;
-    ExitScope(T lambda) : lambda(lambda) {}
-    ~ExitScope() { lambda(); }
-    ExitScope(const ExitScope&);
-private:
-    ExitScope& operator =(const ExitScope&);
-};
-
-class ExitScopeHelp {
-public:
-    template<typename T>
-    ExitScope<T> operator+(T t) { return t; }
-};
-
-#define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
-#endif
-
-#define SetFlag(flags, mask, enable) do { if (enable) { flags |= (mask); } else { flags &= ~(mask); } } while(0)
+#define count_of ArrayCount
+#define offset_of OffsetOf
+#define cast(T) (T)
 
 //
-// Types
-//
-
-#ifndef NULL
-    #define NULL 0
-#endif
-
-#ifndef null
-    #define null nullptr
-#endif
-
-typedef uint8_t   u8;
-typedef int8_t    i8;
-typedef uint16_t  u16;
-typedef int16_t   i16;
-typedef uint32_t  u32;
-typedef int32_t   i32;
-typedef uint64_t  u64;
-typedef int64_t   i64;
-typedef float     f32;
-typedef double    f64;
-typedef size_t    usize;
-typedef ptrdiff_t isize;
-
-typedef i8  b8;
-typedef i16 b16;
-typedef i32 b32;
-
-typedef u8 byte;
-typedef i32 rune;
-
-#define enum8(Type)  u8
-#define enum16(Type) u16
-#define enum32(Type) u32
-#define enum64(Type) u64
-
-#define U8_MAX  0xff
-#define I8_MAX  0x7f
-#define I8_MIN  0x80
-#define U16_MAX 0xffff
-#define I16_MAX 0x7fff
-#define I16_MIN 0x8000
-#define U32_MAX 0xffffffff
-#define I32_MAX 0x7fffffff
-#define I32_MIN 0x80000000
-#define U64_MAX 0xffffffffffffffff
-#define I64_MAX 0x7fffffffffffffff
-#define I64_MIN 0x8000000000000000
-#define F32_MIN 1.17549435e-38f
-#define F32_MAX 3.40282347e+38f
-#define F64_MIN 2.2250738585072014e-308
-#define F64_MAX 1.7976931348623157e+308
-
-#define USIZE_MIX U64_MIN
-#define USIZE_MAX U64_MAX
-#define ISIZE_MIX I64_MIN
-#define ISIZE_MAX I64_MAX
-
-StaticAssert(sizeof(u8)  == sizeof(i8));
-StaticAssert(sizeof(u16) == sizeof(i16));
-StaticAssert(sizeof(u32) == sizeof(i32));
-StaticAssert(sizeof(u64) == sizeof(i64));
-
-StaticAssert(sizeof(f32) == 4);
-StaticAssert(sizeof(f64) == 8);
-
-StaticAssert(sizeof(usize) == sizeof(isize));
-
-StaticAssert(sizeof(u8)  == 1);
-StaticAssert(sizeof(u16) == 2);
-StaticAssert(sizeof(u32) == 4);
-StaticAssert(sizeof(u64) == 8);
-
-//
-// Linked List Helpers
+// Linked-List Macros
 //
 
 #define CheckNull(p) ((p)==0)
@@ -442,363 +265,186 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 #define DLLInsert(f,l,p,n)       DLLInsert_NPZ(f,l,p,n,next,prev,CheckNull,SetNull)
 #define DLLRemove(f,l,n)         DLLRemove_NPZ(f,l,n,next,prev,CheckNull,SetNull)
 
-//
-// Helpers
-//
-
-bool na_is_power_of_two(isize x) {
-    return !(x & (x - 1));
-}
-
-u64 na_next_power_of_two(u64 x) {
-    assert(x != 0);
-
-    --x;
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    x |= x >> 8;
-    x |= x >> 16;
-    x |= x >> 32;
-
-    return ++x;
-}
-
-u64 na_previous_power_of_two(u64 x) {
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    x |= x >> 8;
-    x |= x >> 16;
-    x |= x >> 32;
-    return x - (x >> 1);
-}
-
-inline u32 na_rotate_left(u32 value, i32 amount) {
-#if COMPILER_MSVC
-    u32 result = _rotl(value, amount);
-#else
-    // TODO(casey): Actually port this to other compiler platforms!
-    amount &= 31;
-    u32 result = ((value << amount) | (value >> (32 - amount)));
-#endif
-
-    return result;
-}
-
-inline u32 na_rotate_right(u32 value, i32 amount) {
-#if COMPILER_MSVC
-    u32 result = _rotr(value, amount);
-#else
-    // TODO(casey): Actually port this to other compiler platforms!
-    amount &= 31;
-    u32 result = ((value >> amount) | (value << (32 - amount)));
-#endif
-
-    return result;
-}
-
-void *na_align_forward(void *ptr, isize alignment) {
-    usize p;
-
-    assert(alignment >= 1);
-    assert(na_is_power_of_two(alignment));
-
-    p = cast(usize)ptr;
-    return cast(void *)((p + (alignment - 1)) & ~(alignment - 1));
-}
-
-u64 na_align_offset(void *ptr, isize alignment) {
-    usize base_address = (usize)ptr;
-
-    assert(alignment >= 1);
-    assert(na_is_power_of_two(alignment));
-
-    u64 align_offset = alignment - (base_address & (alignment - 1));
-    align_offset &= (alignment - 1);
-
-    return align_offset;
-}
-
-inline void *na_pointer_add(void *ptr, isize bytes) {
-    return cast(void *)(cast(u8 *)ptr + bytes);
-}
-
-inline void *na_pointer_sub(void *ptr, isize bytes) {
-    return cast(void *)(cast(u8 *)ptr - bytes);
-}
-
-inline isize na_pointer_diff(void *begin, void *end) {
-    return cast(isize)(cast(u8 *)end - cast(u8 *)begin);
-}
-
-inline u16 na_endian_swap16(u16 i) {
-    return (i>>8) | (i<<8);
-}
-
-inline u32 na_endian_swap32(u32 i) {
-    return (i>>24) |(i<<24) | ((i&0x00ff0000u)>>8)  | ((i&0x0000ff00u)<<8);
-}
-
-inline u64 na_endian_swap64(u64 i) {
-    return (i>>56) | (i<<56) |
-           ((i&0x00ff000000000000ull)>>40) | ((i&0x000000000000ff00ull)<<40) |
-           ((i&0x0000ff0000000000ull)>>24) | ((i&0x0000000000ff0000ull)<<24) |
-           ((i&0x000000ff00000000ull)>>8)  | ((i&0x00000000ff000000ull)<<8);
-}
-
+#define ListEach(it,list) auto it = (list)->first; it != NULL; it = it->next
 
 //
-// Functions
+// Clamps
 //
 
-#define PI  3.14159265359f
-#define TAU 6.28318530717958647692f
-
-#define EPSILON_F32 (1.1920929e-7f)
-#define EPSILON_F64 (2.220446e-16)
-
-#define SQRT_2 0.70710678118
-
-#ifndef Min
 #define Min(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef Max
 #define Max(a, b) (((a) > (b)) ? (a) : (b))
-#endif
-
-#ifndef Clamp
 #define Clamp(value, lower, upper) (Max(Min(value, upper), lower))
-#endif
-
-#ifndef ClampTop
 #define ClampTop(a, b) Min(a, b)
-#endif
-
-#ifndef ClampBot
 #define ClampBot(a, b) Max(a, b)
-#endif
-
-#ifndef Sign
 #define Sign(x) (((x) > 0) - ((x) < 0))
-#endif
+#define Abs(x) (((x) < 0) ? (0u - x) : (0u + x))
 
-#ifndef Abs
-#define Abs(x) (((x) < 0) ? -(x) : (x))
-#endif
-
-#ifndef AlignUpPow2
 #define AlignUpPow2(x, p) (((x) + (p) - 1) & ~((p) - 1))
-#endif
-
-#ifndef AlignDownPow2
 #define AlignDownPow2(x, p) ((x) & ~((p) - 1))
+#define IsPow2(x) (((x) & ((x) - 1)) == 0)
+
+//
+// Defer
+//
+
+#define Defer(start, end) for(int _i_ = (start, 0); _i_ == 0; _i_ += 1, end)
+
+#if LANG_CPP
+    #ifndef CONCAT
+    #define CONCAT_HELPER(x, y) x##y
+    #define CONCAT(x, y) CONCAT_HELPER(x, y)
+    #endif
+
+    // Defer macro/thing.
+    template<typename T>
+    struct ExitScope {
+        T lambda;
+        ExitScope(T lambda) : lambda(lambda) {}
+        ~ExitScope() { lambda(); }
+        ExitScope(const ExitScope&);
+    private:
+        ExitScope& operator =(const ExitScope&);
+    };
+
+    class ExitScopeHelp {
+    public:
+        template<typename T>
+        ExitScope<T> operator+(T t) { return t; }
+    };
+
+    #define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
+#endif // LANG_CPP
+
+//
+// Types
+//
+
+#ifndef NULL
+    #define NULL 0
 #endif
 
+#ifndef null
+    #define null nullptr
+#endif
+
+#if LANG_C
+    #define bool int
+    #define true 1
+    #define false 0
+#endif
+
+
+typedef int8_t    i8;
+typedef int16_t   i16;
+typedef int32_t   i32;
+typedef int64_t   i64;
+typedef uint8_t   u8;
+typedef uint16_t  u16;
+typedef uint32_t  u32;
+typedef uint64_t  u64;
+typedef i8        b8;
+typedef i16       b16;
+typedef i32       b32;
+typedef i64       b64;
+typedef float     f32;
+typedef double    f64;
+typedef void VoidFunction(void);
+
+#define U8_MAX  0xff
+#define I8_MAX  0x7f
+#define I8_MIN  0x80
+#define U16_MAX 0xffff
+#define I16_MAX 0x7fff
+#define I16_MIN 0x8000
+#define U32_MAX 0xffffffff
+#define I32_MAX 0x7fffffff
+#define I32_MIN 0x80000000
+#define U64_MAX 0xffffffffffffffff
+#define I64_MAX 0x7fffffffffffffff
+#define I64_MIN 0x8000000000000000
+#define F32_MIN 1.17549435e-38f
+#define F32_MAX 3.40282347e+38f
+#define F64_MIN 2.2250738585072014e-308
+#define F64_MAX 1.7976931348623157e+308
+
 //
-// Memory
+// Language Helpers
 //
 
-#define kilobytes(value) ((value) * 1024LL)
-#define megabytes(value) ((value) * 1024LL * 1024LL)
-#define gigabytes(value) ((value) * 1024LL * 1024LL * 1024LL)
-#define terabytes(value) ((value) * 1024LL * 1024LL * 1024LL * 1024LL)
-
-#define thousand(value) ((value) * 1000LL)
-#define million (value) ((value) * 1000LL * 1000LL)
-#define billion (value) ((value) * 1000LL * 1000LL * 1000LL)
-#define trillion(value) ((value) * 1000LL * 1000LL * 1000LL * 1000LL)
-
-// Possible Linux / MacOS version of __movsb?
-// @Incomplete: test / try this!!!
-#if 0
-static void __movsb(void* dst, const void* src, size_t size)
+typedef struct MemberOffset MemberOffset;
+struct MemberOffset
 {
-        __asm__ __volatile__("rep movsb" : "+D"(dst), "+S"(src), "+c"(size) : : "memory");
-}
-
-void CopyMemory(void* dst, const void* src, size_t size)
-{
-#ifdef _MSC_VER
-        __movsb(dst, src, size);
-#elif defined(__i386__) || defined(__x86_64___)
-        __asm__ __volatile__("rep movsb" : "+D"(dst), "+S"(src), "+c"(size) : : "memory");
-#else
-        #error TODO: implement for other architectures
-#endif
-}
-#endif
-
-void *memory_copy(void *from, void *to, u64 size) {
-    if (to == NULL) {
-        return NULL;
-    }
-
-    if (from == NULL) {
-        return to;
-    }
-
-#if OS_WINDOWS
-    // @Incomplete: is this good enough?
-    __movsb((u8 *)to, (u8 *)from, size);
-#else
-    // @Speed: make this way faster!
-
-    u8 *src = cast(u8 *)from;
-    u8 *dest = cast(u8 *)to;
-
-    while (size--) { *dest++ = *src++; }
-#endif
-
-    return to;
-}
-
-bool memory_equals(void *a_in, void *b_in, u64 size) {
-    if (a_in == b_in) {
-        return true;
-    }
-
-    // @Speed: make this faster!
-    u8 *a = cast(u8 *)a_in;
-    u8 *b = cast(u8 *)b_in;
-
-    while (size--) {
-        if (*a++ != *b++) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-void memory_set(void *ptr, u8 value, u64 size) {
-    // @Speed: heavily optimize!
-    u8 *at = cast(u8 *)ptr;
-    while (size--) { *at++ = value; }
-}
-
-void memory_zero(void *ptr, u64 size) {
-    memory_set(ptr, 0, size);
-}
-
-#define memory_zero_array(Array) memory_zero(Array, count_of(Array) * sizeof(Array[0]))
-
-void *memory_move(void *from, void *to, u64 size) {
-    // @Speed: heavily optimize!
-    char *d = (char *)to;
-    char *s = (char *)from;
-
-    if (d < s) {
-        while (size--) {
-            *d++ = *s++;
-        }
-    } else {
-        char *lasts = s + (size - 1);
-        char *lastd = d + (size - 1);
-
-        while (size--) {
-            *lastd-- = *lasts--;
-        }
-    }
-
-    return to;
-}
-
-void memory_swap(void *i, void *j, isize size) {
-    if (i == j) return;
-
-    if (size == 4) {
-        Swap(u32, *cast(u32 *)i, *cast(u32 *)j);
-    } else if (size == 8) {
-        Swap(u64, *cast(u64 *)i, *cast(u64 *)j);
-    } else if (size < 8) {
-        u8 *a = cast(u8 *)i;
-        u8 *b = cast(u8 *)j;
-
-        if (a != b) {
-            while (size--) {
-                Swap(u8, *a, *b);
-                a++, b++;
-            }
-        }
-    } else {
-        char buffer[256];
-
-        // TODO(bill): Is the recursion ever a problem?
-        while (size > size_of(buffer)) {
-            memory_swap(i, j, size_of(buffer));
-            i = na_pointer_add(i, size_of(buffer));
-            j = na_pointer_add(j, size_of(buffer));
-            size -= size_of(buffer);
-        }
-
-        memory_copy(i, buffer, size);
-        memory_copy(j, i, size);
-        memory_copy(buffer, j, size);
-    }
-}
-
-//
-// Arenas
-//
-
-enum Allocator_Mode {
-    ALLOCATOR_MODE_ALLOC    = 0,
-    ALLOCATOR_MODE_RESIZE   = 1,
-    ALLOCATOR_MODE_FREE     = 2,
-    ALLOCATOR_MODE_FREE_ALL = 3,
+    u64 v;
 };
 
-#define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data, u32 alignment)
-typedef ALLOCATOR_PROC(Allocator_Proc);
+#define MemberOff(S, member) (MemberOffset){OffsetOf(S, m)}
+#define MemberFromOff(ptr, type, memoff) (*(type *)((u8 *)ptr + memoff.v))
 
-struct Allocator {
-    Allocator_Proc *proc;
-    void *data;
-};
+//
+// Assert
+//
 
-void *allocator_alloc(Allocator allocator, u64 size);
-void allocator_free(Allocator allocator, void *data);
+int na__assert(bool cond, const char *expr, const char *file, long int line, char *msg) {
+    if (!cond) {
+        printf("%s(%ld): %s: ", file, line, "Assertion Failed");
+        if (expr) {
+            printf( "`%s` ", expr);
+        }
+        if (msg) {
+            printf("- %s", msg);
+        }
+        printf("\n");
+        fflush(stdout);
 
-void *os_reserve(u64 size);
-bool os_commit(void *ptr, u64 size);
-bool os_decommit(void *ptr, u64 size);
-bool os_release(void *ptr, u64 size);
+        #if COMPILER_MSVC
+        __debugbreak();
+        #endif
 
-#ifndef DEFAULT_MEMORY_ALIGNMENT
-#define DEFAULT_MEMORY_ALIGNMENT 16
+        *(volatile int *)0 = 0;
+    }
+
+    return 0;
+}
+
+#undef assert
+#define assert(expr) na__assert(expr, #expr, __FILE__, __LINE__, NULL)
+
+#define Assert(expr) na__assert(expr, #expr, __FILE__, __LINE__, NULL)
+
+
+#if LANG_C
+    #ifdef _Static_assert
+        #define StaticAssert(c,label) _Static_assert(c, label)
+    #else
+        #define StaticAssert(c,label) u8 static_assert__failed_on_line_##__LINE__[(c)?(1):(-1)]
+    #endif
+#else
+    #define StaticAssert(c,label) static_assert(c, #label)
 #endif
 
-#ifndef ARENA_COMMIT_SIZE
-#define ARENA_COMMIT_SIZE kilobytes(4)
+#define NotImplemented assert(!"Not Implemented")
+#define InvalidPath assert(!"Invalid Path")
+
+#endif // BASE_TYPES_H
+
+#ifndef BASE_MEMORY_H
+#define BASE_MEMORY_H
+
+#if !defined(ARENA_DEFAULT_ALIGNMENT)
+#define ARENA_DEFAULT_ALIGNMENT 8
 #endif
 
-#ifndef ARENA_INITIAL_COMMIT_SIZE
-#define ARENA_INITIAL_COMMIT_SIZE kilobytes(4)
+#if !defined(ARENA_COMMIT_SIZE)
+#define ARENA_COMMIT_SIZE Kilobytes(4)
 #endif
 
-#ifndef ARENA_DECOMMIT_THRESHOLD
-#define ARENA_DECOMMIT_THRESHOLD kilobytes(64)
+#if !defined(ARENA_INITIAL_COMMIT_SIZE)
+#define ARENA_INITIAL_COMMIT_SIZE Kilobytes(4)
 #endif
 
-#ifndef ARENA_RESERVE
-#define ARENA_RESERVE os_reserve
+#if !defined(ARENA_DECOMMIT_THRESHOLD)
+#define ARENA_DECOMMIT_THRESHOLD Kilobytes(64)
 #endif
-
-#ifndef ARENA_COMMIT
-#define ARENA_COMMIT os_commit
-#endif
-
-#ifndef ARENA_DECOMMIT
-#define ARENA_DECOMMIT os_decommit
-#endif
-
-#ifndef ARENA_RELEASE
-#define ARENA_RELEASE os_release
-#endif
-
-#define arena_has_virtual_backing(arena) (arena->commit_pos < U64_MAX)
 
 struct Arena {
     u8 *data;
@@ -807,32 +453,624 @@ struct Arena {
     u64 commit_pos;
 };
 
-struct Arena_Mark {
+struct M_Temp {
+    Arena *arena;
     u64 pos;
 };
 
-Arena arena_make(u8 *data, u64 size) {
-    Arena result = {};
+//
+// API
+//
+
+function Arena arena_make(u8 *data, u64 size);
+function void arena_init(Arena *arena, u8 *data, u64 size);
+function Arena *arena_alloc(u64 size);
+function Arena *arena_alloc_default();
+function void arena_free(Arena *arena);
+function void *arena_push_bytes(Arena *arena, u64 size);
+function void arena_pop_to(Arena *arena, u64 pos);
+function void arena_pop(Arena *arena, u64 size);
+function void arena_set_pos(Arena *arena, u64 pos);
+function void arena_reset(Arena *arena);
+function void arena_align(Arena *arena, u64 pow2_align);
+function void *arena_push(Arena *arena, u64 size);
+function void *arena_push_zero(Arena *arena, u64 size);
+function bool arena_write(Arena *arena, u8 *data, u64 size);
+
+function void *arena_resize_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size);
+function void arena_free_ptr(Arena *arena, void *old_memory_pointer, u64 old_size);
+
+function M_Temp arena_begin_temp(Arena *arena);
+function void arena_end_temp(M_Temp temp);
+
+#define PushArray(a,T,c)     (T*)arena_push((a), sizeof(T)*(c))
+#define PushArrayZero(a,T,c) (T*)arena_push_zero((a), sizeof(T)*(c))
+#define PushStruct(a, T)     (T*)arena_push((a), sizeof(T))
+#define PushStructZero(a, T) (T*)arena_push_zero((a), sizeof(T))
+
+function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count);
+#define GetScratch(conflicts, conflict_count) arena_get_scratch(conflicts, conflict_count)
+#define ReleaseScratch(temp) arena_end_temp(temp)
+function Arena *temp_arena();
+
+
+//
+// Allocator
+//
+
+#if !defined(ALLOCATOR_DEFAULT_ALIGNMENT)
+#define ALLOCATOR_DEFAULT_ALIGNMENT 16
+#endif
+
+
+enum Allocator_Mode
+{
+    AllocatorMode_Alloc    = 0,
+    AllocatorMode_Resize   = 1,
+    AllocatorMode_Free     = 2,
+    AllocatorMode_FreeAll  = 3,
+};
+
+#define ALLOCATOR_PROC(name) void *name(Allocator_Mode mode, u64 requested_size, u64 old_size, void *old_memory_pointer, void *allocator_data, u32 alignment)
+typedef ALLOCATOR_PROC(Allocator_Proc);
+
+struct Allocator
+{
+    Allocator_Proc *proc;
+    void *data;
+};
+
+//
+// API
+//
+
+function void *allocator_alloc(Allocator allocator, u64 size);
+function void allocator_free(Allocator allocator, void *data, u64 old_size);
+function void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size);
+
+function void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment);
+function void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment);
+
+#ifndef default_allocator
+#define default_allocator() os_allocator()
+#endif
+
+function Allocator os_allocator();
+function Allocator arena_allocator(Arena *arena);
+
+#endif // BASE_MEMORY_H
+
+#ifndef BASE_STRINGS_H
+#define BASE_STRINGS_H
+
+struct String {
+    u8 *data;
+    i64 count;
+};
+
+struct String16 {
+    u16 *data;
+    i64 count;
+};
+
+struct String32 {
+    u32 *data;
+    i64 count;
+};
+
+struct String_Decode {
+    u32 codepoint;
+    u8 advance; // 1 - 4
+};
+
+struct String_Node
+{
+    String_Node *next;
+    String string;
+};
+
+struct String_List
+{
+    String_Node *first;
+    String_Node *last;
+    u64 node_count;
+    u64 total_size;
+};
+
+struct String_Join
+{
+    String pre;
+    String sep;
+    String post;
+};
+
+typedef u32 Match_Flags;
+enum
+{
+    MatchFlag_None             = 0,
+    MatchFlag_CaseInsensitive  = 1 << 0,
+    MatchFlag_RightSideSloppy  = 1 << 1,
+    MatchFlag_SlashInsensitive = 1 << 2,
+    MatchFlag_FindLast         = 1 << 3,
+};
+
+// Char Functions
+function b32 char_is_alpha(u8 c);
+function b32 char_is_lower(u8 c);
+function b32 char_is_upper(u8 c);
+function b32 char_is_digit(u8 c);
+function b32 char_is_space(u8 c);
+function b32 char_is_whitespace(u8 c);
+function b32 char_is_symbol(u8 c);
+function u8 char_to_upper(u8 c);
+function u8 char_to_lower(u8 c);
+function u8 char_to_forward_slash(u8 c);
+
+// Constructors
+function String string_make(u8 *data, i64 count);
+function String string_range(u8 *at, u8 *end);
+function String string_from_cstr(char *cstr);
+function char *string_to_cstr(Arena *arena, String str);
+function String16 string16_make(u16 *data, i64 count);
+function String16 string16_from_cstr(u16 *data);
+function String32 string32_make(u32 *data, i64 count);
+#define S(x) {(u8 *)(x), sizeof(x)-1}
+#define Str8(data, count) string_make((u8 *)data, count)
+#define Str16(data, count) string16_make((u16 *)data, count)
+#define Str32(data, count) string32_make((u32 *)data, count)
+
+// Print Helper
+#define LIT(str) (int)str.count, (char *)str.data
+
+// Substrings
+function String string_slice(String str, i64 start_index, i64 end_index);
+function String string_substr(String str, i64 offset, i64 count);
+function String string_skip(String str, i64 offset);
+function String string_chop(String str, i64 offset);
+function String string_prefix(String str, i64 count);
+function String string_suffix(String str, i64 count);
+
+// Matching
+function bool string_equals(String a, String b);
+function bool string_match(String a, String b, Match_Flags flags);
+function i64 string_find(String str, String search, i64 start_index, Match_Flags flags);
+function bool string_starts_with(String str, String prefix);
+function bool string_ends_with(String str, String postfix);
+function i64 string_index(String str, String search, i64 start_index);
+function i64 string_char_index(String str, u8 search, i64 start_index);
+function i64 string_last_index(String str, String search);
+function bool string_contains(String str, String search);
+
+// Allocation
+function String string_copy(Arena *arena, String str);
+function String string_printv(Arena *arena, char *fmt, va_list args);
+function String string_print(Arena *arena, char *fmt, ...);
+#define PushStringCopy(arena, str) string_copy(arena, str)
+#define PushStringFV(arena, fmt, args) string_printv(arena, fmt, args)
+#define PushStringF(arena, fmt, ...) string_print(arena, fmt, __VA_ARGS__)
+
+#define sprint(fmt, ...) string_print(temp_arena(), fmt, __VA_ARGS__)
+
+function String string_replace(Arena *arena, String str, String find, String replacer, u64 replace_limit);
+
+// Unicode Conversions
+function String_Decode string_decode_utf8(u8 *str, u32 capacity);
+function u32 string_encode_utf8(u8 *dest, u32 codepoint);
+function u8 string_seek_right_utf8(u8 *data, u32 capacity);
+function u8 string_seek_left_utf8(u8 *data, u32 capacity);
+function String_Decode string_decode_utf16(u16 *str, u32 capacity);
+function u32 string_encode_utf16(u16 *dest, u32 codepoint);
+function String32 string32_from_string(Arena *arena, String str);
+function String string_from_string32(Arena *arena, String32 str);
+function String16 string16_from_string(Arena *arena, String str);
+function String string_from_string16(Arena *arena, String16 str);
+
+// Conversions
+function u64 string_to_u64(String string, u32 radix);
+function i64 string_to_i64(String str, u32 base);
+function f64 string_to_f64(String str);
+function b32 string_to_b32(String str);
+
+// String Lists
+function void string_list_push_node(String_List *list, String_Node *n);
+function void string_list_push(Arena *arena, String_List *list, String str);
+function void string_list_concat(String_List *list, String_List *to_push);
+function String_List string_splits(Arena *arena, String string, int split_count, String *splits);
+function String_List string_split(Arena *arena, String string, int split_count, String *splits);
+function String string_list_joins(Arena *arena, String_List list, String_Join *optional_params);
+function String string_list_join(Arena *arena, String_List list, String join);
+function String string_list_print(Arena *arena, String_List *list, char *fmt, ...);
+function String string_list_to_string(Arena *arena, String_List *list);
+
+// Misc Helpers
+function String string_concat2(Arena *arena, String a, String b);
+function String string_concat3(Arena *arena, String a, String b, String c);
+function String string_concat4(Arena *arena, String a, String b, String c, String d);
+#define string_concat(a, b) string_concat2(temp_arena(), a, b)
+
+function String string_chop_last_period(String string);
+function String string_skip_last_period(String string);
+function String string_chop_last_slash(String string);
+function String string_skip_last_slash(String string);
+
+function String string_trim_whitespace(String str);
+
+// Path Helpers
+function String path_filename(String path);
+function String path_basename(String path);
+function String path_extension(String path);
+function String path_strip_extension(String path);
+
+function String path_join2(Arena *arena, String a, String b);
+function String path_join3(Arena *arena, String a, String b, String c);
+function String path_join4(Arena *arena, String a, String b, String c, String d);
+#define path_join(a, b) path_join2(temp_arena(), a, b)
+
+function b32 path_is_absolute(String path);
+
+#if DEBUG
+    #define dump(x) print("%s = %S\n", #x, to_string(x))
+#else
+    #define dump(x)
+#endif
+
+#endif // BASE_STRINGS_H
+
+#ifndef BASE_FUNCTIONS_H
+#define BASE_FUNCTIONS_H
+
+struct Random_State
+{
+    u64 state;
+    u64 selector;
+};
+
+//
+// API
+//
+
+// Math
+function b32 is_power_of_two(i64 x);
+function u64 next_power_of_two(u64 x);
+function u64 previous_power_of_two(u64 x);
+
+function u16 endian_swap16(u16 i);
+function u32 endian_swap32(u32 i);
+function u64 endian_swap64(u64 i);
+
+function u32 rotate_left_u32(u32 value, i32 amount);
+function u32 rotate_right_u32(u32 value, i32 amount);
+
+// Hashing
+function u32 murmur32_seed(void const *data, i64 len, u32 seed);
+function u64 murmur64_seed(void const *data_, i64 len, u64 seed);
+function u32 murmur32(void const *data, i64 len);
+function u64 murmur64(void const *data, i64 len);
+function u32 fnv32a(void const *data, i64 len);
+function u64 fnv64a(void const *data, i64 len);
+
+// Random PCG
+function Random_State random_make_default();
+function void random_set_seed(Random_State *series, u64 state, u64 selector);
+function u32 random_u32(Random_State *series);
+function f32 random_f32(Random_State *series);
+function f32 random_f32_between(Random_State *series, f32 min, f32 max);
+function i32 random_i32_between(Random_State *series, i32 min, i32 max);
+
+#endif // BASE_FUNCTIONS_H
+
+#ifndef OS_H
+#define OS_H
+
+typedef u32 SystemPath;
+enum {
+    SystemPath_Null,
+    //SystemPath_Initial,
+    SystemPath_Current,
+    SystemPath_Binary,
+    SystemPath_AppData,
+    SystemPath_COUNT,
+};
+
+struct File {
+    void *handle;
+    bool has_errors;
+    u64 offset;
+};
+
+typedef u32 File_Attribute_Flags;
+enum {
+    File_IsDirectory = 0x01,
+    File_IsHidden    = 0x02,
+    File_IsSystem    = 0x04,
+};
+
+typedef u32 File_Access_Flags;
+enum {
+    FileAccess_Read    = 0x01,
+    FileAccess_Write   = 0x02,
+    FileAccess_Execute = 0x04,
+};
+
+typedef u64 Dense_Time;
+
+struct File_Info {
+    String name;
+    u64 size;
+    Dense_Time created_at;
+    Dense_Time updated_at;
+    Dense_Time last_accessed_at;
+    File_Attribute_Flags flags;
+    File_Access_Flags access;
+};
+
+typedef u32 File_Mode;
+enum {
+    FileMode_Read   = 0x1,
+    FileMode_Write  = 0x2,
+    FileMode_Append = 0x4,
+};
+
+struct File_Lister
+{
+    u8 opaque[1024];
+};
+
+struct OS_Library {
+    void *handle;
+};
+
+struct Date_Time {
+    u16 msec; // [0,999]
+    u8 sec;   // [0,60]
+    u8 min;   // [0,59]
+    u8 hour;  // [0,23]
+    u8 day;   // [1,31]
+    u8 mon;   // [1,12]
+    i16 year; // 1 = 1 CE; 2020 = 2020 CE; 0 = 1 BCE; -100 = 101 BCE; etc.
+};
+
+typedef u32 Month;
+enum {
+    Month_Jan = 1,
+    Month_Feb,
+    Month_Mar,
+    Month_Apr,
+    Month_May,
+    Month_Jun,
+    Month_Jul,
+    Month_Aug,
+    Month_Sep,
+    Month_Oct,
+    Month_Nov,
+    Month_Dec
+};
+
+typedef u32 DayOfWeek;
+enum {
+    DayOfWeek_Sunday,
+    DayOfWeek_Monday,
+    DayOfWeek_Tuesday,
+    DayOfWeek_Wednesday,
+    DayOfWeek_Thursday,
+    DayOfWeek_Friday,
+    DayOfWeek_Saturday
+};
+
+// System
+function bool os_init();
+function void os_exit(i32 code);
+function String os_get_system_path(Arena *arena, SystemPath path);
+#define os_get_executable_path() os_get_system_path(temp_arena(), SystemPath_Binary)
+#define os_get_current_path() os_get_system_path(temp_arena(), SystemPath_Current)
+
+// Timing
+function f64 os_time();
+function f64 os_time_in_miliseconds();
+function u64 os_clock_cycles();
+function void os_sleep(f64 seconds);
+function void os_set_high_process_priority(bool enable);
+
+// Memory
+function u64  os_page_size();
+function void *os_reserve(u64 size);
+function bool os_commit(void *ptr, u64 size);
+function bool os_decommit(void *ptr, u64 size);
+function bool os_release(void *ptr, u64 size);
+function void *os_alloc(u64 size);
+function void os_free(void *ptr);
+#define New(T) (T *)os_alloc(sizeof(T))
+#define Free(ptr) os_free((void *)ptr)
+
+// Files
+function String os_read_entire_file(Arena *arena, String path);
+function bool os_write_entire_file(String path, String contents);
+function File_Info os_get_file_info(String path);
+
+function File os_file_open(String path, u32 mode_flags);
+function void os_file_read(File *file, u64 offset, u64 size, void *dest);
+function void os_file_write(File *file, u64 offset, u64 size, void *data);
+function void os_file_close(File *file);
+
+function void os_file_append(File *file, String data);
+function void os_file_print(File *file, char *fmt, ...);
+
+function bool os_file_rename(String from, String to);
+function bool os_delete_file(String path);
+function bool os_make_directory(String path);
+function bool os_delete_directory(String path);
+
+// File Lister
+function File_Lister *os_file_list_begin(Arena *arena, String path);
+function bool os_file_list_next(File_Lister *iter, File_Info *info);
+function void os_file_list_end(File_Lister *iter);
+
+// Clipboard
+function String os_get_clipboard_text();
+function bool os_set_clipboard_text(String str);
+
+// Dates
+function Date_Time os_get_current_time_in_utc();
+function Date_Time os_get_local_time();
+
+// Library
+function OS_Library os_library_load(String path);
+function void os_library_unload(OS_Library lib);
+function void *os_library_get_proc(OS_Library lib, char *proc_name);
+function bool os_library_is_loaded(OS_Library lib);
+
+// Shell
+function bool os_shell_open(String path);
+function bool os_shell_execute(String cmd, String arguments, bool admin = false);
+
+// Dates
+function Date_Time os_get_current_time_in_utc();
+function Date_Time os_get_local_time();
+function Dense_Time dense_time_from_date_time(Date_Time in);
+function Date_Time date_time_from_dense_time(Dense_Time in);
+
+// Misc.
+function void os_get_entropy(void *data, u64 size);
+function f64 os_caret_blink_time();
+
+// Debugging
+function void os_open_file_in_debugger(String path, int line);
+function void os_attach_to_debugger(b32 pause);
+
+
+#define M_Reserve os_reserve
+#define M_Release os_release
+#define M_Commit os_commit
+#define M_Decommit os_decommit
+
+//
+// Threads
+//
+
+struct Thread {
+    u32 id;
+    void *handle;
+};
+
+#define THREAD_PROC(name) u32 name(void *data)
+typedef THREAD_PROC(Thread_Proc);
+
+struct Semaphore {
+    void *handle;
+};
+
+struct Mutex {
+    void *handle;
+};
+
+// Basic
+function u32 thread_get_id();
+
+#if COMPILER_MSVC
+    #define read_barrier() _ReadBarrier()
+    #define write_barrier() _WriteBarrier()
+#else
+    #define read_barrier() asm volatile("" ::: "memory")
+    #define write_barrier() asm volatile("" ::: "memory")
+#endif
+
+// Atomics
+inline u32 atomic_compare_exchange_u32(u32 volatile *value, u32 New, u32 Expected);
+inline u64 atomic_exchange_u64(u64 volatile *value, u64 New);
+inline u64 atomic_add_u64(u64 volatile *value, u64 Addend);
+
+// Threads
+function Thread thread_create(Thread_Proc *proc, void *data, u64 copy_size);
+function void thread_pause(Thread thread);
+function void thread_resume(Thread thread);
+function void thread_detach(Thread thread);
+function u32 thread_await(Thread thread);
+
+// Data Structures
+function Semaphore semaphore_create(u32 max_count);
+function void semaphore_signal(Semaphore *sem);
+function void semaphore_wait_for(Semaphore *sem, bool infinite);
+function void semaphore_destroy(Semaphore *sem);
+
+function Mutex mutex_create(u32 spin_count);
+function void mutex_aquire_lock(Mutex *mutex);
+function bool mutex_try_aquire_lock(Mutex *mutex);
+function void mutex_release_lock(Mutex *mutex);
+function void mutex_destroy(Mutex *mutex);
+
+//
+// Platform-Specific Headers:
+//
+
+#if OS_WINDOWS
+
+    #pragma push_macro("function")
+    #pragma push_macro("Free")
+    #undef function
+    #undef Free
+    #define WIN32_LEAN_AND_MEAN
+    #define VC_EXTRALEAN
+    #define NOMINMAX
+    #include <windows.h>
+    #include <Shlobj.h>
+    #pragma pop_macro("function")
+    #pragma pop_macro("Free")
+
+#elif OS_MACOS
+#else
+    // TODO(nick): support linux
+    #error OS layer not implemented.
+#endif
+
+#endif // OS_H
+
+#endif // NA_H
+
+#ifndef NA_IMPL
+#define NA_IMPL
+
+//
+// Memory
+//
+
+#if !defined(M_Reserve)
+#error M_Reserve must be defined to use base memory.
+#endif
+#if !defined(M_Release)
+#error M_Release must be defined to use base memory.
+#endif
+#if !defined(M_Commit)
+#error M_Commit must be defined to use base memory.
+#endif
+#if !defined(M_Decommit)
+#error M_Decommit must be defined to use base memory.
+#endif
+
+#define arena_has_virtual_backing(arena) (arena->commit_pos < U64_MAX)
+
+function Arena arena_make(u8 *data, u64 size) {
+    Arena result = {0};
     result.data = data;
     result.size = size;
+    result.pos = 0;
+    result.commit_pos = U64_MAX;
     return result;
 }
 
-void arena_init(Arena *arena, u8 *data, u64 size) {
-    *arena = {};
+function void arena_init(Arena *arena, u8 *data, u64 size) {
     arena->data = data;
     arena->size = size;
     arena->pos  = 0;
     arena->commit_pos = U64_MAX;
 }
 
-Arena *arena_alloc_from_memory(u64 size) {
+function Arena *arena_alloc(u64 size) {
     size = Max(size, ARENA_INITIAL_COMMIT_SIZE);
 
     Arena *result = NULL;
-    u8 *data = cast(u8 *)ARENA_RESERVE(size);
+    u8 *data = cast(u8 *)M_Reserve(size);
 
-    if (data && ARENA_COMMIT(data, ARENA_INITIAL_COMMIT_SIZE))
+    if (data && M_Commit(data, ARENA_INITIAL_COMMIT_SIZE))
     {
         result = cast(Arena *)data;
         result->data = data + AlignUpPow2(sizeof(Arena), 64);
@@ -845,19 +1083,24 @@ Arena *arena_alloc_from_memory(u64 size) {
     return result;
 }
 
-void arena_free(Arena *arena) {
+function Arena *arena_alloc_default()
+{
+    return arena_alloc(Gigabytes(1));
+}
+
+function void arena_free(Arena *arena) {
     if (arena->data)
     {
         arena->data = NULL;
 
         if (arena_has_virtual_backing(arena))
         {
-            ARENA_RELEASE(arena, arena->size);
+            M_Release(arena, arena->size);
         }
     }
 }
 
-void *arena_push(Arena *arena, u64 size) {
+function void *arena_push_bytes(Arena *arena, u64 size) {
     void *result = NULL;
 
     if (arena->pos + size <= arena->size)
@@ -875,7 +1118,7 @@ void *arena_push(Arena *arena, u64 size) {
                 u64 next_commit_position = ClampTop(p_aligned, arena->size);
                 u64 commit_size = next_commit_position - commit_p;
 
-                if (ARENA_COMMIT((u8 *)arena + arena->commit_pos, commit_size))
+                if (M_Commit((u8 *)arena + arena->commit_pos, commit_size))
                 {
                     commit_p = next_commit_position;
                     arena->commit_pos = next_commit_position;
@@ -893,16 +1136,7 @@ void *arena_push(Arena *arena, u64 size) {
     return result;
 }
 
-void *arena_push_zero(Arena *arena, u64 size) {
-    void *result = arena_push(arena, size);
-    if (result != NULL)
-    {
-        memory_zero(result, size);
-    }
-    return result;
-}
-
-void arena_pop_to(Arena *arena, u64 pos) {
+function void arena_pop_to(Arena *arena, u64 pos) {
     if (arena->pos > pos)
     {
         arena->pos = pos;
@@ -915,7 +1149,7 @@ void arena_pop_to(Arena *arena, u64 pos) {
 
             if (decommit_pos < arena->commit_pos && over_committed >= ARENA_DECOMMIT_THRESHOLD)
             {
-                if (ARENA_DECOMMIT((u8 *)arena + decommit_pos, over_committed))
+                if (M_Decommit((u8 *)arena + decommit_pos, over_committed))
                 {
                     arena->commit_pos -= over_committed;
                 }
@@ -924,379 +1158,404 @@ void arena_pop_to(Arena *arena, u64 pos) {
     }
 }
 
-void arena_pop(Arena *arena, u64 size) {
+function void arena_pop(Arena *arena, u64 size) {
     arena_pop_to(arena, arena->pos - size);
 }
 
-void arena_reset(Arena *arena) {
-    if (arena_has_virtual_backing(arena))
-    {
-        arena_pop(arena, arena->pos);
-    }
-    else
-    {
-        arena->pos = 0;
+function void arena_set_pos(Arena *arena, u64 pos) {
+    if (arena->pos > pos) {
+        arena_pop_to(arena, pos);
+    } else {
+        arena_push_bytes(arena, pos - arena->pos);
     }
 }
 
-void arena_align(Arena *arena, u64 pow2_align) {
+function void arena_reset(Arena *arena) {
+    arena_pop_to(arena, 0);
+}
+
+function void arena_align(Arena *arena, u64 pow2_align) {
     u64 p = arena->pos;
     u64 p_aligned = AlignUpPow2(p, pow2_align);
     u64 z = p_aligned - p;
     if (z > 0) {
-        arena_push(arena, z);
+        arena_push_bytes(arena, z);
     }
 }
 
-void *arena_push_aligned(Arena *arena, u64 size, u64 pow2_align) {
-    arena_align(arena, pow2_align);
-    return arena_push_zero(arena, size);
+function void *arena_push(Arena *arena, u64 size) {
+    arena_align(arena, ARENA_DEFAULT_ALIGNMENT);
+    return arena_push_bytes(arena, size);
 }
 
-void *arena_alloc(Arena *arena, u64 size) {
-    return arena_push_aligned(arena, size, DEFAULT_MEMORY_ALIGNMENT);
+function void *arena_push_zero(Arena *arena, u64 size) {
+    void *result = arena_push(arena, size);
+    if (result != NULL)
+    {
+        MemoryZero(result, size);
+    }
+    return result;
 }
 
-bool arena_contains_pointer(Arena *arena, void *ptr) {
-    return ptr >= arena->data && ptr < arena->data + arena->size;
-}
-
-bool arena_write(Arena *arena, u8 *data, u64 size) {
+function bool arena_write(Arena *arena, u8 *data, u64 size) {
     bool result = false;
 
     u8 *buffer = (u8 *)arena_push(arena, size);
     if (buffer != NULL) {
-        memory_copy(data, buffer, size);
+        MemoryCopy(buffer, data, size);
         result = true;
     }
 
     return result;
 }
 
+function void *arena_resize_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size)
+{
+    void *result = NULL;
 
-#define PushStruct(arena, Struct) (Struct *)arena_push_zero(arena, sizeof(Struct))
+    if (old_memory_pointer && old_size > 0)
+    {
+        u64 old_memory_offset = (u8 *)(old_memory_pointer) - arena->data;
+        if (old_memory_offset == arena->pos - old_size)
+        {
+            arena_set_pos(arena, old_memory_offset + new_size);
+            result = old_memory_pointer;
+        }
+    }
 
-#define PushArray(arena, Struct, count) (Struct *)arena_push_zero(arena, (count) * sizeof(Struct))
+    if (!result)
+    {
+        result = arena_push_bytes(arena, new_size);
 
-#define PushArrayZero(arena, Struct, count) PushArray(arena, Struct, count)
+        if (result && old_memory_pointer)
+        {
+            MemoryCopy(result, old_memory_pointer, Min(new_size, old_size));
+        }
+    }
 
-Arena_Mark arena_get_position(Arena *arena) {
-    Arena_Mark result = {};
-    result.pos = arena->pos;
     return result;
 }
 
-void arena_set_position(Arena *arena, Arena_Mark mark) {
-    arena_pop_to(arena, mark.pos);
-    arena->pos = mark.pos;
-}
-
-//
-// Sorting
-//
-
-#define COMPARE_PROC(name) int name(void *a, void *b)
-typedef COMPARE_PROC(Compare_Proc);
-
-// TODO(bill): Make user definable?
-#define GB__SORT_STACK_SIZE            64
-#define GB__SORT_INSERT_SORT_THRESHOLD  8
-
-#define GB__SORT_PUSH(_base, _limit) do { \
-    stack_ptr[0] = (_base); \
-    stack_ptr[1] = (_limit); \
-    stack_ptr += 2; \
-} while (0)
-
-#define GB__SORT_POP(_base, _limit) do { \
-    stack_ptr -= 2; \
-    (_base)  = stack_ptr[0]; \
-    (_limit) = stack_ptr[1]; \
-} while (0)
-
-void na_sort(void *base_, isize count, isize size, Compare_Proc cmp) {
-    u8 *i, *j;
-    u8 *base = cast(u8 *)base_;
-    u8 *limit = base + count*size;
-    isize threshold = GB__SORT_INSERT_SORT_THRESHOLD * size;
-
-    // NOTE(bill): Prepare the stack
-    u8 *stack[GB__SORT_STACK_SIZE] = {0};
-    u8 **stack_ptr = stack;
-
-    for (;;) {
-        if ((limit-base) > threshold) {
-            // NOTE(bill): Quick sort
-            i = base + size;
-            j = limit - size;
-
-            memory_swap(((limit-base)/size/2) * size + base, base, size);
-            if (cmp(i, j) > 0)    memory_swap(i, j, size);
-            if (cmp(base, j) > 0) memory_swap(base, j, size);
-            if (cmp(i, base) > 0) memory_swap(i, base, size);
-
-            for (;;) {
-                do i += size; while (cmp(i, base) < 0);
-                do j -= size; while (cmp(j, base) > 0);
-                if (i > j) break;
-                memory_swap(i, j, size);
-            }
-
-            memory_swap(base, j, size);
-
-            if (j - base > limit - i) {
-                GB__SORT_PUSH(base, j);
-                base = i;
-            } else {
-                GB__SORT_PUSH(i, limit);
-                limit = j;
-            }
-        } else {
-            // NOTE(bill): Insertion sort
-            for (j = base, i = j+size;
-                     i < limit;
-                     j = i, i += size) {
-                for (; cmp(j, j+size) > 0; j -= size) {
-                    memory_swap(j, j+size, size);
-                    if (j == base) break;
-                }
-            }
-
-            if (stack_ptr == stack) break; // NOTE(bill): Sorting is done!
-            GB__SORT_POP(base, limit);
+function void arena_free_ptr(Arena *arena, void *old_memory_pointer, u64 old_size)
+{
+    if (old_memory_pointer && old_size > 0)
+    {
+        u64 old_memory_offset = (u8 *)(old_memory_pointer) - arena->data;
+        if (old_memory_offset == arena->pos - old_size)
+        {
+            arena_pop(arena, old_size);
         }
     }
 }
 
-#undef GB__SORT_PUSH
-#undef GB__SORT_POP
+function M_Temp arena_begin_temp(Arena *arena) {
+    M_Temp result = {arena, arena->pos};
+    return result;
+}
 
-isize na_binary_search(void *base, isize count, isize size, void *key, Compare_Proc cmp) {
-    isize start = 0;
-    isize end = count;
+function void arena_end_temp(M_Temp temp) {
+    arena_pop_to(temp.arena, temp.pos);
+}
 
-    while (start < end) {
-        isize mid = start + (end-start)/2;
-        isize result = cmp(key, cast(u8 *)base + mid*size);
-        if (result < 0)
-            end = mid;
-        else if (result > 0)
-            start = mid+1;
-        else
-            return mid;
+thread_local Arena *m__scratch_pool[2] = {0};
+
+function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count) {
+    if (m__scratch_pool[0] == 0) {
+        for (int i = 0; i < count_of(m__scratch_pool); i += 1)
+        {
+            m__scratch_pool[i] = arena_alloc_default();
+        }
     }
 
-    return -1;
+    M_Temp result = {0};
+    for (u64 i = 0; i < count_of(m__scratch_pool); i += 1)
+    {
+        b32 is_conflict = false;
+        for (Arena **conflict = conflicts; conflict < conflicts+conflict_count; conflict += 1)
+        {
+            if (*conflict == m__scratch_pool[i]) {
+                is_conflict = true;
+                break;
+            }
+        }
+
+        if (!is_conflict) {
+            result = arena_begin_temp(m__scratch_pool[i]);
+            break;
+        }
+    }
+    return result;
+}
+
+function Arena *temp_arena() {
+    if (m__scratch_pool[0] == 0) {
+        for (int i = 0; i < count_of(m__scratch_pool); i += 1)
+        {
+            m__scratch_pool[i] = arena_alloc_default();
+        }
+    }
+
+    return m__scratch_pool[0];
+}
+
+function u64 m_align_offset(void *ptr, u64 alignment){
+    u64 base_address = (u64)ptr;
+
+    assert(alignment >= 1);
+    assert(IsPow2(alignment));
+
+    u64 align_offset = alignment - (base_address & (alignment - 1));
+    align_offset &= (alignment - 1);
+
+    return align_offset;
 }
 
 //
-// Threading Primitives
+// Allocator
 //
 
-#if !OS_WINDOWS
-#include <pthread.h>
-#endif
+function void *allocator_alloc(Allocator allocator, u64 size)
+{
+    if (!allocator.proc) allocator = default_allocator();
 
-inline u32 thread_get_id() {
-    u32 result;
+    if (allocator.proc) {
+        void *result = allocator.proc(AllocatorMode_Alloc, size, 0, NULL, allocator.data, ALLOCATOR_DEFAULT_ALIGNMENT);
+        return result;
+    }
+
+    return NULL;
+}
+
+function void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment)
+{
+    if (!allocator.proc) allocator = default_allocator();
+
+    if (allocator.proc) {
+        void *result = allocator.proc(AllocatorMode_Alloc, size, 0, NULL, allocator.data, alignment);
+        return result;
+    }
+
+    return NULL;
+}
+
+function void allocator_free(Allocator allocator, void *data, u64 old_size)
+{
+    if (!allocator.proc) allocator = default_allocator();
+
+    if (allocator.proc) {
+        if (data != NULL) {
+            allocator.proc(AllocatorMode_Free, 0, old_size, data, allocator.data, 0);
+        }
+    }
+}
+
+function void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size)
+{
+    if (!allocator.proc) allocator = default_allocator();
+
+    if (allocator.proc) {
+        return allocator.proc(AllocatorMode_Resize, new_size, old_size, data, allocator.data, ALLOCATOR_DEFAULT_ALIGNMENT);
+    }
+
+    return NULL;
+}
+
+function void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment)
+{
+    if (!allocator.proc) allocator = default_allocator();
+
+    if (allocator.proc) {
+        return allocator.proc(AllocatorMode_Resize, new_size, old_size, data, allocator.data, alignment);
+    }
+
+    return NULL;
+}
+
+function ALLOCATOR_PROC(os_allocator_proc)
+{
+    switch (mode) {
+        case AllocatorMode_Alloc: {
+            u64 actual_size = requested_size + m_align_offset(0, alignment);
+            void *result = os_alloc(actual_size);
+            return result;
+        }
+
+        case AllocatorMode_Resize: {
+            u64 actual_size = requested_size + m_align_offset(0, alignment);
+
+            void *result = os_alloc(actual_size);
+
+            if (result && old_memory_pointer) {
+                // @Incomplete: provide os-level realloc function
+                MemoryCopy(result, old_memory_pointer, Min(requested_size, old_size));
+                os_free(old_memory_pointer);
+            }
+
+            return result;
+        }
+        
+        case AllocatorMode_Free: {
+            os_free(old_memory_pointer);
+            return NULL;
+        }
+
+        case AllocatorMode_FreeAll: {
+            // @Incomplete
+            return NULL;
+        }
+
+        default: {
+            return NULL;
+        }
+    }
+}
+
+function Allocator os_allocator() {
+    return Allocator{os_allocator_proc, 0};
+}
+
+function ALLOCATOR_PROC(arena_allocator_proc)
+{
+    Arena *arena = cast(Arena *)allocator_data; 
+
+    switch (mode) {
+        case AllocatorMode_Alloc:
+        {
+            arena_align(arena, alignment);
+            void *result = arena_push_bytes(arena, requested_size);
+            MemoryZero(result, requested_size);
+            return result;
+        } break;
+
+        case AllocatorMode_Resize:
+        {
+            arena_align(arena, alignment);
+            void *result = arena_resize_ptr(arena, requested_size, old_memory_pointer, old_size);
+            return result;
+        } break;
+
+        case AllocatorMode_Free:
+        {
+            arena_free_ptr(arena, old_memory_pointer, old_size);
+            return NULL;
+        } break;
+
+        case AllocatorMode_FreeAll:
+        {
+            arena_reset(arena);
+            return NULL;
+        } break;
+
+        default: {
+            return NULL;
+        } break;
+    }
+}
+
+Allocator arena_allocator(Arena *arena) {
+    assert(arena);
+    return Allocator{arena_allocator_proc, arena};
+}
+
+
+//
+// Strings
+//
+
+#ifndef PrintToBuffer
+
+#include <stdio.h>
+#define PrintToBuffer vsnprintf
+#define print na__print
+
+void na__print(const char *format, ...) {
+    char buffer[1024];
+
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+
+    fflush(stdout);
+}
+
+#endif // PrintToBuffer
 
 #if OS_WINDOWS
-    u8 *ThreadLocalStorage = (u8 *)__readgsqword(0x30);
-    result = *(u32 *)(ThreadLocalStorage + 0x48);
-#elif OS_MACOS
-    result = pthread_mach_thread_np(pthread_self());
-#elif OS_LINUX
-    result = gettid();
+    #define PATH_SEP '\\'
 #else
-    #error Unsupported architecture for thread_get_id()
+    #define PATH_SEP '/'
 #endif
-
-    return result;
-}
-
-inline u64 rdtsc(void) {
-#if defined(COMPILER_MSVC) && !defined(__clang__)
-    return __rdtsc();
-#elif defined(__i386__)
-    u64 x;
-    __asm__ volatile (".byte 0x0f, 0x31" : "=A" (x));
-    return x;
-#elif defined(__x86_64__)
-    u32 hi, lo;
-    __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
-    return (cast(u64)lo) | ((cast(u64)hi)<<32);
-#endif
-}
-
-#if COMPILER_MSVC
-    #define read_barrier() _ReadBarrier()
-    #define write_barrier() _WriteBarrier()
-#else
-    #define read_barrier() asm volatile("" ::: "memory")
-    #define write_barrier() asm volatile("" ::: "memory")
-#endif
-
-#if COMPILER_MSVC
-inline u32 atomic_compare_exchange_u32(u32 volatile *value, u32 New, u32 Expected) {
-    u32 result = _InterlockedCompareExchange((long volatile *)value, New, Expected);
-    return (result);
-}
-
-inline u64 atomic_exchange_u64(u64 volatile *value, u64 New) {
-    u64 result = _InterlockedExchange64((__int64 volatile *)value, New);
-    return (result);
-}
-
-inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
-    // NOTE(casey): Returns the original value _prior_ to adding
-    u64 result = _InterlockedExchangeAdd64((__int64 volatile *)value, Addend);
-    return (result);
-}
-#else // COMPILER_MSVC
-inline u32 atomic_compare_exchange_u32(u32 volatile *value, u32 New, u32 Expected) {
-    u32 result = __sync_val_compare_and_swap(value, Expected, New);
-    return (result);
-}
-
-inline u64 atomic_exchange_u64(u64 volatile *value, u64 New) {
-    u64 result = __sync_lock_test_and_set(value, New);
-    return (result);
-}
-
-inline u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
-    // NOTE(casey): Returns the original value _prior_ to adding
-    u64 result = __sync_fetch_and_add(value, Addend);
-    return (result);
-}
-#endif // COMPILER_MSVC
-
-static thread_local Arena *thread_temporary_storage;
-
-void thread_context_init(u64 temporary_storage_size) {
-    thread_temporary_storage = arena_alloc_from_memory(temporary_storage_size);
-}
-
-void thread_context_free() {
-    arena_free(thread_temporary_storage);
-}
-
-Arena *temp_arena() {
-    return thread_temporary_storage;
-}
-
-void *talloc(u64 size) {
-    return arena_alloc(temp_arena(), size);
-}
-
-void tpop(u64 size) {
-    arena_pop(temp_arena(), size);
-}
-
-void reset_temporary_storage() {
-    arena_reset(temp_arena());
-}
-
-struct Scratch_Memory {
-    Arena *arena;
-    Arena_Mark restore_point;
-};
-
-Scratch_Memory begin_scratch_memory() {
-    Scratch_Memory result = {};
-
-    Arena *arena = temp_arena();
-
-    result.arena         = arena;
-    result.restore_point = arena_get_position(arena);
-
-    return result;
-}
-
-void end_scratch_memory(Scratch_Memory scratch) {
-    arena_set_position(scratch.arena, scratch.restore_point);
-}
 
 
 //
-// String
+// Char Functions
 //
 
-struct String {
-    i64 count;
-    u8 *data;
+function b32 char_is_alpha(u8 c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
 
-    u8 &operator[](i64 i) {
-        assert(i >= 0 && i < count);
-        return data[i];
-    }
-};
+function b32 char_is_lower(u8 c) {
+    return c >= 'a' && c <= 'z';
+}
 
-typedef u32 Match_Flags;
-enum
+function b32 char_is_upper(u8 c) {
+    return c >= 'A' && c <= 'Z';
+}
+
+function b32 char_is_digit(u8 c) {
+    return c >= '0' && c <= '9';
+}
+
+function b32 char_is_space(u8 c) {
+    return c == ' ' || c == '\t' || c == '\f' || c == '\v';
+}
+
+function b32 char_is_whitespace(u8 c) {
+    return char_is_space(c) || c == '\r' || c == '\n';
+}
+
+function b32 char_is_symbol(u8 c)
 {
-    MatchFlags_None            = 0,
-    MatchFlags_IgnoreCase      = 1 << 0,
-    MatchFlags_FindLast        = 1 << 1,
-    MatchFlags_RightSideSloppy = 1 << 2,
-};
-
-#define S(x) String{sizeof(x) - 1, cast(u8 *)x}
-
-#define LIT(str) (int)str.count, (char *)str.data
-
-force_inline bool char_is_alpha(char ch) {
-    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+    return (c == '~' || c == '!'  || c == '$' || c == '%' || c == '^' ||
+            c == '&' || c == '*'  || c == '-' || c == '=' || c == '+' ||
+            c == '<' || c == '.'  || c == '>' || c == '/' || c == '?' ||
+            c == '|' || c == '\\' || c == '{' || c == '}' || c == '(' ||
+            c == ')' || c == '['  || c == ']' || c == '#' || c == ',' ||
+            c == ';'  || c == ':' || c == '@');
 }
 
-force_inline bool char_is_digit(char ch) {
-    return ch >= '0' && ch <= '9';
+function u8 char_to_upper(u8 c) {
+    return c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c;
 }
 
-force_inline bool char_is_whitespace(char ch) {
-    return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
+function u8 char_to_lower(u8 c) {
+    return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
 }
 
-force_inline bool char_is_lower(char ch) {
-    return ch >= 'a' && ch <= 'z';
+function u8 char_to_forward_slash(u8 c) {
+    return c == '\\' ? '/' : c;
 }
 
-force_inline bool char_is_upper(char ch) {
-    return ch >= 'A' && ch <= 'Z';
-}
+//
+// Constructors
+//
 
-force_inline char char_to_upper(char ch) {
-    return ch >= 'a' && ch <= 'z' ? ch - ('a' - 'A') : ch;
-}
-
-force_inline char char_to_lower(char ch) {
-    return ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch;
-}
-
-String make_string(u8 *data, i64 count) {
-    return String{count, cast(u8 *)data};
-}
-
-String make_string(char *data, i64 count) {
-    return String{count, cast(u8 *)data};
-}
-
-char *string_to_cstr(Arena *arena, String str) {
-    if (!str.count || !str.data) {
-        return NULL;
-    }
-
-    char *result = PushArray(arena, char, str.count + 1); // size for null character
-    memory_copy(str.data, result, str.count);
-    result[str.count] = 0;
+function String string_make(u8 *data, i64 count) {
+    String result;
+    result.data = data;
+    result.count = count;
     return result;
 }
 
-char *string_to_cstr(String str) {
-    return string_to_cstr(temp_arena(), str);
+function String string_range(u8 *at, u8 *end) {
+    assert(end >= at);
+    return string_make(at, (end - at));
 }
 
-i64 cstr_length(char *str) {
-    char *at = str;
+function i64 cstr_length(char *cstr) {
+    char *at = cstr;
 
     // @Speed: this can be made wide
     if (at != NULL) {
@@ -1305,73 +1564,50 @@ i64 cstr_length(char *str) {
         }
     }
 
-    return at - str;
+    return at - cstr;
 }
 
-bool cstr_equals(char *a, char *b) {
-    if (a == b) {
-        return true;
+function String string_from_cstr(char *cstr) {
+    return string_make((u8 *)cstr, cstr_length(cstr));
+};
+
+function char *string_to_cstr(Arena *arena, String str) {
+    if (!str.count || !str.data) {
+        return NULL;
     }
 
-    i64 length = cstr_length(a);
-    return b[length] == (char)NULL && memory_equals(a, b, length);
-}
-
-String string_from_cstr(char *data) {
-    String result = {};
-    i64 length = cstr_length(data);
-
-    if (length > 0) {
-        result = String{(i64)length, (u8 *)data};
-    }
-
+    char *result = PushArray(arena, char, str.count + 1); // size for null character
+    MemoryCopy(result, str.data, str.count);
+    result[str.count] = 0;
     return result;
 }
 
-bool string_equals(String a, String b)
-{
-    return a.count == b.count && memory_equals(a.data, b.data, a.count);
-}
-
-bool string_match(String a, String b, Match_Flags flags)
-{
-    bool result = false;
-
-    if (a.count == b.count || ((flags & MatchFlags_RightSideSloppy) && a.count >= b.count))
-    {
-        result = true;
-
-        for (i64 i = 0; i < b.count; i += 1)
-        {
-            u8 char_a = a.data[i];
-            u8 char_b = b.data[i];
-
-            if (flags & MatchFlags_IgnoreCase)
-            {
-                char_a = char_to_lower(char_a);
-                char_b = char_to_lower(char_b);
-            }
-
-            if (char_a != char_b)
-            {
-                result = false;
-                break;
-            }
-        }
-    }
-
+function String16 string16_make(u16 *data, i64 count) {
+    String16 result;
+    result.data = data;
+    result.count = count;
     return result;
 }
 
-bool string_starts_with(String str, String prefix) {
-    return str.count >= prefix.count && memory_equals(str.data, prefix.data, prefix.count);
+function String16 string16_from_cstr(u16 *data) {
+    u16 *at = data;
+    while (*at != 0) at += 1;
+    String16 result = Str16(data, at - data);
+    return result;
 }
 
-bool string_ends_with(String str, String postfix) {
-    return str.count >= postfix.count && memory_equals(str.data + (str.count - postfix.count), postfix.data, postfix.count);
+function String32 string32_make(u32 *data, i64 count) {
+    String32 result;
+    result.data = data;
+    result.count = count;
+    return result;
 }
 
-String string_slice(String str, i64 start_index, i64 end_index) {
+//
+// Substrings
+//
+
+function String string_slice(String str, i64 start_index, i64 end_index) {
     start_index = Clamp(start_index, 0, str.count);
     end_index   = Clamp(end_index, 0, str.count);
 
@@ -1382,43 +1618,83 @@ String string_slice(String str, i64 start_index, i64 end_index) {
         end_index = tmp;
     }
 
-    return make_string(str.data + start_index, end_index - start_index);
+    return string_make(str.data + start_index, end_index - start_index);
 }
 
-String string_slice(String str, i64 start_index) {
-    return string_slice(str, start_index, str.count);
+function String string_substr(String str, i64 offset, i64 count)
+{
+    return string_slice(str, offset, offset + count);
 }
 
-String string_skip(String str, i64 offset) {
+function String string_skip(String str, i64 offset) {
     return string_slice(str, offset, str.count);
 }
 
-String string_chop(String str, i64 offset) {
+function String string_chop(String str, i64 offset) {
     return string_slice(str, 0, str.count - offset);
 }
 
-String string_prefix(String str, i64 count) {
+function String string_prefix(String str, i64 count) {
     return string_slice(str, 0, count);
 }
 
-String string_suffix(String str, i64 count) {
+function String string_suffix(String str, i64 count) {
     return string_slice(str, str.count - count, str.count);
 }
 
-String string_range(u8 *at, u8 *end) {
-    assert(end >= at);
-    return make_string(at, (end - at));
+//
+// Matching
+//
+
+function bool string_equals(String a, String b)
+{
+    return a.count == b.count && MemoryEquals(a.data, b.data, a.count);
 }
 
-i64 string_find(String str, String search, i64 start_index = 0, Match_Flags flags = 0)
+function bool string_match(String a, String b, Match_Flags flags)
+{
+    bool result = false;
+
+    if (a.count == b.count || ((flags & MatchFlag_RightSideSloppy) && a.count >= b.count))
+    {
+        result = true;
+
+        for (i64 i = 0; i < b.count; i += 1)
+        {
+            bool match = a.data[i] == b.data[i];
+            if (flags & MatchFlag_CaseInsensitive)
+            {
+                match |= (char_to_lower(a.data[i]) == char_to_lower(b.data[i]));
+            }
+            if (flags & MatchFlag_SlashInsensitive)
+            {
+                match |= (char_to_forward_slash(a.data[i]) == char_to_forward_slash(b.data[i]));
+            }
+
+            if (!match)
+            {
+                result = false;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+function i64 string_find(String str, String search, i64 start_index, Match_Flags flags)
 {
     i64 result = str.count;
 
-    for (i64 i = start_index; i < str.count; i += 1) {
-        if (string_match(string_skip(str, i), search, flags | MatchFlags_RightSideSloppy))
+    for (i64 i = start_index; i < str.count; i += 1)
+    {
+        if (i + search.count > str.count) break;
+
+        String substr = string_slice(str, i, i+search.count);
+        if (string_match(substr, search, flags))
         {
             result = i;
-            if (!(flags & MatchFlags_FindLast))
+            if (!(flags & MatchFlag_FindLast))
             {
                 break;
             }
@@ -1428,233 +1704,55 @@ i64 string_find(String str, String search, i64 start_index = 0, Match_Flags flag
     return result;
 }
 
-i64 string_index(String str, String search, i64 start_index = 0) {
-    for (i64 i = start_index; i < str.count; i += 1) {
-        if (memory_equals(str.data + i, search.data, search.count)) {
-            return i;
-        }
-    }
-
-    return -1;
+function bool string_starts_with(String str, String prefix) {
+    return str.count >= prefix.count && MemoryEquals(str.data, prefix.data, prefix.count);
 }
 
-i64 string_index(String str, char search, i64 start_index = 0) {
-    return string_index(str, make_string(&search, 1), start_index);
+function bool string_ends_with(String str, String postfix) {
+    return (
+        str.count >= postfix.count &&
+        MemoryEquals(str.data + (str.count - postfix.count), postfix.data, postfix.count)
+    );
 }
 
-i64 string_last_index(String str, String search) {
-    i64 start_index = str.count - 1;
-    for (i64 i = start_index; i >= 0; i -= 1) {
-        if (memory_equals(str.data + i, search.data, search.count)) {
-            return i;
-        }
-    }
-
-    return -1;
+function i64 string_index(String str, String search, i64 start_index) {
+    i64 result = string_find(str, search, start_index, 0);
+    return result < str.count ? result : -1;
 }
 
-bool string_contains(String str, String search) {
-    return string_index(str, search) >= 0;
+function i64 string_char_index(String str, u8 search, i64 start_index) {
+    return string_index(str, string_make(&search, 1), start_index);
 }
 
-i64 string_count_occurances(String str, String search, i64 start_index = 0) {
-    i64 result = 0;
-
-    for (i64 i = start_index; i < str.count; i += 1) {
-        if (memory_equals(str.data + i, search.data, search.count)) {
-            result += 1;
-            i += search.count - 1;
-        }
-    }
-
-    return result;
+function i64 string_last_index(String str, String search) {
+    i64 result = string_find(str, search, 0, MatchFlag_FindLast);
+    return result < str.count ? result : -1;
 }
 
-#define PushStringCopy string_copy
+function bool string_contains(String str, String search) {
+    return string_find(str, search, 0, 0) < str.count;
+}
 
-String string_copy(Arena *arena, String other) {
-    String copy = {};
-    u8 *data = PushArray(arena, u8, other.count);
+//
+// Allocation
+//
+
+function String string_copy(Arena *arena, String str)
+{
+    String copy = {0};
+    u8 *data = PushArray(arena, u8, str.count);
 
     if (data) {
-        copy = make_string(data, other.count);
-        memory_copy(other.data, copy.data, other.count);
+        copy = string_make(data, str.count);
+        MemoryCopy(copy.data, str.data, str.count);
     }
 
     return copy;
 }
 
-String string_temp(String other) { return string_copy(temp_arena(), other); }
-
-String string_write(String str, char *buffer, u64 limit)
+function String string_printv(Arena *arena, char *fmt, va_list args)
 {
-    String result = {};
-
-    if (str.count && buffer)
-    {
-        u64 count = Min(str.count, limit - 1);
-        memory_copy(str.data, buffer, count);
-        buffer[count] = '\0';
-        result = make_string(buffer, count);
-    }
-
-    return result;
-}
-
-String string_write(String str, u8 *buffer, u64 limit) {
-    return string_write(str, (char *)buffer, limit);
-}
-
-String string_push(Arena *arena, i64 count)
-{
-    u8 *buffer = PushArray(arena, u8, count);
-    return make_string(buffer, count);
-}
-
-String string_alloc(Allocator allocator, String other) {
-    String copy = {};
-    u8 *data = cast(u8 *)allocator_alloc(allocator, sizeof(u8) * other.count);
-
-    if (data) {
-        copy = make_string(data, other.count);
-        memory_copy(other.data, copy.data, sizeof(u8) * other.count);
-    }
-
-    return copy;
-}
-
-void string_free(Allocator allocator, String *string) {
-    if (string->data) {
-        allocator_free(allocator, string->data);
-        string->data  = NULL;
-        string->count = 0;
-    }
-}
-
-String string_concat(Arena *arena, String a, String b) {
-    u64 count = a.count + b.count;
-    u8 *data = PushArray(arena, u8, count);
-
-    if (data) {
-        memory_copy(a.data, data + 0,       a.count);
-        memory_copy(b.data, data + a.count, b.count);
-    }
-
-    return make_string(data, count);
-}
-
-String string_concat(Arena *arena, String a, String b, String c) {
-    u64 count = a.count + b.count + c.count;
-    u8 *data = PushArray(arena, u8, count);
-
-    if (data) {
-        memory_copy(a.data, data + 0,                 a.count);
-        memory_copy(b.data, data + a.count,           b.count);
-        memory_copy(c.data, data + a.count + b.count, c.count);
-    }
-
-    return make_string(data, count);
-}
-
-String string_concat(Arena *arena, String a, String b, String c, String d) {
-    u64 count = a.count + b.count + c.count + d.count;
-    u8 *data = PushArray(arena, u8, count);
-
-    if (data) {
-        memory_copy(a.data, data + 0,                           a.count);
-        memory_copy(b.data, data + a.count,                     b.count);
-        memory_copy(c.data, data + a.count + b.count,           c.count);
-        memory_copy(d.data, data + a.count + b.count + c.count, d.count);
-    }
-
-    return make_string(data, count);
-}
-
-String string_concat(String a, String b) {
-    return string_concat(temp_arena(), a, b);
-}
-
-String string_concat(String a, String b, String c) {
-    return string_concat(temp_arena(), a, b, c);
-}
-
-String string_concat(String a, String b, String c, String d) {
-    return string_concat(temp_arena(), a, b, c, d);
-}
-
-void string_to_lower(String *str) {
-    for (i64 i = 0; i < str->count; i += 1) {
-        str->data[i] = char_to_lower(str->data[i]);
-    }
-}
-
-String string_lower(String str) {
-    String result = string_copy(temp_arena(), str);
-    string_to_lower(&result);
-    return result;
-}
-
-void string_to_upper(String *str) {
-    for (i64 i = 0; i < str->count; i += 1) {
-        str->data[i] = char_to_upper(str->data[i]);
-    }
-}
-
-void string_advance(String *str, i64 amount) {
-    assert(str->count >= amount);
-
-    str->count -= amount;
-    str->data  += amount;
-}
-
-void string_trim_whitespace(String *str) {
-    while (str->count > 0 && char_is_whitespace(str->data[0])) {
-        str->data ++;
-        str->count --;
-    }
-
-    while (str->count > 0 && char_is_whitespace(str->data[str->count - 1])) {
-        str->count --;
-    }
-}
-
-String string_trim_whitespace(String str) {
-    String copy = str;
-    string_trim_whitespace(&copy);
-    return copy;
-}
-
-bool string_eat_whitespace(String *str) {
-    u64 start_count = str->count;
-
-    while (str->count > 0 && char_is_whitespace((*str)[0])) {
-        string_advance(str, 1);
-    }
-
-    return start_count != str->count;
-}
-
-String string_eat_until(String *str, String token) {
-    String start = *str;
-
-    while (str->count > 0) {
-        if (string_starts_with(*str, token)) {
-            break;
-        }
-
-        string_advance(str, 1);
-    }
-
-    return make_string(start.data, start.count - str->count);
-}
-
-String string_eat_until_newline(String *str)
-{
-    return string_eat_until(str, S("\n"));
-}
-
-String string_printv(Arena *arena, const char *format, va_list args) {
-    String result = {};
+    String result = {0};
     
     // in case we need to try a second time
     va_list args2;
@@ -1666,7 +1764,7 @@ String string_printv(Arena *arena, const char *format, va_list args) {
     if (buffer != NULL)
     {
         // NOTE(nick): print_to_buffer returns size excluding the null terminator
-        i64 actual_size = print_to_buffer((char *)buffer, buffer_size, format, args);
+        i64 actual_size = PrintToBuffer((char *)buffer, buffer_size, fmt, args);
 
         if (actual_size > 0)
         {
@@ -1674,7 +1772,7 @@ String string_printv(Arena *arena, const char *format, va_list args) {
             {
                 // NOTE(nick): happy path
                 arena_pop(arena, buffer_size - actual_size);
-                result = make_string(buffer, actual_size);
+                result = string_make(buffer, actual_size);
             }
             else
             {
@@ -1683,8 +1781,8 @@ String string_printv(Arena *arena, const char *format, va_list args) {
 
                 if (fixed_buffer != NULL)
                 {
-                    i64 final_size = print_to_buffer((char *)fixed_buffer, actual_size + 1, format, args2);
-                    result = make_string(fixed_buffer, final_size);
+                    i64 final_size = PrintToBuffer((char *)fixed_buffer, actual_size + 1, fmt, args2);
+                    result = string_make(fixed_buffer, final_size);
                 }
             }
         }
@@ -1695,393 +1793,136 @@ String string_printv(Arena *arena, const char *format, va_list args) {
     return result;
 }
 
-String string_print(Arena *arena, const char *format, ...) {
-    String result = {};
+function String string_print(Arena *arena, char *fmt, ...)
+{
+    String result = {0};
 
     va_list args;
-    va_start(args, format);
-    result = string_printv(arena, format, args);
+    va_start(args, fmt);
+    result = string_printv(arena, fmt, args);
     va_end(args);
 
     return result;
 }
 
-char *cstr_print(Arena *arena, const char *format, ...) {
-    String result = {};
-
-    va_list args;
-    va_start(args, format);
-    result = string_printv(arena, format, args);
-    va_end(args);
-
-    char *null_terminator = (char *)arena_push(arena, 1);
-    *null_terminator = 0;
-
-    return (char *)result.data;
-}
-
-#define sprint(...) string_print(temp_arena(), __VA_ARGS__)
-#define cprint(...) cstr_print(temp_arena(), __VA_ARGS__)
-
-
-i64 print_to_stringv(String buffer, const char *format, va_list args) {
-    i64 result = 0;
-    // NOTE(nick): print_to_buffer returns size excluding the null terminator
-    result = print_to_buffer((char *)buffer.data, buffer.count, format, args);
-    return result;
-}
-
-i64 print_to_string(String buffer, const char *format, ...)
+function String string_replace(Arena *arena, String str, String find, String replacer, u64 replace_limit)
 {
-    i64 result = 0;
+    String result = str;
+    if (replace_limit == 0) replace_limit = U64_MAX;
 
-    va_list args;
-    va_start(args, format);
-    result = print_to_stringv(buffer, format, args);
-    va_end(args);
-
-    return result;
-}
-
-i64 print_to_memory(u8 *buffer, i64 limit, const char *format, ...)
-{
-    i64 result = 0;
-
-    va_list args;
-    va_start(args, format);
-    result = print_to_stringv(make_string(buffer, limit), format, args);
-    va_end(args);
-
-    return result;
-}
-
-
-void arena_print(Arena *arena, char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    string_printv(arena, format, args);
-    va_end(args);
-}
-
-void arena_write(Arena *arena, String string)
-{
-    arena_write(arena, string.data, string.count);
-}
-
-String arena_to_string(Arena *arena)
-{
-    return make_string(arena->data, arena->pos);
-}
-
-
-i64 string_to_i64(String str, int base = 10) {
-    i64 result = 0;
-    i64 fact = 1;
-
-    if (str.count > 0)
+    u64 match_count = 0;
+    u64 replace_count = replace_limit;
+    if (replace_count > 0 && find.count > 0)
     {
-        if (str.data[0] == '-') {
-            string_advance(&str, 1);
-            fact = -1;
-        }
+        i64 index = -1;
+        while (index < str.count)
+        {
+            index = string_find(str, find, index + 1, 0);
+            if (index < str.count)
+            {
+                replace_count -= 1;
+                if (replace_count == 0) break;
 
-        for (u64 i = 0; i < str.count; i++) {
-            char it = str.data[i];
-
-            int d = it - '0';
-            if (d >= 0 && d <= 9 && d <= base - 1) {
-                result = result * base + d;
-                continue;
-            }
-
-            int a = char_to_upper(it) - 'A';
-            if (a >= 0 && a <= 25 && a + 10 <= base - 1) {
-                result = result * base + a + 10;
-                continue;
+                match_count += 1;
             }
         }
     }
 
-    return result * fact;
-}
+    if (match_count > 0)
+    {
+        u64 count = str.count - (replacer.count - find.count) * match_count;
+        u8 *data = PushArray(arena, u8, count);
+        u8 *at = data;
 
-f64 string_to_f64(String str) {
-    f64 result = 0;
-    f64 fact = 1;
+        i64 index = -1;
+        while (index < str.count)
+        {
+            i64 start_index = Max(index, 0);
+            index = string_find(str, find, index + 1, 0);
 
-    if (str.data[0] == '-') {
-        string_advance(&str, 1);
-        fact = -1;
+            MemoryCopy(at, str.data + start_index, (index - start_index));
+            at += (index - start_index);
+
+            if (index < str.count)
+            {
+                MemoryCopy(at, replacer.data, replacer.count);
+                at += replacer.count;
+                index += find.count;
+
+                if (match_count == 0)
+                {
+                    MemoryCopy(at, str.data + index, str.count - index);
+                    at += str.count - index;
+                    break;
+                }
+                match_count -= 1;
+            }
+        }
+
+        result = Str8(data, at - data);
     }
 
-    bool point_seen = false;
-    bool e_seen = false;
-
-    u64 i = 0;
-    for (; i < str.count; i++) {
-        char ch = str.data[i];
-
-        if (ch == '.') {
-            point_seen = true;
-            continue;
-        }
-
-        if ((ch == 'e' || ch == 'E') && i > 0) {
-            e_seen = true;
-            i++;
-            break;
-        }
-
-        int d = ch - '0';
-        if (d >= 0 && d <= 9) {
-            if (point_seen) fact /= 10.0f;
-            result = result * 10.0f + (f64)d;
-        }
-    }
-
-    if (e_seen) {
-        i64 int_value = string_to_i64(string_slice(str, i, str.count));
-        f64 multiple = 10.0f;
-        if (int_value < 0) {
-            int_value *= -1;
-            multiple = 0.1f;
-        }
-
-        for (i32 j = 0; j < int_value; j++) {
-            fact *= multiple;
-        }
-    }
-
-    return result * fact;
+    return result;
 }
-
-bool string_to_bool(String str) {
-    str = string_lower(str);
-    return string_equals(str, S("true")) || string_equals(str, S("1"));
-}
-
-String string_pluralize(i64 count, String singular, String plural)
-{
-    auto numstr = sprint("%d ", count);
-    return string_concat(numstr, count == 1 ? singular : plural);
-}
-
-
-// NOTE(nick): The path_* functions assume that we are working with a normalized (unix-like) path string.
-// All paths should be normalized at the OS interface level, so we can make that assumption here.
-
-String path_join(Arena *arena, String path1, String path2) {
-    if (!path1.count) return path2;
-    if (!path2.count) return path1;
-
-    if (path1.data[path1.count - 1] == '/') path1.count -= 1;
-
-    return string_print(arena, "%.*s/%.*s", path1.count, path1.data, path2.count, path2.data);
-}
-
-force_inline String path_join(String path1, String path2) {
-    return path_join(temp_arena(), path1, path2);
-}
-
-String path_join(Arena *arena, String path1, String path2, String path3) {
-    if (!path1.count) return path_join(path2, path3);
-    if (!path2.count) return path_join(path1, path3);
-    if (!path3.count) return path_join(path2, path3);
-
-    if (path1.data[path1.count - 1] == '/') path1.count -= 1;
-    if (path2.data[path2.count - 1] == '/') path2.count -= 1;
-    
-    return string_print(arena, "%.*s/%.*s/%.*s", path1.count, path1.data, path2.count, path2.data, path3.count, path3.data);
-}
-
-force_inline String path_join(String path1, String path2, String path3) {
-    return path_join(temp_arena(), path1, path2, path3);
-}
-
-bool path_is_absolute(String path) {
-    return (
-        (path.count > 0 && path[0] == '/') ||
-        // Windows drive root:
-        (path.count > 2 && char_is_alpha(path[0]) && path[1] == ':' && (path.count == 2 || path[2] == '/'))
-    );
-}
-
-// @Incomplete: do we care about Unix vs. Windows differences on each respective platform?
-bool path_is_root(String path) {
-    return (
-        // Unix root:
-        (path.count == 1 && path[0] == '/') ||
-        // Windows drive root:
-        ((path.count == 2 || path.count == 3) && char_is_alpha(path[0]) && path[1] == ':' && (path.count == 2 || path[2] == '/'))
-    );
-}
-
-String path_dirname(String path) {
-    // normalize path
-    if (path.data[path.count - 1] == '/') path.count -= 1;
-
-    for (i32 i = path.count - 1; i >= 0; i--) {
-        if (path.data[i] == '/') {
-            return string_slice(path, 0, i + 1);
-        }
-    }
-
-    return sprint("./");
-}
-
-String path_resolve(String base_folder, String subpath)
-{
-    if (path_is_absolute(subpath)) return subpath;
-    return path_join(base_folder, subpath);
-}
-
-String path_filename(String path) {
-    // normalize path
-    if (path.data[path.count - 1] == '/') path.count -= 1;
-
-    for (i32 i = path.count - 1; i >= 0; i--) {
-        char ch = path.data[i];
-        if (ch == '/') {
-            return string_slice(path, i + 1, path.count);
-        }
-    }
-
-    return path;
-}
-
-String path_strip_extension(String path) {
-    for (i32 i = path.count - 1; i >= 0; i--) {
-        char ch = path.data[i];
-        if (ch == '.') {
-            return string_slice(path, 0, i);
-        }
-    }
-
-    return path;
-}
-
-String path_get_extension(String path) {
-    for (i32 i = path.count - 1; i >= 0; i--) {
-        char ch = path.data[i];
-        if (ch == '.') {
-            return string_slice(path, i, path.count);
-        }
-    }
-
-    return {};
-}
-
-String to_string(bool x)   { return x ? S("true") : S("false"); }
-String to_string(char x)   { return sprint("%c", x); }
-String to_string(char *x)  { return string_from_cstr(x); }
-String to_string(i8 x)     { return sprint("%d", x); }
-String to_string(u8 x)     { return sprint("%d", x); }
-String to_string(i16 x)    { return sprint("%d", x); }
-String to_string(u16 x)    { return sprint("%d", x); }
-String to_string(i32 x)    { return sprint("%d", x); }
-String to_string(u32 x)    { return sprint("%d", x); }
-String to_string(i64 x)    { return sprint("%lld", x); }
-String to_string(u64 x)    { return sprint("%llu", x); }
-/*
-String to_string(isize x)  { return sprint("%lld", x); }
-String to_string(usize x)  { return sprint("%llu", x); }
-*/
-String to_string(f32 x)    { return sprint("%.2f", x); }
-String to_string(f64 x)    { return sprint("%.4f", x); }
-String to_string(void *x)  { return sprint("%p", x); }
-String to_string(String x) { return x; }
 
 //
-// String conversions
+// Unicode Conversions
 //
 
-struct String16 {
-    i64 count;
-    u16 *data;
-};
+function String_Decode string_decode_utf8(u8 *str, u32 capacity) {
+    String_Decode result = {'?', 1};
 
-struct String32 {
-    i64 count;
-    u32 *data;
-};
-
-struct String_Decode {
-    u32 codepoint;
-    u8 size; // 1 - 4
-};
-
-String16 make_string16(void *data, i64 count) {
-    return String16{count, (u16 *)data};
-}
-
-String32 make_string32(u32 *data, i64 count) {
-    return String32{count, data};
-}
-
-String32 string32_slice(String32 str, i64 start_index, i64 end_index) {
-    assert(start_index >= 0 && start_index <= str.count);
-    assert(end_index >= 0 && end_index <= str.count);
-    return make_string32(str.data + start_index, end_index - start_index);
-}
-
-String32 string32_slice(String32 str, i64 start_index) {
-    return string32_slice(str, start_index, str.count);
-}
-
-String32 string32_alloc(Allocator allocator, String32 other) {
-    String32 copy = {};
-    u32 *data = cast(u32 *)allocator_alloc(allocator, sizeof(u32) * other.count);
-
-    if (data) {
-        copy = make_string32(data, other.count);
-        memory_copy(other.data, copy.data, sizeof(u32) * other.count);
-    }
-
-    return copy;
-}
-
-void string32_free(Allocator allocator, String32 *string) {
-    if (string->data) {
-        allocator_free(allocator, string->data);
-        string->data  = NULL;
-        string->count = 0;
-    }
-}
-
-String_Decode string_decode_utf8(u8 *str, u32 capacity) {
-    static u8 high_bits_to_count[] = {
+    static u8 utf8_class[] = {
         1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1,
         0, 0, 0, 0, 0, 0, 0, 0,
         2, 2, 2, 2, 3, 3, 4, 0,
     };
 
-    String_Decode result = {'?', 1};
+    u8 byte = str[0];
+    u8 count = utf8_class[byte >> 3];
 
-    u8 count = high_bits_to_count[str[0] >> 3];
-
-    // @Speed: this could be made branchless
     if (capacity >= count) {
         switch (count) {
             case 1: {
-                result.size = 1;
-                result.codepoint = str[0] & 0x7f;
+                result.advance = 1;
+                result.codepoint = str[0] & 0x7F;
             } break;
 
             case 2: {
-                result.size = 2;
-                result.codepoint = ((str[0] & 0x1f) << 6) | (str[1] & 0x3f);
+                if (utf8_class[str[1] >> 3] == 0)
+                {
+                    result.advance = 2;
+                    result.codepoint = ((str[0] & 0x1F) << 6) | (str[1] & 0x3F);
+                }
             } break;
 
             case 3: {
-                result.size = 3;
-                result.codepoint = ((str[0] & 0x0f) << 12) | ((str[1] & 0x3f) << 6) | (str[2] & 0x3f);
+                if (utf8_class[str[1] >> 3] == 0 &&
+                    utf8_class[str[2] >> 3] == 0)
+                {
+                    result.advance = 3;
+                    result.codepoint = (
+                        ((str[0] & 0x0F) << 12) |
+                        ((str[1] & 0x3F) << 6) |
+                        ((str[2] & 0x3F))
+                    );
+                }
             } break;
 
             case 4: {
-                result.size = 4;
-                result.codepoint = ((str[0] & 0x09) << 18) | ((str[1] & 0x3f) << 12) | ((str[2] & 0x3f) << 6) | (str[3] & 0x3f);
+                if (utf8_class[str[1] >> 3] == 0 &&
+                    utf8_class[str[2] >> 3] == 0 &&
+                    utf8_class[str[3] >> 3] == 0)
+                {
+                    result.advance = 4;
+                    result.codepoint = (
+                        ((str[0] & 0x07) << 18) |
+                        ((str[1] & 0x3F) << 12) |
+                        ((str[2] & 0x3F) << 6) |
+                        ((str[3] & 0x3F))
+                    );
+                }
             } break;
         }
     }
@@ -2089,46 +1930,47 @@ String_Decode string_decode_utf8(u8 *str, u32 capacity) {
     return result;
 }
 
-u32 string_encode_utf8(u8 *dest, u32 codepoint) {
-    u32 size = 0;
+function u32 string_encode_utf8(u8 *dest, u32 codepoint) {
+    u32 advance = 0;
 
-    if (codepoint <= 0x7f) {
-        size = 1;
-        dest[0] = codepoint;
+    if (codepoint <= 0x7F) {
+        advance = 1;
+        dest[0] = (u8)codepoint;
     }
-    else if (codepoint <= 0x7ff) {
-        size = 2;
+    else if (codepoint <= 0x7FF) {
+        advance = 2;
         dest[0] = 0xC0 | (codepoint >> 6);
-        dest[1] = 0x80 | (codepoint & 0x3f);
+        dest[1] = 0x80 | (codepoint & 0x3F);
     }
-    else if (codepoint <= 0xffff) {
-        size = 3;
+    else if (codepoint <= 0xFFFF) {
+        advance = 3;
         dest[0] = 0xE0 | (codepoint >> 12);
-        dest[1] = 0x80 | ((codepoint >> 6) & 0x3f);
-        dest[2] = 0x80 | (codepoint & 0x3f);
+        dest[1] = 0x80 | ((codepoint >> 6) & 0x3F);
+        dest[2] = 0x80 | (codepoint & 0x3F);
     }
     else if (codepoint <= 0x10FFFF) {
-        size = 4;
+        advance = 4;
         dest[0] = 0xF0 | (codepoint >> 18);
-        dest[1] = 0x80 | ((codepoint >> 12) & 0x3f);
-        dest[2] = 0x80 | ((codepoint >> 6) & 0x3f);
-        dest[3] = 0x80 | (codepoint & 0x3f);
+        dest[1] = 0x80 | ((codepoint >> 12) & 0x3F);
+        dest[2] = 0x80 | ((codepoint >> 6) & 0x3F);
+        dest[3] = 0x80 | (codepoint & 0x3F);
     }
-    else {
+    else
+    {
         dest[0] = '?';
-        size = 1;
+        advance = 1;
     }
 
-    return size;
+    return advance;
 }
 
-u8 string_seek_right_utf8(u8 *data, u32 capacity) {
-    auto decode = string_decode_utf8(data, capacity);
-    return Min(decode.size, capacity);
+function u8 string_seek_right_utf8(u8 *data, u32 capacity) {
+    String_Decode decode = string_decode_utf8(data, capacity);
+    return Min(decode.advance, capacity);
 }
 
-u8 string_seek_left_utf8(u8 *data, u32 capacity) {
-    u8 size = 0;
+function u8 string_seek_left_utf8(u8 *data, u32 capacity) {
+    u8 advance = 0;
 
     if (capacity >= 1)
     {
@@ -2136,116 +1978,119 @@ u8 string_seek_left_utf8(u8 *data, u32 capacity) {
 
         if (at < 128)
         {
-            size = 1;
+            advance = 1;
         }
         else if (capacity >= 2)
         {
-            size = 2;
+            advance = 2;
             at = *(data - 2);
 
             // scan for 10xxxxxx
             if (capacity >= 3 && (at & 0xC0) == 0x80)
             {
-                size += 1;
+                advance += 1;
                 at = *(data - 3);
 
                 if (capacity >= 4 && (at & 0xC0) == 0x80)
                 {
-                    size += 1;
+                    advance += 1;
                 }
             }
         }
     }
 
-    return size;
+    return advance;
 }
 
-String_Decode string_decode_utf16(u16 *str, u32 capacity) {
+function String_Decode string_decode_utf16(u16 *str, u32 capacity) {
     String_Decode result = {'?', 1};
 
     u16 x = str[0];
 
     if (x < 0xD800 || 0xDFFF < x) {
         result.codepoint = x;
-        result.size = 1;
+        result.advance = 1;
     } else if (capacity >= 2) {
         u16 y = str[1];
 
         if (0xD800 <= x && x < 0xDC00 && 0xDC00 <= y && y < 0xE000) {
             result.codepoint = (((x - 0xD800) << 10) | (y - 0xDC00)) + 0x10000;
-            result.size = 2;
+            result.advance = 2;
         }
     }
 
     return result;
 }
 
-u32 string_encode_utf16(u16 *dest, u32 codepoint) {
-    u32 size = 0;
-
-    if (codepoint < 0x10000) {
-        dest[0] = codepoint;
-        size = 1;
-    } else {
-        u32 x = codepoint - 0x10000;
-        dest[0] = (x >> 10) + 0xD800;
-        dest[1] = (x & 0x3FF) + 0xDC00;
-        size = 2;
+function u32 string_encode_utf16(u16 *dest, u32 codepoint)
+{
+    u32 advance = 1;
+    if (codepoint == ~((u32)0))
+    {
+        dest[0] = (u16)'?';
     }
-
-    return size;
+    else if (codepoint < 0x10000)
+    {
+        dest[0] = (u16)codepoint;
+    }
+    else
+    {
+        u32 v = codepoint - 0x10000;
+        dest[0] = 0xD800 + (v >> 10);
+        dest[1] = 0xDC00 + (v & 0x3FF);
+        advance = 2;
+    }
+    return advance;
 }
 
-String32 string32_from_string(Arena *arena, String str) {
-    u32 *memory = PushArray(arena, u32, str.count);
+function String32 string32_from_string(Arena *arena, String str) {
+    u32 *data = PushArray(arena, u32, str.count);
 
-    u32 *at = memory;
+    u32 *at = data;
     u8 *p0 = str.data;
     u8 *p1 = str.data + str.count;
 
     while (p0 < p1) {
-        auto decode = string_decode_utf8(p0, cast(u64)(p1 - p0));
+        String_Decode decode = string_decode_utf8(p0, cast(u64)(p1 - p0));
 
         *at = decode.codepoint;
-        p0 += decode.size;
+        p0 += decode.advance;
         at += 1;
     }
 
     i64 alloc_count = str.count;
-    i64 string_count = cast(u64)(at - memory);
+    i64 string_count = cast(u64)(at - data);
     i64 unused_count = alloc_count - string_count;
 
     arena_pop(arena, unused_count * sizeof(u32));
 
-    String32 result = {string_count, memory};
-    return result;
+    return string32_make(data, string_count);
 }
 
-String string_from_string32(Arena *arena, String32 str) {
-    u8 *memory = PushArray(arena, u8, str.count * 4);
+function String string_from_string32(Arena *arena, String32 str) {
+    u8 *data = PushArray(arena, u8, str.count * 4);
 
     u32 *p0 = str.data;
     u32 *p1 = str.data + str.count;
-    u8 *at = memory;
+    u8 *at = data;
 
     while (p0 < p1) {
-        auto size = string_encode_utf8(at, *p0);
+        u32 advance = string_encode_utf8(at, *p0);
 
         p0 += 1;
-        at += size;
+        at += advance;
     }
 
     i64 alloc_count = str.count * 4;
-    i64 string_count = cast(u64)(at - memory);
+    i64 string_count = cast(u64)(at - data);
     i64 unused_count = alloc_count - string_count;
 
     arena_pop(arena, unused_count);
 
-    String result = {string_count, memory};
-    return result;
+    return Str8(data, string_count);
 }
 
-String16 string16_from_string(Arena *arena, String str) {
+function String16 string16_from_string(Arena *arena, String str) {
     arena_align(arena, sizeof(u16));
     u16 *data = PushArray(arena, u16, str.count * 2 + 1);
 
@@ -2254,10 +2099,10 @@ String16 string16_from_string(Arena *arena, String str) {
     u8 *p1 = str.data + str.count;
 
     while (p0 < p1) {
-        auto decode = string_decode_utf8(p0, (u64)(p1 - p0));
+        String_Decode decode = string_decode_utf8(p0, (u64)(p1 - p0));
         u32 encode_size = string_encode_utf16(at, decode.codepoint);
 
-        p0 += decode.size;
+        p0 += decode.advance;
         at += encode_size;
     }
 
@@ -2269,12 +2114,11 @@ String16 string16_from_string(Arena *arena, String str) {
 
     arena_pop(arena, unused_count * sizeof(u16));
 
-    String16 result = {string_count, data};
-    return result;
+    return Str16(data, string_count);
 }
 
-String string_from_string16(Arena *arena, String16 str) {
-    String result = {};
+function String string_from_string16(Arena *arena, String16 str) {
+    String result = {0};
     result.data = PushArray(arena, u8, str.count * 3 + 1);
 
     u16 *p0 = str.data;
@@ -2282,10 +2126,10 @@ String string_from_string16(Arena *arena, String16 str) {
     u8 *at = result.data;
 
     while (p0 < p1) {
-        auto decode = string_decode_utf16(p0, cast(u64)(p1 - p0));
+        String_Decode decode = string_decode_utf16(p0, cast(u64)(p1 - p0));
         u32 encode_size = string_encode_utf8(at, decode.codepoint);
 
-        p0 += decode.size;
+        p0 += decode.advance;
         at += encode_size;
     }
 
@@ -2299,2301 +2143,527 @@ String string_from_string16(Arena *arena, String16 str) {
     return result;
 }
 
-
 //
-// Dates
-//
- 
-typedef u64 Dense_Time;
-
-struct Date_Time {
-    u16 msec; // [0,999]
-    u8 sec;   // [0,60]
-    u8 min;   // [0,59]
-    u8 hour;  // [0,23]
-    u8 day;   // [1,31]
-    u8 mon;   // [1,12]
-    i16 year; // 1 = 1 CE; 2020 = 2020 CE; 0 = 1 BCE; -100 = 101 BCE; etc.
-};
-
-enum Month {
-    Month_Jan = 1,
-    Month_Feb,
-    Month_Mar,
-    Month_Apr,
-    Month_May,
-    Month_Jun,
-    Month_Jul,
-    Month_Aug,
-    Month_Sep,
-    Month_Oct,
-    Month_Nov,
-    Month_Dec
-};
-
-enum DayOfWeek {
-    DayOfWeek_Sunday,
-    DayOfWeek_Monday,
-    DayOfWeek_Tuesday,
-    DayOfWeek_Wednesday,
-    DayOfWeek_Thursday,
-    DayOfWeek_Friday,
-    DayOfWeek_Saturday
-};
-
-Dense_Time dense_time_from_date_time(Date_Time *in) {
-    u32 year_encoded = (u32)((i32)in->year + 0x8000);
-    Dense_Time result = 0;
-
-    result += year_encoded;
-    result *= 12;
-    result += (in->mon - 1);
-    result *= 31;
-    result += (in->day - 1);
-    result *= 24;
-    result += in->hour;
-    result *= 60;
-    result += in->min;
-    result *= 61;
-    result += in->sec;
-    result *= 1000;
-    result += in->msec;
-
-    return result;
-}
-
-Date_Time date_time_from_dense_time(Dense_Time in) {
-    Date_Time result = {};
-
-    result.msec = in%1000;
-    in /= 1000;
-    result.sec = in%61;
-    in /= 61;
-    result.min = in%60;
-    in /= 60;
-    result.hour = in%24;
-    in /= 24;
-    result.day = (in%31) + 1;
-    in /= 31;
-    result.mon = (in%12) + 1;
-    in /= 12;
-
-    i32 year_encoded = (i32)in;
-    result.year = (year_encoded - 0x8000);
-
-    return result;
-}
-
-i64 date_time_compare(Date_Time a, Date_Time b) {
-    // @Incomplete @Robustness: this might not always work for values > 2^(64-1)
-    return (i64)dense_time_from_date_time(&a) - (i64)dense_time_from_date_time(&b);
-}
-
-String string_from_month(Month month) {
-    String result = S("(null)");
-
-    switch (month) {
-        case Month_Jan: { result = S("January");   } break;
-        case Month_Feb: { result = S("February");  } break;
-        case Month_Mar: { result = S("March");     } break;
-        case Month_Apr: { result = S("April");     } break;
-        case Month_May: { result = S("May");       } break;
-        case Month_Jun: { result = S("June");      } break;
-        case Month_Jul: { result = S("July");      } break;
-        case Month_Aug: { result = S("August");    } break;
-        case Month_Sep: { result = S("September"); } break;
-        case Month_Oct: { result = S("October");   } break;
-        case Month_Nov: { result = S("November");  } break;
-        case Month_Dec: { result = S("December");  } break;
-    }
-
-    return result;
-}
-
-String string_from_day_of_week(DayOfWeek day_of_week) {
-    String result = S("(null)");
-
-    switch (day_of_week) {
-        case DayOfWeek_Sunday:    { result = S("Sunday");    } break;
-        case DayOfWeek_Monday:    { result = S("Monday");    } break;
-        case DayOfWeek_Tuesday:   { result = S("Tuesday");   } break;
-        case DayOfWeek_Wednesday: { result = S("Wednesday"); } break;
-        case DayOfWeek_Thursday:  { result = S("Thursday");  } break;
-        case DayOfWeek_Friday:    { result = S("Friday");    } break;
-        case DayOfWeek_Saturday:  { result = S("Saturday");  } break;
-    }
-
-    return result;
-}
-
-String to_string(Date_Time it) {
-    auto month = string_from_month(cast(Month)it.mon);
-    return sprint("%S %02d %d %02d:%02d:%02d", month, it.day, it.year, it.hour, it.min, it.sec);
-}
-
-//
-// Random
+// Conversions
 //
 
-struct Random_Lcg {
-    u32 state;
-};
-
-inline f32 random_lerp(f32 a, f32 b, f32 t) {
-  return (1 - t) * a + b * t;
-}
-
-
-inline Random_Lcg random_seed_lcg(u32 state) {
-    return {state};
-}
-
-inline u32 random_next_u32(Random_Lcg *series) {
-    return series->state = (series->state * 1103515245 + 12345) & U32_MAX;
-}
-
-inline f32 random(Random_Lcg *series) {
-    f32 divisor = 1.0f / (f32)U32_MAX;
-    return divisor * (f32)random_next_u32(series);
-}
-
-inline f32 random_between(Random_Lcg *series, f32 min, f32 max) {
-    return random_lerp(min, max, random(series));
-}
-
-inline i32 random_int_between(Random_Lcg *series, i32 min, i32 max) {
-    assert(max >= min);
-    return min + (i32)(random_next_u32(series) % (max - min + 1));
-}
-
-struct Random_Pcg {
-    u64 state;
-    u64 selector;
-};
-
-inline Random_Pcg random_seed_pcg(u64 state, u64 selector) {
-    Random_Pcg result;
-
-    result.state = state;
-    result.selector = (selector << 1) | 1;
-
-    return result;
-}
-
-inline u32 random_next_u32(Random_Pcg *series) {
-    u64 state = series->state;
-    state = state * 6364136223846793005ULL + series->selector;
-    series->state = state;
-
-    u32 pre_rotate = (u32)((state ^ (state >> 18)) >> 27);
-    u32 result = na_rotate_right(pre_rotate, (i32)(state >> 59));
-
-    return result;
-}
-
-inline f32 random(Random_Pcg *series) {
-    f32 divisor = 1.0f / (f32)U32_MAX;
-    return divisor * (f32)random_next_u32(series);
-}
-
-inline f32 random_between(Random_Pcg *series, f32 min, f32 max) {
-    return random_lerp(min, max, random(series));
-}
-
-inline i32 random_int_between(Random_Pcg *series, i32 min, i32 max) {
-    assert(max >= min);
-    return min + (i32)(random_next_u32(series) % (max - min + 1));
-}
-
-
-void na_shuffle(void *base, isize count, isize size) {
-    u8 *a;
-    isize i, j;
-
-    // @Incomplete: initialize this with some current time
-    static Random_Pcg random;
-
-    a = cast(u8 *)base + (count-1) * size;
-    for (i = count; i > 1; i--) {
-        j = random_next_u32(&random) % i;
-        memory_swap(a, cast(u8 *)base + j*size, size);
-        a -= size;
-    }
-}
-
-//
-// OS
-//
-
-struct File {
-    void *handle;
-    bool has_errors;
-    u64 offset;
-};
-
-enum File_Attribute_Flag {
-    File_IsDirectory = 0x01,
-    File_IsHidden    = 0x02,
-    File_IsSystem    = 0x04,
-};
-
-enum File_Access_Flag {
-    FileAccess_Read    = 0x01,
-    FileAccess_Write   = 0x02,
-    FileAccess_Execute = 0x04,
-};
-
-struct File_Info {
-    String name;
-    u64 size;
-    Dense_Time created_at;
-    Dense_Time updated_at;
-    Dense_Time last_accessed_at;
-    u32 flags;
-    u32 access;
-};
-
-enum File_Mode {
-    FILE_MODE_READ   = 0x1,
-    FILE_MODE_WRITE  = 0x2,
-    FILE_MODE_APPEND = 0x4,
-};
-
-struct File_Lister;
-
-#define THREAD_PROC(name) u32 name(void *data)
-typedef THREAD_PROC(Thread_Proc);
-
-struct Thread {
-    u32 id;
-    void *handle;
-};
-
-struct Thread_Params {
-    Thread_Proc *proc;
-    void *data;
-};
-
-#if OS_WINDOWS
-
-#define WIN32_LEAN_AND_MEAN
-#define VC_EXTRALEAN
-#define NOMINMAX
-#include <windows.h>
-
-#pragma comment(lib, "user32")
-
-struct File_Lister {
-    Arena *arena;
-
-    bool is_first_file;
-
-    HANDLE handle;
-    WIN32_FIND_DATAW data;
-};
-
-function Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
-    Date_Time result = {};
-
-    result.year = in->wYear;
-    result.mon  = cast(u8)in->wMonth;
-    result.day  = in->wDay;
-    result.hour = in->wHour;
-    result.min  = in->wMinute;
-    result.sec  = in->wSecond;
-    result.msec = in->wMilliseconds;
-
-    return result;
-}
-
-function SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
-    SYSTEMTIME result = {};
-
-    result.wYear = in->year;
-    result.wMonth = in->mon;
-    result.wDay = in->day;
-    result.wHour = in->hour;
-    result.wMinute = in->min;
-    result.wSecond = in->sec;
-    result.wMilliseconds = in->msec;
-
-    return result;
-}
-
-function Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
-    SYSTEMTIME system_time = {};
-    FileTimeToSystemTime(file_time, &system_time);
-    Date_Time date_time = win32_date_time_from_system_time(&system_time);
-    Dense_Time result = dense_time_from_date_time(&date_time);
-    return result;
-}
-
-bool os_init() {
-    thread_context_init(gigabytes(1));
-    f64 os_time();
-    os_time();
-    return true;
-}
-
-f64 os_time() {
-    static u64 win32_ticks_per_second = 0;
-    static u64 win32_counter_offset = 0;
-
-    if (win32_ticks_per_second == 0)
-    {
-        LARGE_INTEGER perf_frequency = {};
-        if (QueryPerformanceFrequency(&perf_frequency)) {
-            win32_ticks_per_second = perf_frequency.QuadPart;
-        }
-        LARGE_INTEGER perf_counter = {};
-        if (QueryPerformanceCounter(&perf_counter)) {
-            win32_counter_offset = perf_counter.QuadPart;
-        }
-
-        assert(win32_ticks_per_second != 0);
-    }
-
-    f64 result = 0;
-
-    LARGE_INTEGER perf_counter;
-    if (QueryPerformanceCounter(&perf_counter)) {
-        perf_counter.QuadPart -= win32_counter_offset;
-        result = (f64)(perf_counter.QuadPart) / win32_ticks_per_second;
-    }
-
-    return result;
-}
-
-f64 os_time_in_miliseconds() {
-    return os_time() * 1000;
-}
-
-Date_Time os_get_current_time_in_utc() {
-    SYSTEMTIME st;
-    GetSystemTime(&st);
-    return win32_date_time_from_system_time(&st);
-}
-
-Date_Time os_get_local_time() {
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    return win32_date_time_from_system_time(&st);
-}
-
-void os_sleep(f64 miliseconds) {
-    // @Incomplete: only do this if win32_sleep_is_granular
-    // Otherwise do some sort of busy wait thing
-
-    static bool win32_sleep_is_granular = false;
-    static bool win32_did_init_sleep = false;
-
-    if (!win32_did_init_sleep)
-    {
-        HMODULE libwinmm = LoadLibraryA("winmm.dll");
-        typedef UINT (WINAPI * timeBeginPeriod_t)(UINT);
-        auto timeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(libwinmm, "timeBeginPeriod");
-        if (timeBeginPeriod) {
-            win32_sleep_is_granular = timeBeginPeriod(1) == 0 /* TIMERR_NOERROR */;
-        }
-
-        win32_did_init_sleep = true;
-    }
-
-
-    LARGE_INTEGER ft;
-    ft.QuadPart = -(10 * (__int64)(miliseconds * 1000));
-
-    HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
-    SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
-    WaitForSingleObject(timer, INFINITE);
-    CloseHandle(timer);
-}
-
-void os_set_high_process_priority(bool enable) {
-    if (enable) {
-        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-    } else {
-        SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
-    }
-}
-
-void *os_reserve(u64 size) {
-    return VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE);
-}
-
-bool os_commit(void *ptr, u64 size) {
-    return VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE) != NULL;
-}
-
-bool os_decommit(void *ptr, u64 size) {
-    return VirtualFree(ptr, size, MEM_DECOMMIT) != NULL;
-}
-
-bool os_release(void *ptr, u64 size) {
-    // According to the docs, the size should be 0 when using MEM_RELEASE
-    return VirtualFree(ptr, 0, MEM_RELEASE) != NULL;
-}
-
-void *os_alloc(u64 size) {
-    // Memory allocated by this function is automatically initialized to zero.
-    return VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-}
-
-void os_free(void *ptr) {
-    if (ptr) {
-        VirtualFree(ptr, 0, MEM_RELEASE);
-        ptr = 0;
-    }
-}
-
-bool os_file_rename(String from, String to) {
-    auto scratch = begin_scratch_memory();
-
-    String16 from16 = string16_from_string(scratch.arena, from);
-    String16 to16   = string16_from_string(scratch.arena, to);
-
-    BOOL result = MoveFileW((WCHAR *)from16.data, (WCHAR *)to16.data);
-    end_scratch_memory(scratch);
-    return result;
-}
-
-void win32_file_error(File *file, const char *message, String file_name = {}) {
-#if DEBUG
-    if (file_name.data) {
-        print("[file] %s: %.*s\n", message, LIT(file_name));
-    } else {
-        print("[file] %s\n", message);
-    }
-#endif
-
-    file->has_errors = true;
-}
-
-String os_read_entire_file(Allocator allocator, String path)
+function u64 string_to_u64(String string, u32 radix)
 {
-    String result = {};
-
-    auto scratch = begin_scratch_memory();
-    String16 path_w = string16_from_string(scratch.arena, path);
-    HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-    end_scratch_memory(scratch);
-
-    if (handle != INVALID_HANDLE_VALUE)
+    assert(2 <= radix && radix <= 16);
+    local_persist u8 char_to_value[] =
     {
-        LARGE_INTEGER file_size;
-        GetFileSizeEx(handle, &file_size);
-        u64 size = cast(u64)file_size.QuadPart;
-        if (size > 0)
-        {
-            u8 *data = cast(u8 *)allocator_alloc(allocator, size);
-            result.data  = data;
-            result.count = size;
-
-            u8 *ptr = data;
-            u8 *end = data + size;
-
-            for (;;)
-            {
-                u64 bytes_remaining = (u64)(end - ptr);
-                DWORD to_read = (DWORD)(ClampTop(bytes_remaining, U32_MAX));
-                DWORD bytes_read = 0;
-                if (!ReadFile(handle, ptr, to_read, &bytes_read, 0))
-                {
-                    break;
-                }
-
-                ptr += bytes_read;
-                if (ptr >= end)
-                {
-                    break;
-                }
-            }
-        }
-
-        CloseHandle(handle);
-    }
-
-    return result;
-}
-
-bool os_write_entire_file(String path, String contents)
-{
-    bool result = false;
-
-    auto scratch = begin_scratch_memory();
-    String16 path_w = string16_from_string(scratch.arena, path);
-    HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
-    end_scratch_memory(scratch);
-
-    if (handle != INVALID_HANDLE_VALUE)
-    {
-        u8 *ptr = contents.data;
-        u8 *end = contents.data + contents.count;
-        for (;;)
-        {
-            u64 bytes_remaining = (u64)(end - ptr);
-            DWORD to_write = (DWORD)(ClampTop(bytes_remaining, U32_MAX));
-
-            DWORD bytes_written = 0;
-            if (!WriteFile(handle, ptr, to_write, &bytes_written, 0)) {
-                break;
-            }
-
-            ptr += bytes_written;
-            if (ptr >= end)
-            {
-                result = true;
-                break;
-            }
-        }
-
-        CloseHandle(handle);
-    }
-
-    return result;
-}
-
-File os_file_open(String path, u32 mode_flags) {
-    File result = {};
-
-    DWORD permissions = 0;
-    DWORD creation = 0;
-
-    if (mode_flags & FILE_MODE_READ) {
-        permissions |= GENERIC_READ;
-        creation = OPEN_EXISTING;
-    }
-
-    if (mode_flags & FILE_MODE_APPEND) {
-        permissions |= GENERIC_WRITE;
-        creation = OPEN_ALWAYS;
-    }
-
-    if (mode_flags & FILE_MODE_WRITE) {
-        permissions |= GENERIC_WRITE;
-        creation = CREATE_ALWAYS;
-    }
-
-    auto scratch = begin_scratch_memory();
-
-    String16 path_w = string16_from_string(scratch.arena, path);
-    HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, permissions, FILE_SHARE_READ, 0, creation, 0, 0);
-    result.handle = (void *)handle;
-
-    end_scratch_memory(scratch);
-
-    if (handle == INVALID_HANDLE_VALUE) {
-        win32_file_error(&result, "Failed to open file", path);
-    }
-
-    if ((mode_flags & FILE_MODE_APPEND) && !(mode_flags & FILE_MODE_WRITE)) {
-        LARGE_INTEGER file_size;
-        GetFileSizeEx(handle, &file_size);
-        u64 size = cast(u64)file_size.QuadPart;
-
-        result.offset = size;
-    }
-
-    return result;
-}
-
-void os_file_read(File *file, u64 offset, u64 size, void *dest) {
-    if (file->has_errors) { return; }
-
-    HANDLE handle = (HANDLE)file->handle;
-
-    // :Win32_64BitFileIO
-    assert(size <= U32_MAX);
-    u32 size32 = cast(u32)size;
-
-    OVERLAPPED overlapped = {};
-    overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
-    overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
-
-    DWORD bytes_read;
-    if (ReadFile(handle, dest, size32, &bytes_read, &overlapped) && (size32 == bytes_read)) {
-        // Success!
-    } else {
-        win32_file_error(file, "Failed to read file");
-    }
-}
-
-void os_file_write(File *file, u64 offset, u64 size, void *data) {
-    if (file->has_errors) { return; }
-
-    HANDLE handle = (HANDLE)file->handle;
-
-    // :Win32_64BitFileIO
-    assert(size <= U32_MAX);
-    u32 size32 = cast(u32)(size);
-
-    OVERLAPPED overlapped = {};
-    overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
-    overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
-
-    DWORD bytes_written;
-    if (WriteFile(handle, data, size32, &bytes_written, &overlapped) && (size32 == bytes_written)) {
-        // Success!
-    } else {
-        win32_file_error(file, "Failed to write file");
-    }
-}
-
-u64 os_file_get_size(File *file) {
-    HANDLE handle = (HANDLE)file->handle;
-
-    LARGE_INTEGER file_size;
-    GetFileSizeEx(handle, &file_size);
-    u64 size = cast(u64)file_size.QuadPart;
-
-    return size;
-}
-
-void os_file_close(File *file) {
-    if (file->handle) {
-        HANDLE handle = (HANDLE)file->handle;
-        BOOL success = CloseHandle(handle);
-        file->handle = NULL;
-
-        if (!success) {
-            win32_file_error(file, "Failed to close file");
-        }
-    }
-}
-
-bool os_delete_file(String path) {
-    auto scratch = begin_scratch_memory();
-    String16 str = string16_from_string(scratch.arena, path);
-    BOOL success = DeleteFileW(cast(WCHAR *)str.data);
-    end_scratch_memory(scratch);
-
-    return success;
-}
-
-bool os_make_directory(String path) {
-    auto scratch = begin_scratch_memory();
-    String16 str = string16_from_string(scratch.arena, path);
-    BOOL success = CreateDirectoryW(cast(WCHAR *)str.data, NULL);
-    end_scratch_memory(scratch);
-
-    return success;
-}
-
-bool os_delete_directory(String path) {
-    auto scratch = begin_scratch_memory();
-    String16 str = string16_from_string(scratch.arena, path);
-    BOOL success = RemoveDirectoryW(cast(WCHAR *)str.data);
-    end_scratch_memory(scratch);
-
-    return success;
-}
-
-i64 __wcslen(WCHAR *str)
-{
-    WCHAR *at = str;
-    while (*at != 0) *at ++;
-    return at - str;
-}
-
-String string_from_wstr(Arena *arena, WCHAR *wstr) {
-    String16 str16 = make_string16(wstr, __wcslen(wstr));
-    return string_from_string16(arena, str16);
-}
-
-
-function u32 win32_flags_from_attributes(DWORD attributes) {
-    u32 result = 0;
-
-    if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
-        result |= File_IsDirectory;
-    }
-
-    if (attributes & FILE_ATTRIBUTE_HIDDEN) {
-        result |= File_IsHidden;
-    }
-
-    if (attributes & FILE_ATTRIBUTE_SYSTEM) {
-        result |= File_IsSystem;
-    }
-
-    return result;
-}
-
-function u32 win32_access_from_attributes(DWORD attributes) {
-    u32 result = FileAccess_Read | FileAccess_Execute;
-
-    if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
-        result |= FileAccess_Write;
-    }
-
-    return result;
-}
-
-File_Lister os_file_list_begin(Arena *arena, String path) {
-    File_Lister result = {};
-
-    result.arena         = arena;
-    result.handle        = 0;
-    result.is_first_file = true;
-
-    auto mark = arena_get_position(arena);
-    String find_path = string_concat(path, S("\\*.*")); // @Incomplete: use \\?\ prefix?
-    WCHAR *find_path_w = cast(WCHAR *)string16_from_string(arena, find_path).data;
-    // FindExInfoStandard
-    result.handle = FindFirstFileExW(find_path_w, FindExInfoBasic, &result.data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
-    arena_set_position(arena, mark);
-
-    return result;
-}
-
-bool os_file_list_next(File_Lister *iter, File_Info *info) {
-    bool should_continue = true;
-
-    if (iter->is_first_file) {
-        iter->is_first_file = false;
-    } else {
-        should_continue = FindNextFileW(iter->handle, &iter->data);
-    }
-
-    if (iter->handle != INVALID_HANDLE_VALUE) {
-        String name = string_from_wstr(iter->arena, iter->data.cFileName);
-
-        // Ignore . and .. "directories"
-        while (string_equals(name, S(".")) || string_equals(name, S(".."))) {
-            should_continue = FindNextFileW(iter->handle, &iter->data);
-
-            if (!should_continue) {
-                return false;
-            }
-
-            name = string_from_wstr(iter->arena, iter->data.cFileName);
-        }
-
-        auto data = iter->data;
-
-        *info = {};
-        info->name             = name;
-        info->size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
-        info->created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
-        info->updated_at       = win32_dense_time_from_file_time(&data.ftLastWriteTime);
-        info->last_accessed_at = win32_dense_time_from_file_time(&data.ftLastAccessTime);
-        info->flags            = win32_flags_from_attributes(data.dwFileAttributes);
-        info->access           = win32_access_from_attributes(data.dwFileAttributes);
-
-    } else {
-        should_continue = false;
-    }
-
-    return should_continue;
-}
-
-void os_file_list_end(File_Lister *iter) {
-    if (iter->handle) {
-        // @Memory: restore arena to position when os_file_list_begin was called?
-        FindClose(iter->handle);
-        iter->handle = 0;
-    }
-}
-
-File_Info os_get_file_info(Arena *arena, String path) {
-    File_Info info = {};
-
-    auto scratch = begin_scratch_memory();
-    String16 str = string16_from_string(scratch.arena, path);
-
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    if (GetFileAttributesExW(cast(WCHAR *)str.data, GetFileExInfoStandard, &data))
-    {
-        // @See https://docs.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-win32_file_attribute_data
-        info.name             = path_filename(path);
-        info.size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
-        info.created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
-        info.updated_at       = win32_dense_time_from_file_time(&data.ftLastWriteTime);
-        info.last_accessed_at = win32_dense_time_from_file_time(&data.ftLastAccessTime);
-        info.flags            = win32_flags_from_attributes(data.dwFileAttributes);
-        info.access           = win32_access_from_attributes(data.dwFileAttributes);
-    }
-
-    end_scratch_memory(scratch);
-
-    return info;
-}
-
-DWORD WINAPI win32_thread_proc(LPVOID lpParameter) {
-    Thread_Params *params = (Thread_Params *)lpParameter;
-
-    thread_context_init(megabytes(16));
-    assert(params->proc);
-    u32 result = params->proc(params->data);
-    thread_context_free();
-
-    os_free(params);
-
-    return result;
-}
-
-Thread os_create_thread(u64 stack_size, Thread_Proc *proc, void *data) {
-    Thread_Params *params = (Thread_Params *)os_alloc(sizeof(Thread_Params));
-    params->proc = proc;
-    params->data = data;
-
-    DWORD thread_id;
-    HANDLE handle = CreateThread(0, stack_size, win32_thread_proc, params, 0, &thread_id);
-
-    Thread result = {};
-    result.handle = handle;
-    result.id = thread_id;
-    return result;
-}
-
-Thread os_create_thread_with_params(u64 stack_size, Thread_Proc *proc, void *data, u64 copy_size) {
-    Thread_Params *params = (Thread_Params *)os_alloc(sizeof(Thread_Params) + copy_size);
-    params->proc = proc;
-    params->data = params + sizeof(Thread_Params);
-    memory_copy(data, params->data, copy_size);
-
-    DWORD thread_id;
-    HANDLE handle = CreateThread(0, stack_size, win32_thread_proc, params, 0, &thread_id);
-
-    Thread result = {};
-    result.handle = handle;
-    result.id = thread_id;
-    return result;
-}
-
-void os_detatch_thread(Thread thread) {
-    HANDLE handle = (HANDLE)thread.handle;
-    CloseHandle(handle);
-}
-
-u32 os_await_thread(Thread thread) {
-    HANDLE handle = (HANDLE)thread.handle;
-    WaitForSingleObject(handle, INFINITE);
-    DWORD result;
-    GetExitCodeThread(handle, &result);
-    // @MemoryLeak: free Thread_Params
-    return result;
-}
-
-void win32_normalize_path(String path) {
-    u8 *at = path.data;
-
-    for (u64 i = 0; i < path.count; i++) {
-        if (*at == '\\') {
-            *at = '/';
-        }
-
-        at ++;
-    }
-}
-
-String os_get_executable_path() {
-    Arena *arena = temp_arena();
-
-    u64 buffer_size = 2048;
-    WCHAR *buffer = PushArray(arena, WCHAR, buffer_size);
-
-    DWORD length = GetModuleFileNameW(NULL, buffer, buffer_size);
-    if (length == 0) {
-        return {};
-    }
-
-    if (length == buffer_size && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-        bool success = false;
-
-        for (int i = 0; i < 4; i ++) {
-            arena_pop(arena, buffer_size * sizeof(WCHAR));
-
-            buffer_size *= 2;
-            buffer = PushArray(arena, WCHAR, buffer_size);
-            length = GetModuleFileNameW(NULL, buffer, buffer_size);
-
-            if (!(length == buffer_size && GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
-                success = true;
-                break;
-            }
-        }
-
-        if (!success) {
-            return {};
-        }
-    }
-
-    arena_pop(arena, (buffer_size - length) * sizeof(WCHAR));
-
-    String result = string_from_string16(arena, make_string16(buffer, length));
-    win32_normalize_path(result);
-
-    return result;
-}
-
-String os_get_current_directory() {
-    Arena *arena = temp_arena();
-
-    DWORD length = GetCurrentDirectoryW(0, NULL);
-    if (length == 0) {
-        return {};
-    }
-
-    WCHAR *buffer = PushArray(arena, WCHAR, length);
-    DWORD bytes_written = GetCurrentDirectoryW(length, buffer);
-    if (bytes_written + 1 != length) {
-        return {};
-    }
-
-    String result = string_from_string16(arena, make_string16(buffer, length));
-    win32_normalize_path(result);
-
-    return result;
-}
-
-function char * win32_UTF8FromUTF16(Arena *arena, WCHAR *buffer)
-{
-    int size = WideCharToMultiByte(CP_UTF8, 0, buffer, -1, NULL, 0, NULL, NULL);
-    if (!size)
-    {
-        return NULL;
-    }
-
-    char *result = cast(char *)arena_push(arena, size);
-
-    if (!WideCharToMultiByte(CP_UTF8, 0, buffer, -1, result, size, NULL, NULL))
-    {
-        arena_pop(arena, size);
-        return NULL;
-    }
-
-    return result;
-}
-
-function WCHAR * win32_UTF16FromUTF8(Arena *arena, char *buffer)
-{
-    int count = MultiByteToWideChar(CP_UTF8, 0, buffer, -1, NULL, 0);
-    if (!count)
-    {
-        return NULL;
-    }
-
-    arena_align(arena, sizeof(WCHAR));
-    WCHAR *result = cast(WCHAR *)arena_push(arena, count * sizeof(WCHAR));
-
-    if (!MultiByteToWideChar(CP_UTF8, 0, buffer, -1, result, count))
-    {
-        arena_pop(arena, count * sizeof(WCHAR));
-        return NULL;
-    }
-
-    return result;
-}
-
-bool os_clipboard_set_text(String str) {
-    int count;
-    HANDLE handle;
-    WCHAR* buffer;
-
-    auto scratch = begin_scratch_memory();
-    defer { end_scratch_memory(scratch); };
-
-    char *cstr = string_to_cstr(scratch.arena, str);
-
-    count = MultiByteToWideChar(CP_UTF8, 0, cstr, -1, NULL, 0);
-
-    if (!count) {
-        return false;
-    }
-
-    handle = GlobalAlloc(GMEM_MOVEABLE, count * sizeof(WCHAR));
-    if (!handle) {
-        print("[clipboard] Failed to allocate global handle for clipboard.");
-        return false;
-    }
-
-    buffer = (WCHAR *)GlobalLock(handle);
-    if (!buffer) {
-        print("[clipboard] Failed to lock global handle.");
-        GlobalFree(handle);
-        return false;
-    }
-
-    MultiByteToWideChar(CP_UTF8, 0, cstr, -1, buffer, count);
-    GlobalUnlock(handle);
-
-    if (!OpenClipboard(NULL)) {
-        print("[clipboard] Failed to open clipboard.");
-        GlobalFree(handle);
-        return false;
-    }
-
-    EmptyClipboard();
-    SetClipboardData(CF_UNICODETEXT, handle);
-    CloseClipboard();
-
-    GlobalFree(handle);
-
-    return true;
-}
-
-
-String os_clipboard_get_text() {
-    if (!OpenClipboard(NULL)) {
-        print("[clipboard] Failed to open clipboard.");
-        return {};
-    }
-
-    HANDLE handle = GetClipboardData(CF_UNICODETEXT);
-    if (!handle) {
-        print("[clipboard] Failed to convert clipboard to string.");
-        CloseClipboard();
-        return {};
-    }
-
-    WCHAR *buffer = (WCHAR *)GlobalLock(handle);
-    if (!buffer) {
-        print("[clipboard] Failed to lock global handle.");
-        CloseClipboard();
-        return {};
-    }
-
-    // @Cleanup @Speed: make this just return a string!
-    char *str = win32_UTF8FromUTF16(temp_arena(), buffer);
-    String result = string_from_cstr(str);
-
-    GlobalUnlock(handle);
-    CloseClipboard();
-
-    return result;
-}
-
-#if 1
-typedef HINSTANCE (WINAPI * ShellExecuteW_t)(
-    HWND hwnd, LPCWSTR lpOperation, LPCWSTR lpFile, LPCWSTR lpParameters, LPCWSTR lpDirectory, INT nShowCmd);
-
-static ShellExecuteW_t _ShellExecuteW = NULL;
-
-bool os_shell_open(String path) {
-    if (!_ShellExecuteW)
-    {
-        HMODULE libshell32 = LoadLibraryA("shell32.dll");
-        _ShellExecuteW = (ShellExecuteW_t) GetProcAddress(libshell32, "ShellExecuteW");
-
-        if (!_ShellExecuteW)
-        {
-            return false;
-        }
-    }
-
-    auto scratch = begin_scratch_memory();
-    String16 path_w = string16_from_string(scratch.arena, path);
-    // If the function succeeds, it returns a value greater than 32.
-    bool success = (INT_PTR)_ShellExecuteW(0, 0, cast(WCHAR *)path_w.data, 0, 0 , SW_SHOW) > 32;
-    end_scratch_memory(scratch);
-
-    return success;
-}
-
-bool os_shell_execute(String cmd, String arguments, bool admin = false) {
-    if (!_ShellExecuteW)
-    {
-        HMODULE libshell32 = LoadLibraryA("shell32.dll");
-        _ShellExecuteW = (ShellExecuteW_t) GetProcAddress(libshell32, "ShellExecuteW");
-
-        if (!_ShellExecuteW)
-        {
-            return false;
-        }
-    }
-
-    auto scratch = begin_scratch_memory();
-    String16 cmd_w = string16_from_string(scratch.arena, cmd);
-    String16 arguments_w = string16_from_string(scratch.arena, arguments);
-
-    WCHAR *verb = admin ? L"runas" : L"open";
-
-    // If the function succeeds, it returns a value greater than 32.
-    bool success = (INT_PTR)_ShellExecuteW(0, verb, cast(WCHAR *)cmd_w.data, cast(WCHAR *)arguments_w.data, 0, SW_HIDE) > 32;
-    end_scratch_memory(scratch);
-
-    return success;
-}
-#endif
-
-void os_exit(i32 code)
-{
-    ExitProcess(code);
-}
-
-#endif // OS_WINDOWS
-
-#if OS_MACOS
-
-#include <mach/clock.h> // clock_get_time
-#include <mach/mach_time.h> // mach_timebase_info, mach_absolute_time
-#include <mach/mach_host.h> // mach_host_self
-#include <mach/mach_port.h> // mach_port_deallocate
-#include <mach-o/dyld.h> // _NSGetExecutablePath
-
-#include <time.h>
-#include <unistd.h> // unlink, usleep, getcwd
-
-#include <pthread.h>
-#include <stdlib.h> // realpath
-
-#define PATH_MAX 1024 // #include <sys/syslimits.h>
-
-static pthread_key_t macos_thread_local_key;
-
-f64 os_time();
-
-bool os_init() {
-    pthread_key_create(&macos_thread_local_key, NULL);
-
-    thread_context_init(gigabytes(1));
-
-    os_time();
-
-    return true;
-}
-
-f64 os_time() {
-    static f64 macos_perf_frequency = 0;
-    static f64 macos_perf_counter = 0;
-
-    if (macos_perf_counter == 0)
-    {
-        mach_timebase_info_data_t rate_nsec;
-        mach_timebase_info(&rate_nsec);
-
-        macos_perf_frequency = 1000000000LL * rate_nsec.numer / rate_nsec.denom;
-        macos_perf_counter = mach_absolute_time();
-    }
-
-    f64 now = mach_absolute_time();
-    return (now - macos_perf_counter) / macos_perf_frequency;
-}
-
-f64 os_time_in_miliseconds() {
-    return os_time() * 1000;
-}
-
-// @Incomplete: is this correct?
-#if 0
-f64 os_time_utc_now() {
-    struct timespec t;
-
-    clock_serv_t cclock;
-    mach_timespec_t mts;
-    host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-    clock_get_time(cclock, &mts);
-    mach_port_deallocate(mach_task_self(), cclock);
-    t.tv_sec = mts.tv_sec;
-    t.tv_nsec = mts.tv_nsec;
-
-    return (u64)t.tv_sec * 1000000ull + t.tv_nsec/1000 + 11644473600000000ull;
-}
-#endif
-
-void os_sleep(f64 miliseconds) {
-    u32 ms = (u32)miliseconds;
-    struct timespec req = {(time_t)ms / 1000, (long)((ms % 1000) * 1000000)};
-    struct timespec rem = {0, 0};
-    nanosleep(&req, &rem);
-}
-
-String os_get_executable_path() {
-    u32 length = 0;
-    _NSGetExecutablePath(0, &length);
-
-    Arena *arena = temp_arena();
-    char *buffer = (char *)arena_push(arena, length);
-
-    if (_NSGetExecutablePath(buffer, &length) < 0) {
-        return {};
-    }
-
-    u32 alloc_size = Max(length, PATH_MAX);
-
-    char *normalized = (char *)arena_push(arena, alloc_size);
-    if (realpath(buffer, normalized) != NULL)
-    {
-        auto result = make_string(normalized, length);
-        u32 unused_size = alloc_size - result.count;
-        arena_pop(arena, unused_size);
-        return result;
-    }
-
-    return make_string(buffer, length);
-}
-
-String os_get_current_directory() {
-    Arena *arena = temp_arena();
-
-    char *buffer = (char *)arena_push(arena, PATH_MAX);
-    getcwd(buffer, PATH_MAX);
-
-    auto result = string_from_cstr(buffer);
-    u32 unused_size = PATH_MAX - result.count;
-    arena_pop(arena, unused_size);
-    return result;
-}
-
-#include <objc/objc.h>
-#include <objc/runtime.h>
-#include <objc/message.h>
-#include <objc/NSObjCRuntime.h>
-
-struct NSString;
-struct NSURL;
-
-typedef NSString * NSPasteboardType;
-na_extern NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
-
-#define objc_msgSend_id ((id (*)(id, SEL))objc_msgSend)
-#define objc_method(ReturnType, ...) ((ReturnType (*)(__VA_ARGS__))objc_msgSend)
-
-String os_clipboard_get_text() {
-    // NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
-    id pasteboard = objc_msgSend_id((id)objc_getClass("NSPasteboard"), sel_registerName("generalPasteboard"));
-    // NSString *string = [pasteboard stringForType:NSPasteboardTypeString];
-    id string = objc_method(id, id, SEL, id)(pasteboard, sel_registerName("stringForType:"), (id)NSPasteboardTypeString);
-    // char *text = [string UTF8String];
-    char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
-
-    auto result = string_copy(temp_arena(), string_from_cstr(text));
-    return result;
-}
-
-bool os_clipboard_set_text(String text) {
-    auto scratch = begin_scratch_memory();
-    char *str = string_to_cstr(scratch.arena, text);
-    end_scratch_memory(scratch);
-
-    // [NSString stringWithUTF8String: str];
-    id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
-    // NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
-    id pasteboard = objc_msgSend_id((id)objc_getClass("NSPasteboard"), sel_registerName("generalPasteboard"));
-    // [pasteboard clearContents];
-    objc_msgSend(pasteboard, sel_registerName("clearContents"));
-    // [pasteboard setString:str forType:NSPasteboardTypeString];
-    BOOL result = objc_method(BOOL, id, SEL, id, id)(pasteboard, sel_registerName("setString:forType:"), string, (id)NSPasteboardTypeString);
-
-    return result == YES;
-}
-
-bool os_shell_open(String path) {
-    // [NSWorkspace sharedWorkspace]
-    id workspace = objc_method(id, id, SEL)(cast(id)objc_getClass("NSWorkspace"), sel_registerName("sharedWorkspace"));
-
-    /*
-    NSString* folder = @"/path/to/folder"  
-    [[NSWorkspace sharedWorkspace] openFile:folder withApplication:@"Finder"];
-
-    NSArray *fileURLs = [NSArray arrayWithObjects:fileURL1, nil];
-    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:fileURLs];
-
-    [[NSWorkspace sharedWorkspace] selectFile:fullPathString inFileViewerRootedAtPath:pathString];
-    */
-
-    auto scratch = begin_scratch_memory();
-    char *str = string_to_cstr(scratch.arena, path);
-    end_scratch_memory(scratch);
-
-    // [NSString stringWithUTF8String: str];
-    id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
-    // NSURL *fileURL = [NSURL fileURLWithPath:@"/path/to/user/"];
-    id fileURL = objc_method(id, id, SEL, id)(cast(id)objc_getClass("NSURL"), sel_registerName("fileURLWithPath:"), string);
-
-    BOOL result = objc_method(BOOL, id, SEL, id)(workspace, sel_registerName("openURL:"), fileURL);
-
-    return result == YES;
-}
-
-#endif // OS_MACOS
-
-#if OS_MACOS || OS_LINUX
-
-#include <stdlib.h>   // calloc, free, fseek, ftell, fread, fclose
-#include <dirent.h>   // opendir, readdir, closedir
-#include <sys/stat.h> // stat
-#include <stdio.h>
-
-struct File_Lister {
-    Arena *arena;
-    char *find_path;
-
-    DIR *handle;
-};
-
-void *os_alloc(u64 size) {
-    return calloc(size, 1);
-}
-
-void os_free(void *memory) {
-    if (memory) {
-        free(memory);
-        memory = 0;
-    }
-}
-
-#include <sys/mman.h>
-
-void *os_reserve(u64 size) {
-    void *result = 0;
-
-    result = mmap(NULL, size, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    //msync(result, size, MS_SYNC | MS_INVALIDATE);
-
-    return result;
-}
-
-bool os_commit(void *ptr, u64 size) {
-    int page_size = sysconf(_SC_PAGE_SIZE);
-
-    isize p = (isize)ptr;
-    isize p_aligned = AlignDownPow2(p, page_size);
-
-    if (p != p_aligned) {
-        isize delta = p - p_aligned;
-        ptr = na_pointer_sub(ptr, delta);
-        size += delta;
-    }
-
-    size = AlignUpPow2(size, page_size);
-
-    // NOTE(nick): ptr must be aligned to a page boundary.
-    int result = mprotect(ptr, size, PROT_READ | PROT_WRITE);
-
-    madvise(ptr, size, MADV_WILLNEED);
-
-    return result == 0;
-}
-
-bool os_decommit(void *ptr, u64 size) {
-    int page_size = sysconf(_SC_PAGE_SIZE);
-
-    isize p = (isize)ptr;
-    isize p_aligned = AlignDownPow2(p, page_size);
-
-    if (p != p_aligned) {
-        isize delta = p - p_aligned;
-        ptr = na_pointer_sub(ptr, delta);
-        size += delta;
-    }
-
-    size = AlignUpPow2(size, page_size);
-
-    // NOTE(nick): ptr must be aligned to a page boundary.
-    int result = mprotect(ptr, size, PROT_NONE);
-
-    //madvise(ptr, size, MADV_DONTNEED); // is this too harsh?
-
-    return result == 0;
-}
-
-bool os_release(void *ptr, u64 size) {
-    return munmap(ptr, size) == 0; // @Incomplete: can size be 0 like on windows?
-}
-
-u64 os_file_get_size(File *file) {
-    FILE *f = (FILE *)file->handle;
-
-    u64 prev_position = ftell(f);
-    fseek(f, 0, SEEK_END);
-    u64 size = ftell(f);
-    fseek(f, prev_position, SEEK_SET);
-
-    return size;
-}
-
-bool os_file_rename(String from, String to) {
-    auto scratch = begin_scratch_memory();
-    defer { end_scratch_memory(scratch); };
-
-    char *from_cstr = string_to_cstr(scratch.arena, from);
-    char *to_cstr   = string_to_cstr(scratch.arena, to);
-
-    return rename(from_cstr, to_cstr) == 0;
-}
-
-function u64 unix_date_from_time(time_t time) {
-    // @Incomplete
-    return cast(u64)time;
-}
-
-function u32 unix_flags_from_mode(mode_t mode, String name) {
-    u32 result = 0;
-
-    if (S_ISDIR(mode)) {
-        result |= File_IsDirectory;
-    }
-
-    if (string_starts_with(name, S("."))) {
-        result |= File_IsHidden;
-    }
-
-    // @Incomplete
-    #if 0
-    if (attributes & FILE_ATTRIBUTE_SYSTEM) {
-        result |= File_IsSystem;
-    }
-    #endif
-
-    return result;
-}
-
-function u32 unix_access_from_mode(mode_t mode) {
-    u32 result = FileAccess_Read | FileAccess_Execute;
-
-    // @Incomplete
-    #if 0
-    if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
-        result |= FileAccess_Write;
-    }
-    #endif
-
-    return result;
-}
-
-File_Info os_get_file_info(Arena *arena, String path) {
-    auto scratch = begin_scratch_memory();
-
-    char *cpath = string_to_cstr(scratch.arena, path);
-
-    struct stat64 st;
-    bool file_exists = stat64(cpath, &st) == 0;
-
-    File_Info info = {};
-
-    if (file_exists) {
-        info.name             = path_filename(path);
-        info.size             = st.st_size;
-        info.last_accessed_at = unix_date_from_time(st.st_atime);
-        info.updated_at       = unix_date_from_time(st.st_mtime);
-         // NOTE(nick): not really created time, but UNIX doesn't have this concept
-        info.created_at       = unix_date_from_time(st.st_ctime);
-        info.flags            = unix_flags_from_mode(st.st_mode, info.name);
-        info.access           = unix_access_from_mode(st.st_mode);
-    }
-
-    end_scratch_memory(scratch);
-
-    return info;
-}
-
-void unix_file_error(File *file, char *message, String file_name = {}) {
-#if DEBUG
-    if (file_name.data) {
-        print("[file] %s: %.*s\n", message, LIT(file_name));
-    } else {
-        print("[file] %s\n", message);
-    }
-#endif
-
-    file->has_errors = true;
-}
-
-File os_file_open(String path, u32 mode_flags) {
-    File result = {};
-
-    char mode[4] = {};
-    if ((mode_flags & FILE_MODE_READ) && (mode_flags & FILE_MODE_WRITE)) {
-        mode[0] = 'r';
-        mode[1] = 'b';
-        mode[2] = '+';
-    } else if (mode_flags & FILE_MODE_APPEND) {
-        if (mode_flags & FILE_MODE_WRITE) {
-            mode[0] = 'w';
-            mode[1] = 'b';
-            mode[2] = '+';
-        } else {
-            mode[0] = 'a';
-            mode[1] = 'b';
-            if (mode_flags & FILE_MODE_READ) {
-                mode[2] = '+';
-            }
-        }
-    } else if (mode_flags & FILE_MODE_WRITE) {
-        mode[0] = 'w';
-        mode[1] = 'b';
-    } else {
-        mode[0] = 'r';
-        mode[1] = 'b';
-    }
-
-    auto scratch = begin_scratch_memory();
-
-    FILE *f = fopen(string_to_cstr(scratch.arena, path), mode);
-    result.handle = f;
-
-    end_scratch_memory(scratch);
-
-    if (!f) {
-        unix_file_error(&result, "Failed to open file", path);
-        return result;
-    }
-
-    if ((mode_flags & FILE_MODE_APPEND) && !(mode_flags & FILE_MODE_WRITE)) {
-        fseek(f, 0, SEEK_END);
-        i32 size = ftell(f);
-        if (size != -1) {
-            result.offset = size;
-        }
-    }
-
-    return result;
-}
-
-void os_file_read(File *file, u64 offset, u64 size, void *dest) {
-    if (file->has_errors) { return; }
-
-    FILE *f = (FILE *)file->handle;
-
-    if (offset != ftell(f)) {
-        int seek_result = fseek(f, offset, SEEK_SET);
-        if (seek_result != 0) { unix_file_error(file, "Failed to seek file"); }
-    }
-
-    size_t bytes_read = fread(dest, sizeof(char), size, f);
-    if (bytes_read != sizeof(char) * size) {
-        unix_file_error(file, "Failed to read file");
-    }
-}
-
-void os_file_write(File *file, u64 offset, u64 size, void *data) {
-    if (file->has_errors) { return; }
-
-    FILE *f = (FILE *)file->handle;
-
-    if (offset != ftell(f)) {
-        int seek_result = fseek(f, offset, SEEK_SET);
-        if (seek_result != 0) { unix_file_error(file, "Failed to seek file"); }
-    }
-
-    size_t bytes_written = fwrite(data, sizeof(char), size, f);
-    if (bytes_written != sizeof(char) * size) {
-        unix_file_error(file, "Failed to write to file");
-    }
-}
-
-void os_file_close(File *file) {
-    if (file->handle) {
-        FILE *f = (FILE *)file->handle;
-        file->handle = NULL;
-
-        int close_result = fclose(f);
-        if (close_result != 0) { unix_file_error(file, "Failed to close file"); }
-    }
-}
-
-String os_read_entire_file(Allocator allocator, String path) {
-    auto file = os_file_open(path, FILE_MODE_READ);
-    auto size = os_file_get_size(&file);
-
-    String result = {};
-    result.data = cast(u8 *)allocator_alloc(allocator, size);
-    result.count = size;
-
-    os_file_read(&file, 0, size, result.data);
-    os_file_close(&file);
-
-    return result;
-}
-
-bool os_write_entire_file(String path, String contents) {
-    auto file = os_file_open(path, FILE_MODE_WRITE);
-    if (!file.has_errors)
-    {
-        os_file_write(&file, 0, contents.count, contents.data);
-    }
-    os_file_close(&file);
-    return !file.has_errors;
-}
-
-File_Lister os_file_list_begin(Arena *arena, String path) {
-    File_Lister result = {};
-
-    char *cpath = string_to_cstr(arena, path);
-    DIR *handle = opendir(cpath);
-
-    result.find_path = cpath;
-    result.handle    = handle;
-    result.arena     = arena;
-
-    return result;
-}
-
-bool os_file_list_next(File_Lister *iter, File_Info *info) {
-    if (!iter->handle) {
-        return false;
-    }
-
-    struct dirent *data = readdir(iter->handle);
-
-    if (data != NULL) {
-        String name = string_from_cstr(data->d_name);
-
-        // Ignore . and .. "directories"
-        while (string_equals(name, S(".")) || string_equals(name, S(".."))) {
-            data = readdir(iter->handle);
-            if (data == NULL) {
-                return false;
-            }
-
-            name = string_from_cstr(data->d_name);
-        }
-
-        *info = os_get_file_info(iter->arena, path_join(string_from_cstr(iter->find_path), name));
-
-        #if 0
-        struct stat64 stat_info;
-        stat64(iter->find_path, &stat_info);
-
-        *info = {};
-        info->name         = string_copy(iter->arena, name);
-
-        info->last_accessed_at = unix_date_from_time(stat_info.st_atime);
-        info->updated_at       = unix_date_from_time(stat_info.st_mtime);
-         // NOTE(nick): not really created time, but UNIX doesn't have this concept
-        info->created_at       = unix_date_from_time(stat_info.st_ctime);
-        info->flags            = unix_flags_from_mode(stat_info.st_mode, info->name);
-        info->access           = unix_access_from_mode(stat_info.st_mode);
-        #endif
-    }
-
-    return data != NULL;
-}
-
-void os_file_list_end(File_Lister *iter) {
-    if (iter->handle) {
-        closedir(iter->handle);
-        iter->handle = 0;
-    }
-}
-
-bool os_make_directory(String path) {
-    auto scratch = begin_scratch_memory();
-    int result = mkdir(string_to_cstr(scratch.arena, path), 0700);
-    end_scratch_memory(scratch);
-    return result == 0;
-}
-
-bool os_delete_file(String path) {
-    auto scratch = begin_scratch_memory();
-    int result = unlink(string_to_cstr(scratch.arena, path));
-    end_scratch_memory(scratch);
-    return result == 0;
-}
-
-bool os_delete_directory(String path) {
-    auto scratch = begin_scratch_memory();
-    int result = rmdir(string_to_cstr(scratch.arena, path));
-    end_scratch_memory(scratch);
-    return result == 0;
-}
-
-#include <pthread.h>
-#include <sys/resource.h> // setpriority
-
-void *unix_thread_proc(void *data) {
-    Thread_Params *params = (Thread_Params *)data;
-    assert(params->proc);
-
-    thread_context_init(megabytes(32));
-    u32 result = params->proc(params->data);
-    thread_context_free();
-    os_free(params);
-
-    return (void *)result;
-}
-
-Thread os_create_thread(u64 stack_size, Thread_Proc *proc, void *data) {
-    pthread_attr_t attr;
-    if (pthread_attr_init(&attr) != 0) {
-        return {};
-    }
-
-    if (stack_size > 0) {
-        if (pthread_attr_setstacksize(&attr, stack_size) != 0) {
-            return {};
-        }
-    }
-
-    Thread_Params *params = (Thread_Params *)os_alloc(sizeof(Thread_Params));
-    params->proc = proc;
-    params->data = data;
-
-    pthread_t thread_id;
-    pthread_create(&thread_id, &attr, unix_thread_proc, params);
-
-    Thread result = {};
-    result.handle = (void *)thread_id;
-    return result;
-}
-
-void os_detatch_thread(Thread thread) {
-    pthread_t tid = (pthread_t)thread.handle;
-    pthread_detach(tid);
-}
-
-u32 os_await_thread(Thread thread) {
-    pthread_t tid = (pthread_t)thread.handle;
-    void *result = 0;
-    pthread_join(tid, &result);
-    // @MemoryLeak: free Thread_Params
-    return *(u32 *)result;
-}
-
-void os_set_high_process_priority(bool enable) {
-    if (enable) {
-        setpriority(PRIO_PROCESS, getpid(), -20);
-    } else {
-        setpriority(PRIO_PROCESS, getpid(), 0);
-    }
-}
-
-#endif // OS_MACOS || OS_LINUX
-
-//
-// DLLs
-//
-
-struct OS_Library {
-    void *handle;
-};
-
-typedef void (*OS_Library_Proc)(void);
-
-OS_Library os_library_load(String path);
-void os_library_unload(OS_Library lib);
-OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name);
-
-
-bool os_library_is_loaded(OS_Library lib)
-{
-    return lib.handle != 0;
-}
-
-#if OS_WINDOWS
-
-OS_Library os_library_load(String path) {
-    auto scratch = begin_scratch_memory();
-
-    OS_Library result = {};
-    result.handle     = LoadLibraryW((WCHAR *)string16_from_string(scratch.arena, path).data);
-
-    end_scratch_memory(scratch);
-
-    return result;
-}
-
-inline void os_library_unload(OS_Library lib) {
-    if (lib.handle) {
-        FreeLibrary((HMODULE)lib.handle);
-        lib.handle = 0;
-    }
-}
-
-inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
-    return (OS_Library_Proc)GetProcAddress((HMODULE)lib.handle, proc_name);
-}
-
-#else // POSIX
-
-#include <dlfcn.h>
-
-OS_Library os_library_load(String path) {
-    auto scratch = begin_scratch_memory();
-
-    OS_Library result = {};
-    // TODO(bill): Should this be RTLD_LOCAL?
-    result.handle     = dlopen(string_to_cstr(scratch.arena, path), RTLD_LAZY | RTLD_GLOBAL);
-
-    end_scratch_memory(scratch);
-
-    return result;
-}
-
-inline void os_library_unload(OS_Library lib) {
-    if (lib.handle) {
-        dlclose(lib.handle);
-        lib.handle = 0;
-    }
-}
-
-inline OS_Library_Proc os_library_get_proc(OS_Library lib, char *proc_name) {
-    return (OS_Library_Proc)dlsym(lib.handle, proc_name);
-}
-
-#endif
-
-inline OS_Library_Proc os_library_get_proc(OS_Library lib, String proc_name) {
-    auto scratch = begin_scratch_memory();
-    auto result = os_library_get_proc(lib, string_to_cstr(scratch.arena, proc_name));
-    end_scratch_memory(scratch);
-    return result;
-}
-
-//
-// Allocator
-//
-
-Allocator default_allocator();
-
-void *allocator_alloc(Allocator allocator, u64 size) {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
-        void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
-        return result;
-    }
-
-    return NULL;
-}
-
-void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment) {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
-        void *result = allocator.proc(ALLOCATOR_MODE_ALLOC, size, 0, NULL, allocator.data, alignment);
-        return result;
-    }
-
-    return NULL;
-}
-
-void allocator_free(Allocator allocator, void *data) {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
-        if (data != NULL) {
-            allocator.proc(ALLOCATOR_MODE_FREE, 0, 0, data, allocator.data, 0);
-        }
-    }
-}
-
-void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size) {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
-        return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, DEFAULT_MEMORY_ALIGNMENT);
-    }
-
-    return NULL;
-}
-
-void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment) {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
-        return allocator.proc(ALLOCATOR_MODE_RESIZE, new_size, old_size, data, allocator.data, alignment);
-    }
-
-    return NULL;
-}
-
-ALLOCATOR_PROC(os_allocator_proc) {
-    switch (mode) {
-        case ALLOCATOR_MODE_FREE: {
-            os_free(old_memory_pointer);
-            return NULL;
-        }
-
-        case ALLOCATOR_MODE_FREE_ALL: {
-            // @Incomplete
-            return NULL;
-        }
-
-        case ALLOCATOR_MODE_RESIZE:
-        case ALLOCATOR_MODE_ALLOC: {
-            u64 actual_size = requested_size + na_align_offset(0, alignment);
-
-            void *result = os_alloc(actual_size);
-
-            if (result && old_memory_pointer && mode == ALLOCATOR_MODE_RESIZE) {
-                // @Incomplete: provide os-level realloc function
-                memory_copy(old_memory_pointer, result, Min(requested_size, old_size));
-                os_free(old_memory_pointer);
-            }
-
-            return result;
-        }
-
-        default: {
-            return NULL;
-        }
-    }
-}
-
-Allocator os_allocator() {
-    return Allocator{os_allocator_proc, 0};
-}
-
-Allocator default_allocator() { return os_allocator(); }
-
-ALLOCATOR_PROC(arena_allocator_proc) {
-    Arena *arena = cast(Arena *)allocator_data; 
-
-    switch (mode) {
-        case ALLOCATOR_MODE_ALLOC: {
-            return arena_push_aligned(arena, requested_size, alignment);
-        }
-
-        // @Speed: make this check pointer locations and potentially just extend previous allocation?
-        // Not sure if that's always safe to do or not
-        case ALLOCATOR_MODE_RESIZE: {
-            u64 actual_size = requested_size + na_align_offset(0, alignment);
-
-            void *result = arena_push_aligned(arena, actual_size, alignment);
-
-            if (result && old_memory_pointer && mode == ALLOCATOR_MODE_RESIZE) {
-                memory_copy(old_memory_pointer, result, Min(requested_size, old_size));
-            }
-
-            return result;
-        }
-
-        case ALLOCATOR_MODE_FREE: {
-            return NULL;
-        }
-
-        case ALLOCATOR_MODE_FREE_ALL: {
-            arena_reset(arena);
-            return NULL;
-        }
-
-        default: {
-            return NULL;
-        }
-    }
-}
-
-Allocator arena_allocator(Arena *arena) {
-    return Allocator{arena_allocator_proc, arena};
-}
-
-Arena arena_create_from_allocator(Allocator allocator, u64 size) {
-    Arena result = {};
-    result.data = cast(u8 *)allocator_alloc(allocator, size);
-    result.size = size;
-    return result;
-}
-
-ALLOCATOR_PROC(null_allocator_proc) {
-    return NULL;
-}
-
-Allocator null_allocator() {
-    return Allocator{null_allocator_proc, NULL};
-}
-
-Allocator temp_allocator() {
-    return arena_allocator(temp_arena());
-}
-
-//
-// Array
-//
-
-#define For(array) for (auto &it : array)
-
-#define Forp(array) \
-    auto CONCAT(__array, __LINE__) = (array); \
-    for (auto it = CONCAT(__array, __LINE__).begin(); it < CONCAT(__array, __LINE__).end(); it++)
-
-#define Fori(array) for (i64 index = 0; index < cast(i64)(array).count; index++)
-
-#define For_Array(it, array) for (auto &it : array)
-
-#define For_Index(array) for (i64 index = 0; index < cast(i64)(array).count; index++)
-
-#define For_Index_Reverse(array) \
-    for (i64 index = cast(i64)(array).count - 1; index >= 0; index--)
-
-#define For2(array) \
-        for (i64 index = 0; index < cast(i64)(array).count; index++) \
-            if (auto it = &(array).data[index])
-
-#define Array_Each(it, array) auto it = (array).begin(); it < (array).end(); it ++
-                
-#define Array_Foreach(item, array)                                             \
-  for (i64 index = 0;                                                          \
-       index < cast(i64)(array).count ? (item) = (array).data[index], true : false; \
-       index++)
-
-#define Array_Foreach_Pointer(item, array)                                     \
-  for (i64 index = 0;                                                          \
-       index < cast(i64)(array).count ? (item) = &(array).data[index], true : false; \
-       index++)
-
-#define Array_Foreach_Reverse(item, array)                                     \
-  for (i64 index = cast(i64)(array).count - 1;                             \
-       index >= 0 ? (item) = (array).data[index], true : false;                \
-       index--)
-
-#define Array_Foreach_Pointer_Reverse(item, array)                             \
-  for (i64 index = cast(i64)(array).count - 1;                             \
-       index >= 0 ? (item) = &(array).data[index], true : false;               \
-       index--)
-
-template <typename T>
-struct Array {
-    Allocator allocator;
-    u64       capacity;
-    i64       count;
-    T *       data;
-
-    T &operator[](i64 i) {
-        assert(i >= 0 && i < count);
-        return data[i];
-    }
-
-    T *begin() { return data ? &data[0] : NULL; }
-    T *end()   { return data ? &data[count] : NULL; }
-};
-
-template <typename T>
-void array_init(Array<T> *it, u64 initial_capacity = 16) {
-    it->allocator = os_allocator();
-    it->count = 0;
-    it->capacity = initial_capacity;
-    it->data = cast(T *)allocator_realloc(it->allocator, NULL, it->capacity * sizeof(T), 0);
-}
-
-template <typename T>
-void array_init_from_allocator(Array<T> *it, Allocator allocator, u64 capacity) {
-    it->allocator = allocator;
-    it->count = 0;
-    it->capacity = capacity;
-    it->data = cast(T *)allocator_realloc(allocator, NULL, capacity * sizeof(T), 0);
-}
-
-template <typename T>
-Array<T> array_make(u64 initial_capacity = 16) {
-    Array<T> result = {};
-    array_init(result, initial_capacity);
-    return result;
-}
-
-template <typename T>
-Array<T> array_make_from_allocator(Allocator allocator, u64 capacity) {
-    Array<T> result = {};
-    array_init_from_allocator(result, allocator, capacity);
-    return result;
-}
-
-template <typename T>
-void array_reset(Array<T> *it) {
-    it->count = 0;
-}
-
-template <typename T>
-void array_resize(Array<T> *it, u64 next_capacity) {
-    if (it->data && it->capacity == next_capacity) return;
-
-    u64 prev_size = it->capacity * sizeof(T);
-    u64 next_size = next_capacity * sizeof(T);
-
-    auto next_data = (T *)allocator_realloc(it->allocator, it->data, next_size, prev_size);
-    if (next_data) {
-        it->data = next_data;
-        it->capacity = next_capacity;
-    }
-}
-
-template <typename T>
-bool array_at_capacity(Array<T> *it) {
-    return it->capacity <= it->count;
-}
-
-template <typename T>
-T *array_peek(Array<T> *it) {
-    return it->count > 0 ? &it->data[it->count - 1] : NULL;
-}
-
-template <typename T>
-T *array_pop(Array<T> *it) {
-    T *removed = array_peek(it);
-    if (removed) it->count --;
-    return removed;
-}
-
-template <typename T>
-void array_remove_unordered(Array<T> *it, i64 index) {
-    assert(index >= 0 && index < it->count);
-    memory_copy(&it->data[it->count - 1], &it->data[index], sizeof(T));
-    it->count--;
-}
-
-template <typename T>
-void array_remove_ordered(Array<T> *it, i64 index, i64 num_to_remove = 1) {
-    assert(index >= 0 && index < it->count);
-    assert(num_to_remove > 0 && index + num_to_remove <= it->count);
-
-    u64 i = index + num_to_remove;
-    u64 remaining_count = it->count - i;
-
-    memory_move(&it->data[i], &it->data[index], sizeof(T) * remaining_count);
-
-    it->count -= num_to_remove;
-}
-
-template <typename T>
-void array_free(Array<T> *it) {
-    if (it->data) {
-        allocator_free(it->allocator, it->data);
-        it->data = NULL;
-    }
-
-    it->capacity = 0;
-    it->count = 0;
-}
-
-template <typename T>
-void array_reserve(Array<T> *it, u64 minimum_count) {
-    if (it->capacity < minimum_count) {
-        array_resize(it, minimum_count);
-    }
-}
-
-template <typename T>
-T *array_push(Array<T> *it) {
-    if (it->count >= it->capacity) {
-        array_resize(it, it->capacity ? it->capacity * 2 : 16);
-    }
-
-    memory_set(&it->data[it->count], 0, sizeof(T));
-    return &it->data[it->count ++];
-}
-
-template <typename T>
-T *array_push(Array<T> *it, T item) {
-    if (it->count >= it->capacity) {
-        array_resize(it, it->capacity ? it->capacity * 2 : 16);
-    }
-
-    it->data[it->count] = item;
-    return &it->data[it->count ++];
-}
-
-template <typename T>
-T *array_push_elements(Array<T> *it, void *items, u64 count) {
-    if (it->count + count >= it->capacity) {
-        i64 next_capacity = na_next_power_of_two(Max(it->capacity + count, 16));
-        array_resize(it, next_capacity);
-    }
-
-    T *result = it->data + it->count;
-    memory_copy(items, result, count * sizeof(T));
-    it->count += count;
-    return result;
-}
-
-template <typename T>
-void array_concat(Array<T> *it, T *data, u64 count) {
-    array_push_elements(it, data, count);
-}
-
-template <typename T>
-void array_concat(Array<T> *it, Array<T> other) {
-    array_push_elements(it, other.data, other.count);
-}
-
-template <typename T>
-void array_sort(Array<T> *it) {
-    auto compare = [](void *a, void *b) -> i32 {
-        if (*(T *)a == *(T *)b) return 0;
-        return (*(T *)a < *(T *)b) ? -1 : 1;
+        0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+        0x08,0x09,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+        0xFF,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,0xFF,
+        0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
     };
-
-    na_sort(it->data, it->count, sizeof(T), compare);
+    u64 value = 0;
+    for (u64 i = 0; i < string.count; i += 1) {
+        value *= radix;
+        u8 c = string.data[i];
+        value += char_to_value[(c - 0x30)&0x1F];
+    }
+    return value;
 }
 
-template <typename T>
-void array_sort(Array<T> *it, i32 (*compare)(T *a, T *b)) {
-    na_sort(it->data, it->count, sizeof(T), cast(Compare_Proc *)compare);
+function i64 string_to_i64(String str, u32 base) {
+    u64 p = 0;
+    
+    // consume sign
+    i64 sign = +1;
+    if (p < str.count) {
+        u8 c = str.data[p];
+        if (c == '-'){
+            sign = -1;
+            p += 1;
+        }
+        else if (c == '+'){
+            p += 1;
+        }
+    }
+    
+    // radix from prefix
+    u64 radix = 10;
+    if (p < str.count) {
+        u8 c0 = str.data[p];
+        if (c0 == '0') {
+            p += 1;
+            radix = 8;
+            if (p < str.count) {
+                u8 c1 = str.data[p];
+                if (c1 == 'x') {
+                    p += 1;
+                    radix = 16;
+                }
+                else if (c1 == 'b') {
+                    p += 1;
+                    radix = 2;
+                }
+            }
+        }
+    }
+    
+    // consume integer "digits"
+    String digits_substr = string_skip(str, p);
+    u64 n = string_to_u64(digits_substr, radix);
+    
+    // combine result
+    i64 result = sign*n;
+    return result;
 }
 
+function f64 string_to_f64(String string) {
+    char str[64];
+    u64 count = string.count;
+    if (count > sizeof(str) - 1)
+    {
+        count = sizeof(str) - 1;
+    }
+    MemoryCopy(str, string.data, count);
+    str[count] = 0;
+    return (atof(str));
+}
 
-String string_join(Allocator allocator, Array<String> list, String join);
+function b32 string_to_b32(String str) {
+    return (
+        string_match(str, S("true"), MatchFlag_CaseInsensitive) ||
+        string_match(str, S("yes"), MatchFlag_CaseInsensitive) ||
+        string_equals(str, S("1"))
+    );
+}
 
-template <typename T>
-String to_string(Array<T> it) {
-    Array<String> list = {};
-    list.allocator = temp_allocator();
+//
+// String Lists
+//
 
-    For (it) {
-        array_push(&list, to_string(it));
+function void string_list_push_node(String_List *list, String_Node *n)
+{
+    QueuePush(list->first, list->last, n);
+    list->node_count += 1;
+    list->total_size += n->string.count;
+}
+
+function void string_list_push(Arena *arena, String_List *list, String str)
+{
+    String_Node *n = PushArrayZero(arena, String_Node, 1);
+    n->string = str;
+    string_list_push_node(list, n);
+}
+
+function void string_concat_list(String_List *list, String_List *to_push)
+{
+    if (to_push->first)
+    {
+        list->node_count += to_push->node_count;
+        list->total_size += to_push->total_size;
+        if (list->last == 0)
+        {
+            *list = *to_push;
+        }
+        else
+        {
+            list->last->next = to_push->first;
+            list->last = to_push->last;
+        }
+    }
+    MemoryZero(to_push, sizeof(*to_push));
+}
+
+function String_List string_splits(Arena *arena, String string, int split_count, String *splits)
+{
+    String_List list = {0};
+    
+    u64 split_start = 0;
+    for (u64 i = 0; i < string.count; i += 1)
+    {
+        b32 was_split = 0;
+        for(int split_idx = 0; split_idx < split_count; split_idx += 1)
+        {
+            b32 match = 0;
+            if(i + splits[split_idx].count <= string.count)
+            {
+                match = 1;
+                for(u64 split_i = 0; split_i < splits[split_idx].count && i + split_i < string.count; split_i += 1)
+                {
+                    if(splits[split_idx].data[split_i] != string.data[i + split_i])
+                    {
+                        match = 0;
+                        break;
+                    }
+                }
+            }
+            if(match)
+            {
+                String split_string = Str8(string.data + split_start, i - split_start);
+                string_list_push(arena, &list, split_string);
+                split_start = i + splits[split_idx].count;
+                i += splits[split_idx].count - 1;
+                was_split = 1;
+                break;
+            }
+        }
+        
+        if(was_split == 0 && i == string.count - 1)
+        {
+            String split_string = Str8(string.data + split_start, i+1 - split_start);
+            string_list_push(arena, &list, split_string);
+            break;
+        }
+    }
+    
+    return list;
+}
+
+function String_List string_split(Arena *arena, String string, String split)
+{
+    return string_splits(arena, string, 1, &split);
+}
+
+function String string_list_joins(Arena *arena, String_List list, String_Join *optional_params)
+{
+    String_Join join = {0};
+    if (optional_params)
+    {
+        MemoryCopy(&join, optional_params, sizeof(join));
+    }
+    
+    u64 sep_count = 0;
+    if (list.node_count > 1)
+    {
+        sep_count = list.node_count - 1;
+    }
+    String result = {0};
+    result.count = (list.total_size + join.pre.count +
+                   sep_count*join.sep.count + join.post.count);
+    result.data = PushArray(arena, u8, result.count);
+    
+    u8 *ptr = result.data;
+    MemoryCopy(ptr, join.pre.data, join.pre.count);
+    ptr += join.pre.count;
+    for (String_Node *node = list.first; node; node = node->next)
+    {
+        MemoryCopy(ptr, node->string.data, node->string.count);
+        ptr += node->string.count;
+        if (node != list.last) {
+            MemoryCopy(ptr, join.sep.data, join.sep.count);
+            ptr += join.sep.count;
+        }
+    }
+    MemoryCopy(ptr, join.pre.data, join.pre.count);
+    ptr += join.pre.count;
+    
+    return result;
+}
+
+function String string_list_join(Arena *arena, String_List list, String join)
+{
+    String_Join params = {0};
+    params.sep = join;
+    return string_list_joins(arena, list, &params);
+}
+
+function String string_list_print(Arena *arena, String_List *list, char *fmt, ...)
+{
+    String result = {0};
+
+    va_list args;
+    va_start(args, fmt);
+    result = string_printv(arena, fmt, args);
+    va_end(args);
+
+    string_list_push(arena, list, result);
+    return result;
+}
+
+function String string_list_to_string(Arena *arena, String_List *list)
+{
+    return string_list_join(arena, *list, S(""));
+}
+
+//
+// Misc Helpers
+//
+
+function String string_concat2(Arena *arena, String a, String b) {
+    u64 count = a.count + b.count;
+    u8 *data = PushArray(arena, u8, count);
+
+    if (data) {
+        MemoryCopy(data + 0      , a.data, a.count);
+        MemoryCopy(data + a.count, b.data, b.count);
     }
 
-    return sprint("[%S]", string_join(temp_allocator(), list, S(", ")));
+    return string_make(data, count);
 }
 
-String string_from_array(Array<u8> chars) {
-    return make_string(chars.data, chars.count);
-}
+function String string_concat3(Arena *arena, String a, String b, String c) {
+    u64 count = a.count + b.count + c.count;
+    u8 *data = PushArray(arena, u8, count);
 
-String32 string32_from_array(Array<u32> chars) {
-    return make_string32(chars.data, chars.count);
-}
-
-//
-// Slice
-//
-
-template <typename T>
-struct Slice {
-    i64 count = 0;
-    T * data = NULL;
-
-    T &operator[](i64 i) {
-        assert(i >= 0 && i < count);
-        return data[i];
+    if (data) {
+        MemoryCopy(data + 0                , a.data, a.count);
+        MemoryCopy(data + a.count          , b.data, b.count);
+        MemoryCopy(data + a.count + b.count, c.data, c.count);
     }
 
-    T *begin() { return data ? &data[0] : NULL; }
-    T *end()   { return data ? &data[count] : NULL; }
-};
+    return string_make(data, count);
+}
 
-#define slice_of(it) {count_of(it), it}
+function String string_concat4(Arena *arena, String a, String b, String c, String d) {
+    u64 count = a.count + b.count + c.count + d.count;
+    u8 *data = PushArray(arena, u8, count);
 
-template <typename T>
-Slice<T> make_slice(T *data, i64 count) {
-    Slice<T> result = {};
+    if (data) {
+        MemoryCopy(data + 0,                           a.data, a.count);
+        MemoryCopy(data + a.count,                     b.data, b.count);
+        MemoryCopy(data + a.count + b.count,           c.data, c.count);
+        MemoryCopy(data + a.count + b.count + c.count, d.data, d.count);
+    }
 
-    result.data = data;
-    result.count = count;
+    return string_make(data, count);
+}
+
+function String string_chop_last_period(String string)
+{
+    u64 pos = string_find(string, S("."), 0, MatchFlag_FindLast);
+    if (pos < string.count)
+    {
+        string.count = pos;
+    }
+    return string;
+}
+
+function String string_skip_last_period(String string)
+{
+    u64 pos = string_find(string, S("."), 0, MatchFlag_FindLast);
+    if (pos < string.count)
+    {
+        string.data += pos+1;
+        string.count -= pos+1;
+    }
+    return string;
+}
+
+function String string_chop_last_slash(String string)
+{
+    u64 pos = string_find(string, S("/"), 0, MatchFlag_SlashInsensitive|MatchFlag_FindLast);
+    if (pos < string.count)
+    {
+        string.count = pos;
+    }
+    return string;
+}
+
+function String string_skip_last_slash(String string)
+{
+    u64 pos = string_find(string, S("/"), 0, MatchFlag_SlashInsensitive|MatchFlag_FindLast);
+    if (pos < string.count)
+    {
+        string.data += pos+1;
+        string.count -= pos+1;
+    }
+    return string;
+}
+
+function String string_trim_whitespace(String str)
+{
+    String result = str;
+    while (result.count > 0 && char_is_whitespace(result.data[0]))
+    {
+        result.data  += 1;
+        result.count -= 1;
+    }
+
+    while (result.count > 0 && char_is_whitespace(result.data[result.count - 1]))
+    {
+        result.count -= 1;
+    }
+    return result;
+}
+
+//
+// Path Helpers
+//
+
+function String path_filename(String path)
+{
+    return string_skip_last_slash(path);
+}
+
+function String path_basename(String path)
+{
+    return string_chop_last_slash(path);
+}
+
+function String path_extension(String path)
+{
+    String result = {0};
+    u64 slash_pos = string_find(path, S("/"), 0, MatchFlag_SlashInsensitive|MatchFlag_FindLast);
+    if (slash_pos < path.count)
+    {
+        u64 dot_pos = string_find(path, S("."), slash_pos, MatchFlag_FindLast);
+        if (dot_pos < path.count)
+        {
+            result = string_slice(path, dot_pos, path.count);
+        }
+    }
+    return result;
+}
+
+function String path_strip_extension(String path)
+{
+    String result = {0};
+    u64 slash_pos = string_find(path, S("/"), 0, MatchFlag_SlashInsensitive|MatchFlag_FindLast);
+    if (slash_pos < path.count)
+    {
+        u64 dot_pos = string_find(path, S("."), slash_pos, MatchFlag_FindLast);
+        if (dot_pos < path.count)
+        {
+            result = string_slice(path, 0, dot_pos);
+        }
+    }
+    return result;
+}
+
+function String path_join2(Arena *arena, String a, String b)
+{
+    return string_print(arena, "%.*s%c%.*s", LIT(a), PATH_SEP, LIT(b));
+}
+
+function String path_join3(Arena *arena, String a, String b, String c)
+{
+    return string_print(arena, "%.*s%c%.*s%c%.*s", LIT(a), PATH_SEP, LIT(b), PATH_SEP, LIT(c));
+}
+
+function String path_join4(Arena *arena, String a, String b, String c, String d)
+{
+    return string_print(arena, "%.*s%c%.*s%c%.*s%c%.*s", LIT(a), PATH_SEP, LIT(b), PATH_SEP, LIT(c), PATH_SEP, LIT(d));
+}
+
+function b32 path_is_absolute(String path)
+{
+    b32 result = false;
+    if (path.count > 0 && path.data[0] == '/')
+    {
+        result = true;
+    }
+    else
+    {
+        // Windows drive root:
+        if (path.count >= 2)
+        {
+            result = char_is_alpha(path.data[0]) && path.data[1] == ':';
+
+            if (path.count > 2)
+            {
+                result |= (path.data[2] == '\\' || path.data[2] == '/');
+            }
+        }
+    }
+    return result;
+}
+
+//
+// String Conversions
+//
+
+#if LANG_CPP
+
+function String to_string(bool x)   { if (x) return S("true"); return S("false"); }
+function String to_string(char x)   { return sprint("%c", x); }
+function String to_string(char *x)  { return string_from_cstr(x); }
+function String to_string(i8 x)     { return sprint("%d", x); }
+function String to_string(u8 x)     { return sprint("%d", x); }
+function String to_string(i16 x)    { return sprint("%d", x); }
+function String to_string(u16 x)    { return sprint("%d", x); }
+function String to_string(i32 x)    { return sprint("%d", x); }
+function String to_string(u32 x)    { return sprint("%d", x); }
+function String to_string(i64 x)    { return sprint("%lld", x); }
+function String to_string(u64 x)    { return sprint("%llu", x); }
+function String to_string(f32 x)    { return sprint("%f", x); }
+function String to_string(f64 x)    { return sprint("%f", x); }
+function String to_string(void *x)  { return sprint("%p", x); }
+function String to_string(String x) { return x; }
+
+#endif // LANG_CPP
+
+//
+// Functions
+//
+
+function b32 is_power_of_two(i64 x) {
+    return (x & (x - 1)) == 0;
+}
+
+// NOTE(nick): if x is already a power of two this function just returns x
+function u64 next_power_of_two(u64 x) {
+    if (x == 0) return 1;
+
+    --x;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+
+    return ++x;
+}
+
+function u64 previous_power_of_two(u64 x) {
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    return x - (x >> 1);
+}
+
+function u16 endian_swap16(u16 i) {
+    return (i>>8) | (i<<8);
+}
+
+function u32 endian_swap32(u32 i) {
+    return (i>>24) |(i<<24) | ((i&0x00ff0000u)>>8)  | ((i&0x0000ff00u)<<8);
+}
+
+function u64 endian_swap64(u64 i) {
+    return (i>>56) | (i<<56) |
+           ((i&0x00ff000000000000ull)>>40) | ((i&0x000000000000ff00ull)<<40) |
+           ((i&0x0000ff0000000000ull)>>24) | ((i&0x0000000000ff0000ull)<<24) |
+           ((i&0x000000ff00000000ull)>>8)  | ((i&0x00000000ff000000ull)<<8);
+}
+
+function u32 rotate_left_u32(u32 value, i32 amount) {
+#if COMPILER_MSVC
+    u32 result = _rotl(value, amount);
+#else
+    // TODO(casey): Actually port this to other compiler platforms!
+    amount &= 31;
+    u32 result = ((value << amount) | (value >> (32 - amount)));
+#endif
 
     return result;
 }
 
-template <typename T>
-Slice<T> slice_array(Array<T> &array, i64 lo, i64 hi) {
-    assert(lo >= 0 && lo <= hi && hi <= array.count);
-
-    Slice<T> result = {};
-
-    result.data  = array.data + lo;
-    result.count = hi - lo;
-
-    return result;
-}
-
-template <typename T>
-Slice<T> slice_from_array(Array<T> &array) {
-    Slice<T> result = {};
-
-    result.data  = array.data;
-    result.count = array.count;
+function u32 rotate_right_u32(u32 value, i32 amount) {
+#if COMPILER_MSVC
+    u32 result = _rotr(value, amount);
+#else
+    // TODO(casey): Actually port this to other compiler platforms!
+    amount &= 31;
+    u32 result = ((value >> amount) | (value << (32 - amount)));
+#endif
 
     return result;
 }
 
 //
-// Hash
+// Hashing
 //
 
-u32 murmur32_seed(void const *data, isize len, u32 seed) {
+function u32 murmur32_seed(void const *data, i64 len, u32 seed) {
     u32 const c1 = 0xcc9e2d51;
     u32 const c2 = 0x1b873593;
     u32 const r1 = 15;
@@ -4601,7 +2671,7 @@ u32 murmur32_seed(void const *data, isize len, u32 seed) {
     u32 const m  = 5;
     u32 const n  = 0xe6546b64;
 
-    isize i, nblocks = len / 4;
+    i64 i, nblocks = len / 4;
     u32 hash = seed, k1 = 0;
     u32 const *blocks = cast(u32 const*)data;
     u8 const *tail = cast(u8 const *)(data) + nblocks*4;
@@ -4640,7 +2710,7 @@ u32 murmur32_seed(void const *data, isize len, u32 seed) {
     return hash;
 }
 
-u64 murmur64_seed(void const *data_, isize len, u64 seed) {
+function u64 murmur64_seed(void const *data_, i64 len, u64 seed) {
     u64 const m = 0xc6a4a7935bd1e995ULL;
     i32 const r = 47;
 
@@ -4679,10 +2749,17 @@ u64 murmur64_seed(void const *data_, isize len, u64 seed) {
     return h;
 }
 
-u32 murmur32(void const *data, isize len) { return murmur32_seed(data, len, 0x9747b28c); }
-u64 murmur64(void const *data, isize len) { return murmur64_seed(data, len, 0x9747b28c); }
+function u32 murmur32(void const *data, i64 len)
+{
+    return murmur32_seed(data, len, 0x9747b28c);
+}
 
-u32 fnv32a(void const *data, isize len) {
+function u64 murmur64(void const *data, i64 len)
+{
+    return murmur64_seed(data, len, 0x9747b28c);
+}
+
+function u32 fnv32a(void const *data, i64 len) {
     u8 const *bytes = cast(u8 const *)data;
     u32 h = 0x811c9dc5;
     
@@ -4703,7 +2780,7 @@ u32 fnv32a(void const *data, isize len) {
     return h;
 }
 
-u64 fnv64a(void const *data, isize len) {
+function u64 fnv64a(void const *data, i64 len) {
     u8 const *bytes = cast(u8 const *)data;
     u64 h = 0xcbf29ce484222325ull;
     
@@ -4725,659 +2802,1068 @@ u64 fnv64a(void const *data, isize len) {
 }
 
 //
-// Hash Table
+// Random
 //
 
-#define For_Table(table) \
-    for (auto it = (table).begin(); it < (table).end(); it++) \
-        if (it->hash < TABLE_FIRST_VALID_HASH) continue; else
-
-const int TABLE_NEVER_OCCUPIED_HASH = 0;
-const int TABLE_REMOVED_HASH = 1;
-const int TABLE_FIRST_VALID_HASH = 2;
-
-const int TABLE_SIZE_MIN = 32;
-
-template <typename K>
-bool table_key_equals(K a, K b) {
-    return memory_equals(&a, &b, sizeof(K));
+function Random_State random_make_default()
+{
+    Random_State result = {0};
+    // TODO(nick): seed with os_time
+    //random_set_seed();
+    return result;
 }
 
-bool table_key_equals(u32 a, u32 b) {
-    return a == b; 
+function void random_set_seed(Random_State *it, u64 state, u64 selector)
+{
+    it->state = state;
+    it->selector = (selector << 1) | 1;
 }
 
-bool table_key_equals(char *a, char *b) {
-    return cstr_equals(a, b); 
+function u32 random_u32(Random_State *it)
+{
+    u64 state = it->state;
+    state = state * 6364136223846793005ULL + it->selector;
+    it->state = state;
+
+    u32 pre_rotate = (u32)((state ^ (state >> 18)) >> 27);
+    u32 result = rotate_right_u32(pre_rotate, (i32)(state >> 59));
+
+    return result;
 }
 
-bool table_key_equals(String a, String b) {
-    return string_equals(a, b);
+function f32 random_f32(Random_State *series) 
+{
+    f32 divisor = 1.0f / (f32)U32_MAX;
+    return divisor * (f32)random_u32(series);
 }
 
-template <typename K>
-u64 table_key_hash(K key) {
-    return murmur64(&key, sizeof(K));
+function f32 random_f32_between(Random_State *series, f32 min, f32 max) {
+    return min + (max - min) * random_f32(series);
 }
 
-u64 table_key_hash(char *key) {
-    return fnv64a(&key, cstr_length(key));
+function i32 random_i32_between(Random_State *series, i32 min, i32 max) {
+    assert(max >= min);
+    return min + (i32)(random_u32(series) % (max - min + 1));
 }
 
-u64 table_key_hash(String key) {
-    return fnv64a(key.data, key.count);
-}
+#if 0
+void random_shuffle(Random_State *it, void *base, u64 count, u64 size) {
+    u8 *a;
+    isize i, j;
 
-template <typename K, typename V>
-struct Hash_Table {
-    struct Entry {
-        u64 hash;
-        K key;
-        V value;
-    };
-
-    Allocator allocator    = os_allocator();
-    u32       capacity     = 0;
-    i32       count        = 0;
-    u32       slots_filled = 0;
-    Entry *   data         = 0;
-
-    #if 0
-    u32 add_collisions = 0;
-    u32 find_collisions = 0;
-    #endif
-
-    Entry &operator[](i64 i) {
-        assert(i >= 0 && i < capacity);
-        return data[i];
+    a = cast(u8 *)base + (count-1) * size;
+    for (i = count; i > 1; i--) {
+        j = random_next_u32(it) % i;
+        memory_swap(a, cast(u8 *)base + j*size, size);
+        a -= size;
     }
+}
+#endif
 
-    Entry *begin() { return data ? &data[0] : NULL; }
-    Entry *end()   { return data ? &data[capacity] : NULL; }
+//
+// Platform-Specific:
+//
+
+#if OS_WINDOWS
+
+#pragma comment(lib, "user32")
+#pragma comment(lib, "shell32")
+
+#include <tlhelp32.h>
+
+static Arena *win32_global_arena = NULL;
+static SRWLOCK win32_mutex = SRWLOCK_INIT;
+
+struct Win32_File_Lister {
+    bool is_first_file;
+    HANDLE handle;
+    WIN32_FIND_DATAW data;
 };
 
-template <typename K, typename V>
-void table_init(Hash_Table<K, V> *it, u32 table_size) {
-    it->capacity = Max(na_next_power_of_two(table_size), TABLE_SIZE_MIN);
-    it->count = 0;
-    it->slots_filled = 0;
-
-    #if 0
-    it->add_collisions = 0;
-    it->find_collisions = 0;
+void win32_file_error(File *file, const char *message, String file_name = {}) {
+    #if DEBUG
+    if (file_name.data) {
+        print("[file] %s: %.*s\n", message, LIT(file_name));
+    } else {
+        print("[file] %s\n", message);
+    }
     #endif
 
-    assert(na_is_power_of_two(it->capacity)); // Must be a power of two!
-
-    it->data = (typename Hash_Table<K, V>::Entry *)allocator_alloc(it->allocator, it->capacity * sizeof(typename Hash_Table<K, V>::Entry));
-    memory_zero(it->data, it->capacity * sizeof(typename Hash_Table<K, V>::Entry));
-    table_reset(it); // @Speed: Can be removed if data is initialized to zero!
+    file->has_errors = true;
 }
 
-template <typename K, typename V>
-void table_init_from_allocator(Hash_Table<K, V> *it, Allocator allocator, u32 table_size) {
-    it->allocator = allocator;
-    table_init(it, table_size);
+function Date_Time win32_date_time_from_system_time(SYSTEMTIME *in) {
+    Date_Time result = {};
+
+    result.year = in->wYear;
+    result.mon  = cast(u8)in->wMonth;
+    result.day  = in->wDay;
+    result.hour = in->wHour;
+    result.min  = in->wMinute;
+    result.sec  = in->wSecond;
+    result.msec = in->wMilliseconds;
+
+    return result;
 }
 
-template <typename K, typename V>
-void table_reset(Hash_Table<K, V> *it) {
-    it->count = 0;
-    it->slots_filled = 0;
+function SYSTEMTIME win32_system_time_from_date_time(Date_Time *in) {
+    SYSTEMTIME result = {};
 
-    if (it->data) {
-        for (u32 i = 0; i < it->capacity; i++) {
-            it->data[i].hash = 0;
-        }
-    }
+    result.wYear = in->year;
+    result.wMonth = in->mon;
+    result.wDay = in->day;
+    result.wHour = in->hour;
+    result.wMinute = in->min;
+    result.wSecond = in->sec;
+    result.wMilliseconds = in->msec;
+
+    return result;
 }
 
-template <typename K, typename V>
-void table_free(Hash_Table<K, V> *it) {
-    if (it->data) {
-        allocator_free(it->allocator, it->data);
-        it->data = NULL;
-        it->capacity = 0;
-        it->count = 0;
-        it->slots_filled = 0;
-    }
+function Dense_Time win32_dense_time_from_file_time(FILETIME *file_time) {
+    SYSTEMTIME system_time = {};
+    FileTimeToSystemTime(file_time, &system_time);
+    Date_Time date_time = win32_date_time_from_system_time(&system_time);
+    Dense_Time result = dense_time_from_date_time(date_time);
+    return result;
 }
 
-template <typename K, typename V>
-void table_rehash(Hash_Table<K, V> *it, u32 next_capacity) {
-    assert(na_is_power_of_two(it->capacity)); // Must be a power of two!
+function u32 win32_flags_from_attributes(DWORD attributes) {
+    u32 result = 0;
 
-    auto *old_data = it->data;
-    u32 old_capacity = it->capacity;
-
-    table_init(it, next_capacity);
-
-    // count and slots_filled will be incremented by add.
-    it->count        = 0;
-    it->slots_filled = 0;
-
-    for (u32 i = 0; i < old_capacity; i++) {
-        auto *entry = &old_data[i];
-
-        if (entry->hash >= TABLE_FIRST_VALID_HASH) {
-            table_add(it, entry->key, entry->value);
-        }
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+        result |= File_IsDirectory;
     }
 
-    allocator_free(it->allocator, old_data);
-}
-
-// Sets the key-value pair, replacing it if it already exists.
-template <typename K, typename V>
-V *table_set(Hash_Table<K, V> *it, K key, V value) {
-    if (it->data) {
-        auto result = table_find_pointer(it, key);
-        if (result) {
-            *result = value;
-            return result;
-        }
+    if (attributes & FILE_ATTRIBUTE_HIDDEN) {
+        result |= File_IsHidden;
     }
 
-    return table_add(it, key, value);
-}
-
-// Adds the given key-value pair to the table, returns a pointer to the inserted item.
-template <typename K, typename V>
-V *table_add(Hash_Table<K, V> *it, K key, V value) {
-    // The + 1 is here to handle the weird case where the table size is 1 and you add the first item
-    // slots_filled / capacity >= 7 / 10 ...therefore:
-    // slots_filled * 10 >= capacity * 7
-    if ((it->slots_filled + 1) * 10 >= it->capacity * 7) {
-        u32 next_capacity = it->capacity ? it->capacity * 2 : TABLE_SIZE_MIN;
-        table_rehash(it, next_capacity);
+    if (attributes & FILE_ATTRIBUTE_SYSTEM) {
+        result |= File_IsSystem;
     }
 
-    assert(it->slots_filled <= it->capacity);
-
-    u64 hash = table_key_hash(key);
-    if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
-
-    u64 index = hash & (it->capacity - 1);
-
-    while (it->data[index].hash) {
-        #if 0
-        it->add_collisions += 1;
-        #endif
-
-        index += 1;
-        index &= (it->capacity - 1);
-    }
-
-    it->count ++;
-    it->slots_filled ++;
-    it->data[index] = {hash, key, value};
-
-    return &it->data[index].value;
+    return result;
 }
 
-template <typename K, typename V>
-V *table_find_pointer(Hash_Table<K, V> *it, K key) {
-    if (it->data) {
-        u64 hash = table_key_hash(key);
-        if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
-        u32 index = hash & (it->capacity - 1);
+function u32 win32_access_from_attributes(DWORD attributes) {
+    u32 result = FileAccess_Read | FileAccess_Execute;
 
-        while (it->data[index].hash) {
-            auto entry = &it->data[index];
-
-            if (entry->hash == hash && table_key_equals(entry->key, key)) {
-                return &entry->value;
-            }
-
-            index += 1;
-            index &= (it->capacity - 1);
-        }
+    if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
+        result |= FileAccess_Write;
     }
 
-    return NULL;
+    return result;
 }
 
-template <typename K, typename V>
-bool table_remove(Hash_Table<K, V> *it, K key) {
-    assert(it->data); // Must be initialized!
-
-    u64 hash = table_key_hash(key);
-    if (hash < TABLE_FIRST_VALID_HASH) hash += TABLE_FIRST_VALID_HASH;
-    u32 index = hash & (it->capacity - 1);
-
-    while (it->data[index].hash) {
-        if (it->data[index].hash == hash) {
-            it->data[index].hash = TABLE_REMOVED_HASH; // No valid entry will ever hash to TABLE_REMOVED_HASH.
-            it->count --;
-            return true;
-        }
-
-        index += 1;
-        index &= (it->capacity - 1);
-    }
-
-    return false;
-}
-
-template <typename K, typename V>
-bool table_delete(Hash_Table<K, V> *it, typename Hash_Table<K, V>::Entry *entry)
+function b32 W32_ProcessIsRunning(String process_name)
 {
-    if (entry->hash >= TABLE_FIRST_VALID_HASH)
+    b32 result = false;
+    
+    PROCESSENTRY32 entry;
+    entry.dwSize = sizeof(PROCESSENTRY32);
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (Process32First(snapshot, &entry))
     {
-        it->count --;
-        entry->hash = TABLE_REMOVED_HASH;
-        return true;
-    }
-
-    return false;
-}
-
-template <typename K, typename V>
-V table_find(Hash_Table<K, V> *it, K key) {
-    V *result = table_find_pointer(it, key);
-
-    if (result) {
-        return *result;
-    }
-
-    return {};
-}
-
-template <typename K, typename V>
-bool table_contains(Hash_Table<K, V> *it, K key) {
-    return table_find_pointer(it, key) != NULL;
-}
-
-template <typename K, typename V>
-String to_string(Hash_Table<K, V> table) {
-    // @Speed @Memory: make this not copy so much memory
-    Array<String> list = {};
-    list.allocator = temp_allocator();
-
-    For_Table (table) {
-        array_push(&list, sprint("%S: %S", to_string(it->key), to_string(it->value)));
-    }
-
-    return sprint("{%S}", string_join(temp_allocator(), list, S(", ")));
-}
-
-//
-// Extended OS Functions
-//
-
-String os_read_entire_file(String path) {
-    return os_read_entire_file(temp_allocator(), path);
-}
-
-File_Info os_get_file_info(String path) {
-    return os_get_file_info(temp_arena(), path);
-}
-
-File_Lister os_file_list_begin(String path) {
-    return os_file_list_begin(temp_arena(), path);
-}
-
-void os_file_write(File *file, u64 offset, String str) {
-    os_file_write(file, offset, str.count, str.data);
-}
-
-void os_file_append(File *file, u64 size, void *data) {
-    os_file_write(file, file->offset, size, data);
-    file->offset += size;
-}
-
-void os_file_append(File *file, String str) {
-    os_file_write(file, file->offset, str.count, str.data);
-    file->offset += str.count;
-}
-
-void os_file_print(File *file, char *format, ...) {
-    va_list args;
-
-    va_start(args, format);
-    String result = string_printv(temp_arena(), format, args);
-    va_end(args);
-
-    os_file_append(file, result);
-}
-
-String os_get_executable_directory() {
-    String result = os_get_executable_path();
-    return path_dirname(result);
-}
-
-force_inline bool file_exists(File_Info info) { return info.name.count > 0; }
-
-force_inline bool file_is_directory(File_Info info) { return (info.flags & File_IsDirectory) != 0; }
-force_inline bool file_is_hidden(File_Info info)    { return (info.flags & File_IsHidden) != 0; }
-force_inline bool file_is_system(File_Info info)    { return (info.flags & File_IsSystem) != 0; }
-
-force_inline bool file_is_directory(File_Info *info) { return (info->flags & File_IsDirectory) != 0; }
-force_inline bool file_is_hidden(File_Info *info)    { return (info->flags & File_IsHidden) != 0; }
-force_inline bool file_is_system(File_Info *info)    { return (info->flags & File_IsSystem) != 0; }
-
-
-bool os_delete_entire_directory(String path) {
-    auto scratch = begin_scratch_memory();
-
-    bool success = true;
-
-    auto handle = os_file_list_begin(scratch.arena, path);
-
-    File_Info info = {};
-    while (os_file_list_next(&handle, &info)) {
-        auto file_path = path_join(path, info.name);
-
-        if (file_is_directory(info)) {
-            // @Speed: is the recursive ever a problem?
-            success |= os_delete_entire_directory(file_path);
-        } else {
-            success |= os_delete_file(file_path);
+        while (Process32Next(snapshot, &entry))
+        {
+            if (string_match(string_from_cstr(entry.szExeFile), process_name, MatchFlag_CaseInsensitive))
+            {
+                result = true;
+                break;
+            }
         }
     }
 
-    os_file_list_end(&handle);
-
-    success |= os_delete_directory(path);
-
-    end_scratch_memory(scratch);
-    return success;
+    CloseHandle(snapshot);
+    return result;
 }
 
-bool os_file_or_directory_exists(String path) {
-    return file_exists(os_get_file_info(path));
+//
+// System
+//
+
+function LONG win32_crash_handler(EXCEPTION_POINTERS *ExceptionInfo)
+{
+    print("[win32_crash_handler]");
+
+    #if DEBUG
+    os_attach_to_debugger(true);
+    #endif
+
+    return EXCEPTION_EXECUTE_HANDLER;
 }
 
-bool os_make_directory_recursive(String path) {
-    i64 index = string_index(path, S("/"));
+function bool os_init()
+{
+    // NOTE(nick): calling these functions initializes their state
+    GetScratch(0, 0);
+    os_time();
+    os_sleep(0);
 
-    while (true) {
-        index = string_index(path, S("/"), index + 1);
-        if (index < 0) break;
-
-        auto slice = string_slice(path, 0, index);
-
-        if (!os_file_or_directory_exists(slice)) {
-            bool success = os_make_directory(slice);
-            if (!success) return false;
-        }
+    static HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!stdout_handle) {
+        AttachConsole(ATTACH_PARENT_PROCESS);
     }
 
-    if (!os_file_or_directory_exists(path)) {
-        bool success = os_make_directory(path);
-        if (!success) return false;
-    }
+    win32_global_arena = arena_alloc(Gigabytes(1));
+
+    SetUnhandledExceptionFilter(win32_crash_handler);
 
     return true;
 }
 
-i64 os_count_directory(String path) {
-    i64 result = 0;
-    Arena *arena = temp_arena();
-
-    #if OS_WINDOWS
-    WCHAR *find_path = cast(WCHAR *)string16_from_string(arena, string_concat(path, S("\\*.*"))).data; // @Incomplete: use \\?\ prefix?
-
-    WIN32_FIND_DATAW data;
-    HANDLE handle = FindFirstFileExW(find_path, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
-
-    if (handle != INVALID_HANDLE_VALUE) {
-        do {
-            result += 1;
-        } while (FindNextFileW(handle, &data));
-    }
-
-    FindClose(handle);
-    #endif
-
-    #if OS_MACOS || OS_LINUX
-    char *cpath = string_to_cstr(arena, path);
-
-    DIR *handle = opendir(cpath);
-    if (handle != NULL)
-    {
-        struct dirent *data = readdir(handle);
-
-        while (data) {
-            result += 1;
-            data = readdir(handle);
-        }
-    }
-    #endif
-
-    // NOTE(nick): Ignore . and .. "directories"
-    return result - 2;
+function void os_exit(i32 code)
+{
+    ExitProcess(code);
 }
 
-Array<File_Info> os_scan_directory(Allocator allocator, Arena *string_memory, String path) {
-    i64 count = os_count_directory(path);
+function String os_get_system_path(Arena *arena, SystemPath path)
+{
+    M_Temp scratch = GetScratch(&arena, 1);
+    String result = {};
 
-    Array<File_Info> result = {};
-    if (count > 0)
+    switch (path)
     {
-        array_init_from_allocator(&result, allocator, count);
+        case SystemPath_Current:
+        {
+            DWORD length = GetCurrentDirectoryW(0, NULL);
+            if (length > 0)
+            {
+                u16 *buffer = PushArray(scratch.arena, u16, length);
+                DWORD length_without_null = GetCurrentDirectoryW(length, (WCHAR *)buffer);
+                if (length_without_null + 1 == length)
+                {
+                    result = string_from_string16(arena, Str16(buffer, length_without_null));
+                }
+            }
+        } break;
 
-        auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
+        case SystemPath_Binary:
+        {
+            local_persist String name = {0};
+            local_persist b32 first = true;
+            if (first)
+            {
+                first = false;
+                u64 size = Kilobytes(32);
+                u16 *buffer = PushArray(scratch.arena, u16, size);
 
-        File_Info info = {};
-        while (os_file_list_next(&handle, &info)) {
-            auto it = array_push(&result, info);
-            it->name = string_copy(string_memory, it->name);
+                DWORD length = GetModuleFileNameW(0, (WCHAR *)buffer, size);
+                if (length > 0)
+                {
+                    name = string_from_string16(arena, Str16(buffer, length));
+                    name = string_chop_last_slash(name);
+
+                    AcquireSRWLockExclusive(&win32_mutex);
+                    u8 *buffer8 = PushArrayZero(win32_global_arena, u8, name.count);
+                    ReleaseSRWLockExclusive(&win32_mutex);
+                    MemoryCopy(buffer8, name.data, name.count);
+                    name.data = buffer8;
+                }
+            }
+
+            result = name;
+        } break;
+
+        case SystemPath_AppData:
+        {
+            local_persist String name = {0};
+            local_persist b32 first = true;
+            if (first)
+            {
+                first = false;
+                u64 size = Kilobytes(32);
+                u16 *buffer = PushArray(scratch.arena, u16, size);
+                if (SUCCEEDED(SHGetFolderPathW(0, CSIDL_APPDATA, 0, 0, (WCHAR *)buffer)))
+                {
+                    name = string_from_string16(arena, string16_from_cstr(buffer));
+
+                    AcquireSRWLockExclusive(&win32_mutex);
+                    u8 *buffer8 = PushArrayZero(win32_global_arena, u8, name.count);
+                    ReleaseSRWLockExclusive(&win32_mutex);
+                    MemoryCopy(buffer8, name.data, name.count);
+                    name.data = buffer8;
+                }
+            }
+
+            result = name;
+        } break;
+    }
+
+    ReleaseScratch(scratch);
+
+    return result;
+}
+
+//
+// Timing
+//
+
+function f64 os_time()
+{
+    static u64 win32_ticks_per_second = 0;
+    static u64 win32_counter_offset = 0;
+
+    if (win32_ticks_per_second == 0)
+    {
+        LARGE_INTEGER perf_frequency = {};
+        if (QueryPerformanceFrequency(&perf_frequency)) {
+            win32_ticks_per_second = perf_frequency.QuadPart;
+        }
+        LARGE_INTEGER perf_counter = {};
+        if (QueryPerformanceCounter(&perf_counter)) {
+            win32_counter_offset = perf_counter.QuadPart;
         }
 
-        os_file_list_end(&handle);
+        assert(win32_ticks_per_second != 0);
+    }
+
+    f64 result = 0;
+
+    LARGE_INTEGER perf_counter;
+    if (QueryPerformanceCounter(&perf_counter)) {
+        perf_counter.QuadPart -= win32_counter_offset;
+        result = (f64)(perf_counter.QuadPart) / win32_ticks_per_second;
     }
 
     return result;
 }
 
-Array<File_Info> os_scan_directory(Allocator allocator, String path) {
-    i64 count = os_count_directory(path);
+function void os_sleep(f64 seconds)
+{
+    // @Incomplete: only do this if win32_sleep_is_granular
+    // Otherwise do some sort of busy wait thing
 
-    Array<File_Info> result = {};
-    if (count > 0)
+    static bool win32_sleep_is_granular = false;
+    static bool win32_did_init_sleep = false;
+
+    if (!win32_did_init_sleep)
     {
-        array_init_from_allocator(&result, allocator, count);
-
-        auto handle = os_file_list_begin(path); // @Memory @Cleanup: implicit temp arena
-
-        File_Info info = {};
-        while (os_file_list_next(&handle, &info)) {
-            auto it = array_push(&result, info);
-            it->name = string_alloc(allocator, it->name);
+        HMODULE libwinmm = LoadLibraryA("winmm.dll");
+        typedef UINT (WINAPI * timeBeginPeriod_t)(UINT);
+        timeBeginPeriod_t timeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(libwinmm, "timeBeginPeriod");
+        if (timeBeginPeriod) {
+            win32_sleep_is_granular = timeBeginPeriod(1) == 0 /* TIMERR_NOERROR */;
         }
 
-        os_file_list_end(&handle);
+        win32_did_init_sleep = true;
     }
 
-    return result;
+
+    LARGE_INTEGER ft;
+    ft.QuadPart = -(10 * (__int64)(seconds * 1000 * 1000));
+
+    HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
+    SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
+    WaitForSingleObject(timer, INFINITE);
+    CloseHandle(timer);
 }
 
-Array<File_Info> os_scan_directory(String path) {
-    return os_scan_directory(temp_allocator(), path);
+function void os_set_high_process_priority(bool enable) {
+    if (enable) {
+        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    } else {
+        SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+    }
 }
 
-Array<File_Info> os_scan_files_recursive(Allocator allocator, String path, i32 max_depth = 1024) {
-    Array<File_Info> results = {};
-    Array<String> stack = {};
+//
+// Memory
+//
 
-    results.allocator = allocator;
-    stack.allocator   = allocator; // @Memory: these can be freed after the function ends
+function u64 os_page_size() {
+    static bool win32_got_system_info = false;
+    static SYSTEM_INFO win32_system_info;
 
-    array_push(&stack, S(""));
+    if (!win32_got_system_info)
+    {
+        GetSystemInfo(&win32_system_info);
+        win32_got_system_info = true;
+    }
 
-    while (max_depth >= 0) {
-        max_depth -= 1;
+    return win32_system_info.dwPageSize;
+}
 
-        u32 n = stack.count;
+function void *os_reserve(u64 size) {
+    return VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE);
+}
 
-        for (u32 i = 0; i < n; i++) {
-            auto dir = stack[i];
-            auto infos = os_scan_directory(allocator, path_join(path, dir));
+function bool os_commit(void *ptr, u64 size) {
+    u64 page_snapped_size = size;
+    page_snapped_size += os_page_size() - 1;
+    page_snapped_size -= page_snapped_size % os_page_size();
+    return VirtualAlloc(ptr, page_snapped_size, MEM_COMMIT, PAGE_READWRITE) != NULL;
+}
 
-            For (infos) {
-                it.name = path_join(dir, it.name);
+function bool os_decommit(void *ptr, u64 size) {
+    return VirtualFree(ptr, size, MEM_DECOMMIT) != NULL;
+}
 
-                if (file_is_directory(it)) {
-                    array_push(&stack, it.name);
-                } else {
-                    array_push(&results, it);
+function bool os_release(void *ptr, u64 size) {
+    // According to the docs, the size should be 0 when using MEM_RELEASE
+    return VirtualFree(ptr, 0, MEM_RELEASE) != NULL;
+}
+
+function void *os_alloc(u64 size) {
+    // Memory allocated by this function is automatically initialized to zero.
+    return VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+}
+
+function void os_free(void *ptr) {
+    if (ptr) {
+        VirtualFree(ptr, 0, MEM_RELEASE);
+        ptr = 0;
+    }
+}
+
+//
+// Files
+//
+
+function String os_read_entire_file(Arena *arena, String path)
+{
+    String result = {};
+
+    M_Temp scratch = GetScratch(0, 0);
+    String16 path_w = string16_from_string(scratch.arena, path);
+    HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    ReleaseScratch(scratch);
+
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        LARGE_INTEGER file_size;
+        GetFileSizeEx(handle, &file_size);
+        u64 size = cast(u64)file_size.QuadPart;
+        if (size > 0)
+        {
+            u8 *data = cast(u8 *)arena_push(arena, size);
+            result.data  = data;
+            result.count = size;
+
+            u8 *ptr = data;
+            u8 *end = data + size;
+
+            for (;;)
+            {
+                u64 bytes_remaining = (u64)(end - ptr);
+                DWORD to_read = (DWORD)(ClampTop(bytes_remaining, U32_MAX));
+                DWORD bytes_read = 0;
+                if (!ReadFile(handle, ptr, to_read, &bytes_read, 0))
+                {
+                    break;
+                }
+
+                ptr += bytes_read;
+                if (ptr >= end)
+                {
+                    break;
                 }
             }
         }
 
-        if (n > 0) {
-            array_remove_ordered(&stack, 0, n);
-        }
+        CloseHandle(handle);
     }
 
-    return results;
+    return result;
 }
 
-Array<File_Info> os_scan_files_recursive(String path, i32 max_depth = 1024) {
-    return os_scan_files_recursive(temp_allocator(), path, max_depth);
-}
-
-bool os_copy_entire_file(String from, String to)
+function bool os_write_entire_file(String path, String contents)
 {
     bool result = false;
 
-    auto contents = os_read_entire_file(from);
-    if (contents.count)
+    M_Temp scratch = GetScratch(0, 0);
+    String16 path_w = string16_from_string(scratch.arena, path);
+    HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, 0, 0);
+    ReleaseScratch(scratch);
+
+    if (handle != INVALID_HANDLE_VALUE)
     {
-        result = os_write_entire_file(to, contents);
-
-        if (!result)
+        u8 *ptr = contents.data;
+        u8 *end = contents.data + contents.count;
+        for (;;)
         {
-            print("[file] Copy failed to write entire file: %.*s\n", LIT(to));
-        }
-    }
-    else
-    {
-        print("[file] Copy failed to read entire file: %.*s\n", LIT(from));
-    }
-    
-    return result;
-}
+            u64 bytes_remaining = (u64)(end - ptr);
+            DWORD to_write = (DWORD)(ClampTop(bytes_remaining, U32_MAX));
 
-//
-// Extended Strings
-//
+            DWORD bytes_written = 0;
+            if (!WriteFile(handle, ptr, to_write, &bytes_written, 0)) {
+                break;
+            }
 
-Array<String> string_split(Allocator allocator, String str, String split) {
-    Array<String> result = {};
-    result.allocator = allocator;
-
-    u8 *at = str.data;
-    u8 *word_first = at;
-    u8 *str_end = str.data + str.count;
-
-    for (; at < str_end; at += 1) {
-        if (*at == split.data[0])
-        {
-            if (string_starts_with(string_range(at, str_end), split)) {
-                array_push(&result, string_range(word_first, at));
-                at += split.count - 1;
-                word_first = at + 1;
-                continue;
+            ptr += bytes_written;
+            if (ptr >= end)
+            {
+                result = true;
+                break;
             }
         }
-    }
 
-    array_push(&result, string_range(word_first, str_end));
+        CloseHandle(handle);
+    }
 
     return result;
 }
 
-Array<String> string_split(String str, String split) {
-    return string_split(temp_allocator(), str, split);
-}
+function File_Info os_get_file_info(String path) {
+    File_Info info = {};
 
-String string_join(Allocator allocator, Array<String> list, String join) {
-    if (list.count <= 1)
+    M_Temp scratch = GetScratch(0, 0);
+    String16 str = string16_from_string(scratch.arena, path);
+
+    WIN32_FILE_ATTRIBUTE_DATA data = {};
+    if (GetFileAttributesExW(cast(WCHAR *)str.data, GetFileExInfoStandard, &data))
     {
-        return list.count == 0 ? S("") : list[0];
+        // @See https://docs.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-win32_file_attribute_data
+
+        info.name             = string_skip_last_slash(path);
+        info.size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
+        info.created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
+        info.updated_at       = win32_dense_time_from_file_time(&data.ftLastWriteTime);
+        info.last_accessed_at = win32_dense_time_from_file_time(&data.ftLastAccessTime);
+        info.flags            = win32_flags_from_attributes(data.dwFileAttributes);
+        info.access           = win32_access_from_attributes(data.dwFileAttributes);
     }
 
-    u64 size = join.count * (list.count - 1);
-    For (list) size += it.count;
+    ReleaseScratch(scratch);
 
-    u8 *data = cast(u8 *)allocator_alloc(allocator, size);
+    return info;
+}
 
-    bool is_mid = false;
-    u8 *at = data;
+function File os_file_open(String path, u32 mode_flags) {
+    File result = {};
 
-    Fori (list) {
-        auto it = list[index];
+    DWORD permissions = 0;
+    DWORD creation = 0;
 
-        if (is_mid) {
-            memory_copy(join.data, at, join.count);
-            at += join.count;
+    if (mode_flags & FileMode_Read) {
+        permissions |= GENERIC_READ;
+        creation = OPEN_EXISTING;
+    }
+
+    if (mode_flags & FileMode_Append) {
+        permissions |= GENERIC_WRITE;
+        creation = OPEN_ALWAYS;
+    }
+
+    if (mode_flags & FileMode_Write) {
+        permissions |= GENERIC_WRITE;
+        creation = CREATE_ALWAYS;
+    }
+
+    M_Temp scratch = GetScratch(0, 0);
+
+    String16 path_w = string16_from_string(scratch.arena, path);
+    HANDLE handle = CreateFileW(cast(WCHAR *)path_w.data, permissions, FILE_SHARE_READ, 0, creation, 0, 0);
+    result.handle = (void *)handle;
+
+    ReleaseScratch(scratch);
+
+    if (handle == INVALID_HANDLE_VALUE) {
+        win32_file_error(&result, "Failed to open file", path);
+    }
+
+    if ((mode_flags & FileMode_Append) && !(mode_flags & FileMode_Write)) {
+        LARGE_INTEGER file_size;
+        GetFileSizeEx(handle, &file_size);
+        u64 size = cast(u64)file_size.QuadPart;
+
+        result.offset = size;
+    }
+
+    return result;
+}
+
+function void os_file_read(File *file, u64 offset, u64 size, void *dest) {
+    if (file->has_errors) { return; }
+
+    HANDLE handle = (HANDLE)file->handle;
+
+    // :Win32_64BitFileIO
+    assert(size <= U32_MAX);
+    u32 size32 = cast(u32)size;
+
+    OVERLAPPED overlapped = {};
+    overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
+    overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
+
+    DWORD bytes_read;
+    if (ReadFile(handle, dest, size32, &bytes_read, &overlapped) && (size32 == bytes_read)) {
+        // Success!
+    } else {
+        win32_file_error(file, "Failed to read file");
+    }
+}
+
+function void os_file_write(File *file, u64 offset, u64 size, void *data) {
+    if (file->has_errors) { return; }
+
+    HANDLE handle = (HANDLE)file->handle;
+
+    // :Win32_64BitFileIO
+    assert(size <= U32_MAX);
+    u32 size32 = cast(u32)(size);
+
+    OVERLAPPED overlapped = {};
+    overlapped.Offset = (u32)((offset >> 0) & 0xFFFFFFFF);
+    overlapped.OffsetHigh = (u32)((offset >> 32) & 0xFFFFFFFF);
+
+    DWORD bytes_written;
+    if (WriteFile(handle, data, size32, &bytes_written, &overlapped) && (size32 == bytes_written)) {
+        // Success!
+    } else {
+        win32_file_error(file, "Failed to write file");
+    }
+}
+
+function void os_file_close(File *file) {
+    if (file->handle) {
+        HANDLE handle = (HANDLE)file->handle;
+        BOOL success = CloseHandle(handle);
+        file->handle = NULL;
+
+        if (!success) {
+            win32_file_error(file, "Failed to close file");
+        }
+    }
+}
+
+function bool os_file_rename(String from, String to) {
+    M_Temp scratch = GetScratch(0, 0);
+
+    String16 from16 = string16_from_string(scratch.arena, from);
+    String16 to16   = string16_from_string(scratch.arena, to);
+
+    BOOL result = MoveFileW((WCHAR *)from16.data, (WCHAR *)to16.data);
+    ReleaseScratch(scratch);
+    return result;
+}
+
+function bool os_delete_file(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    String16 str = string16_from_string(scratch.arena, path);
+    BOOL success = DeleteFileW(cast(WCHAR *)str.data);
+    ReleaseScratch(scratch);
+
+    return success;
+}
+
+function bool os_make_directory(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    String16 str = string16_from_string(scratch.arena, path);
+    BOOL success = CreateDirectoryW(cast(WCHAR *)str.data, NULL);
+    ReleaseScratch(scratch);
+
+    return success;
+}
+
+function bool os_delete_directory(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    String16 str = string16_from_string(scratch.arena, path);
+    BOOL success = RemoveDirectoryW(cast(WCHAR *)str.data);
+    ReleaseScratch(scratch);
+
+    return success;
+}
+
+//
+// File Lister
+//
+
+function File_Lister *os_file_list_begin(Arena *arena, String path) {
+    M_Temp scratch = GetScratch(&arena, 1);
+    String16 path16 = string16_from_string(scratch.arena, path);
+
+    Win32_File_Lister *it = PushStructZero(arena, Win32_File_Lister);
+    it->is_first_file = true;
+    it->handle        = 0;
+
+    it->handle = FindFirstFileW((WCHAR*)path16.data, &it->data);
+    ReleaseScratch(scratch);
+
+    return (File_Lister *)it;
+}
+
+function bool os_file_list_next(Arena *arena, File_Lister *it, File_Info *info) {
+    bool should_continue = true;
+
+    Win32_File_Lister *iter = (Win32_File_Lister *)it;
+
+    if (iter->is_first_file) {
+        iter->is_first_file = false;
+    } else {
+        should_continue = FindNextFileW(iter->handle, &iter->data);
+    }
+
+    if (iter->handle != INVALID_HANDLE_VALUE) {
+        String16 name16 = string16_from_cstr((u16 *)iter->data.cFileName);
+
+        WIN32_FIND_DATAW data = iter->data;
+
+        MemoryZeroStruct(info);
+        info->name             = string_from_string16(arena, name16);
+        info->size             = ((u64)data.nFileSizeHigh << (u64)32) | (u64)data.nFileSizeLow;
+        info->created_at       = win32_dense_time_from_file_time(&data.ftCreationTime);
+        info->updated_at       = win32_dense_time_from_file_time(&data.ftLastWriteTime);
+        info->last_accessed_at = win32_dense_time_from_file_time(&data.ftLastAccessTime);
+        info->flags            = win32_flags_from_attributes(data.dwFileAttributes);
+        info->access           = win32_access_from_attributes(data.dwFileAttributes);
+    } else {
+        should_continue = false;
+    }
+
+    return should_continue;
+}
+
+function void os_file_list_end(File_Lister *iter) {
+    Win32_File_Lister *it = (Win32_File_Lister *)iter;
+    if (it->handle) {
+        FindClose(it->handle);
+        it->handle = 0;
+    }
+}
+
+//
+// Clipboard
+//
+
+function String os_get_clipboard_text() {
+    if (!OpenClipboard(NULL)) {
+        print("[clipboard] Failed to open clipboard.");
+        return {};
+    }
+
+    HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+    if (!handle) {
+        print("[clipboard] Failed to convert clipboard to string.");
+        CloseClipboard();
+        return {};
+    }
+
+    WCHAR *buffer = (WCHAR *)GlobalLock(handle);
+    if (!buffer) {
+        print("[clipboard] Failed to lock global handle.");
+        CloseClipboard();
+        return {};
+    }
+
+    String16 str16 = string16_from_cstr((u16 *)buffer);
+    String result = string_from_string16(temp_arena(), str16);
+
+    GlobalUnlock(handle);
+    CloseClipboard();
+
+    return result;
+}
+
+bool os_set_clipboard_text(String str) {
+    M_Temp scratch = GetScratch(0, 0);
+
+    char *cstr = string_to_cstr(scratch.arena, str);
+    int count = MultiByteToWideChar(CP_UTF8, 0, cstr, -1, NULL, 0);
+
+    if (!count) {
+        ReleaseScratch(scratch);
+        return false;
+    }
+
+    HANDLE handle = GlobalAlloc(GMEM_MOVEABLE, count * sizeof(WCHAR));
+    if (!handle) {
+        print("[clipboard] Failed to allocate global handle for clipboard.");
+        ReleaseScratch(scratch);
+        return false;
+    }
+
+    WCHAR *buffer = (WCHAR *)GlobalLock(handle);
+    if (!buffer) {
+        print("[clipboard] Failed to lock global handle.");
+        GlobalFree(handle);
+        ReleaseScratch(scratch);
+        return false;
+    }
+
+    MultiByteToWideChar(CP_UTF8, 0, cstr, -1, buffer, count);
+    GlobalUnlock(handle);
+
+    if (!OpenClipboard(NULL)) {
+        print("[clipboard] Failed to open clipboard.");
+        GlobalFree(handle);
+        ReleaseScratch(scratch);
+        return false;
+    }
+
+    EmptyClipboard();
+    SetClipboardData(CF_UNICODETEXT, handle);
+    CloseClipboard();
+
+    GlobalFree(handle);
+    ReleaseScratch(scratch);
+
+    return true;
+}
+
+//
+// Dates
+//
+
+function Date_Time os_get_current_time_in_utc() {
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    return win32_date_time_from_system_time(&st);
+}
+
+function Date_Time os_get_local_time() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    return win32_date_time_from_system_time(&st);
+}
+
+//
+// Library
+//
+
+function OS_Library os_library_load(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    String16 path16 = string16_from_string(scratch.arena, path);
+
+    OS_Library result = {};
+    result.handle     = LoadLibraryW((WCHAR *)path16.data);
+
+    ReleaseScratch(scratch);
+    return result;
+}
+
+function void os_library_unload(OS_Library lib) {
+    if (lib.handle) {
+        FreeLibrary((HMODULE)lib.handle);
+        lib.handle = 0;
+    }
+}
+
+function void *os_library_get_proc(OS_Library lib, char *proc_name) {
+    return (void *)GetProcAddress((HMODULE)lib.handle, proc_name);
+}
+
+//
+// Shell
+//
+
+typedef HINSTANCE (WINAPI * ShellExecuteW_t)(
+    HWND hwnd, LPCWSTR lpOperation, LPCWSTR lpFile, LPCWSTR lpParameters, LPCWSTR lpDirectory, INT nShowCmd);
+
+static ShellExecuteW_t _ShellExecuteW = NULL;
+
+function bool os_shell_open(String path) {
+    if (_ShellExecuteW == NULL)
+    {
+        HMODULE libshell32 = LoadLibraryA("shell32.dll");
+        _ShellExecuteW = (ShellExecuteW_t) GetProcAddress(libshell32, "ShellExecuteW");
+
+        if (!_ShellExecuteW)
+        {
+            return false;
+        }
+    }
+
+    M_Temp scratch = GetScratch(0, 0);
+    String16 path_w = string16_from_string(scratch.arena, path);
+    // If the function succeeds, it returns a value greater than 32.
+    bool success = (INT_PTR)_ShellExecuteW(0, 0, (WCHAR *)path_w.data, 0, 0 , SW_SHOW) > 32;
+    ReleaseScratch(scratch);
+
+    return success;
+}
+
+function bool os_shell_execute(String cmd, String arguments, bool admin) {
+    if (_ShellExecuteW == NULL)
+    {
+        HMODULE libshell32 = LoadLibraryA("shell32.dll");
+        _ShellExecuteW = (ShellExecuteW_t) GetProcAddress(libshell32, "ShellExecuteW");
+
+        if (!_ShellExecuteW)
+        {
+            return false;
+        }
+    }
+
+    M_Temp scratch = GetScratch(0, 0);
+    String16 cmd_w = string16_from_string(scratch.arena, cmd);
+    String16 arguments_w = string16_from_string(scratch.arena, arguments);
+
+    WCHAR *verb = admin ? L"runas" : L"open";
+
+    // If the function succeeds, it returns a value greater than 32.
+    bool success = (INT_PTR)_ShellExecuteW(0, verb, (WCHAR *)cmd_w.data, (WCHAR *)arguments_w.data, 0, SW_HIDE) > 32;
+    ReleaseScratch(scratch);
+
+    return success;
+}
+
+//
+// Misc
+//
+
+function void os_get_entropy(void *data, u64 size)
+{
+    static BOOL (*RtlGenRandom)(VOID *RandomBuffer, ULONG RandomBufferLength);
+    if (RtlGenRandom == NULL)
+    {
+        HMODULE advapi_dll = LoadLibraryA("advapi32.dll");
+        if (advapi_dll)
+        {
+            *(FARPROC *)&RtlGenRandom = GetProcAddress(advapi_dll, "SystemFunction036");
         }
 
-        memory_copy(it.data, at, it.count);
-        at += it.count;
-        is_mid = index + 1 < list.count;
+        if (!RtlGenRandom)
+        {
+            return;
+        }
     }
 
-    return make_string(data, size);
+    RtlGenRandom(data, size);
 }
 
-String string_join(Array<String> list, String join) {
-    return string_join(temp_allocator(), list, join);
+function f64 os_caret_blink_time()
+{
+    f32 seconds = GetCaretBlinkTime() / 1000.f;
+    return seconds;
 }
 
 //
-// Threading Primitives
+// Debug
 //
 
-struct Semaphore {
-    void *handle;
-};
+function void os_open_file_in_debugger(String path, int line)
+{
+    if (W32_ProcessIsRunning(S("remedybg.exe")))
+    {
+        STARTUPINFO startup_info = {0};
+        PROCESS_INFORMATION process_info = {0};
+        startup_info.cb = sizeof(startup_info);
+        char cmd_line[4096] = {0};
+        snprintf(cmd_line, sizeof(cmd_line), "remedybg.exe open-file %.*s %i", LIT(path), line);
+        CreateProcessA(0, cmd_line, 0, 0, 0, DETACHED_PROCESS, 0, 0, &startup_info, &process_info);
+    }
+}
 
-Semaphore semaphore_create(u32 max_count);
-void semaphore_signal(Semaphore *sem);
-void semaphore_wait_for(Semaphore *sem, bool infinite);
-void semaphore_destroy(Semaphore *sem);
+function void os_attach_to_debugger(b32 pause)
+{
+    if (W32_ProcessIsRunning(S("remedybg.exe")))
+    {
+        STARTUPINFO startup_info = {0};
+        PROCESS_INFORMATION process_info = {0};
+        startup_info.cb = sizeof(startup_info);
 
-struct Mutex {
-    void *handle;
-};
+        u32 pid = GetCurrentProcessId();
+        String break_str = {0};
+        if (!pause) break_str = S("--continue");
 
-Mutex mutex_create(u32 spin_count = 0);
-void  aquire_lock(Mutex *mutex);
-bool  try_aquire_lock(Mutex *mutex);
-void  release_lock(Mutex *mutex);
-void  mutex_destroy(Mutex *mutex);
+        char cmd_line[4096] = {0};
+        snprintf(cmd_line, sizeof(cmd_line), "remedybg.exe attach-to-process-by-id %d %.*s", pid, LIT(break_str));
+        CreateProcessA(0, cmd_line, 0, 0, 0, DETACHED_PROCESS, 0, 0, &startup_info, &process_info);
+    }
+}
 
-#define WORKER_PROC(name) void name(void *data)
-typedef WORKER_PROC(Worker_Proc);
+//
+// Threads
+//
 
-struct Work_Entry {
-    Worker_Proc *callback;
+struct Win32_Thread_Params {
+    Thread_Proc *proc;
     void *data;
 };
 
-struct Work_Queue {
-    u32 volatile completion_goal;
-    u32 volatile completion_count;
+//
+// Basic
+//
 
-    u32 volatile next_entry_to_write;
-    u32 volatile next_entry_to_read;
-    Semaphore semaphore;
+function u32 thread_get_id() {
+    u8 *ThreadLocalStorage = (u8 *)__readgsqword(0x30);
+    u32 result = *(u32 *)(ThreadLocalStorage + 0x48);
+    return result;
+}
 
-    Work_Entry entries[256];
-};
+function u32 atomic_compare_exchange_u32(u32 volatile *value, u32 New, u32 Expected) {
+    u32 result = _InterlockedCompareExchange((long volatile *)value, New, Expected);
+    return (result);
+}
 
-struct Worker_Params {
-    Work_Queue *queue;
-};
+function u64 atomic_exchange_u64(u64 volatile *value, u64 New) {
+    u64 result = _InterlockedExchange64((__int64 volatile *)value, New);
+    return (result);
+}
 
-void work_queue_create(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params);
-void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, void *data);
-void work_queue_complete_all_work(Work_Queue *queue);
+function u64 atomic_add_u64(u64 volatile *value, u64 Addend) {
+    // NOTE(casey): Returns the original value _prior_ to adding
+    u64 result = _InterlockedExchangeAdd64((__int64 volatile *)value, Addend);
+    return (result);
+}
 
-#if OS_WINDOWS
+//
+// Threads
+//
+
+DWORD WINAPI win32_thread_proc(LPVOID lpParameter) {
+    Win32_Thread_Params *params = (Win32_Thread_Params *)lpParameter;
+
+    // NOTE(nick): initialize scratch memory
+    GetScratch(0, 0);
+
+    assert(params->proc);
+    u32 result = params->proc(params->data);
+
+    os_free(params);
+
+    return result;
+}
+
+function Thread thread_create(Thread_Proc *proc, void *data, u64 copy_size) {
+    Win32_Thread_Params *params = (Win32_Thread_Params *)os_alloc(sizeof(Win32_Thread_Params) + copy_size);
+    params->proc = proc;
+    params->data = data;
+    if (copy_size)
+    {
+        params->data = params + sizeof(Win32_Thread_Params);
+        MemoryCopy(params->data, data, copy_size);
+    }
+
+    DWORD thread_id;
+    HANDLE handle = CreateThread(0, 0, win32_thread_proc, params, 0, &thread_id);
+
+    Thread result = {};
+    result.handle = handle;
+    result.id = thread_id;
+    return result;
+}
+
+function void thread_pause(Thread thread) {
+    HANDLE handle = (HANDLE)thread.handle;
+    SuspendThread(handle);
+}
+
+function void thread_resume(Thread thread) {
+    HANDLE handle = (HANDLE)thread.handle;
+    ResumeThread(handle);
+}
+
+function void thread_detach(Thread thread) {
+    HANDLE handle = (HANDLE)thread.handle;
+    CloseHandle(handle);
+}
+
+function u32 thread_await(Thread thread) {
+    HANDLE handle = (HANDLE)thread.handle;
+    WaitForSingleObject(handle, INFINITE);
+    DWORD result;
+    GetExitCodeThread(handle, &result);
+    return result;
+}
+
+//
+// Data Structures
+//
 
 Semaphore semaphore_create(u32 max_count) {
     Semaphore result = {};
@@ -5410,6 +3896,7 @@ void semaphore_destroy(Semaphore *sem) {
 Mutex mutex_create(u32 spin_count) {
     Mutex result = {};
 
+    // TODO(nick): this is only 40 bytes, should we just bake this into the Mutex itself?
     result.handle = os_alloc(sizeof(CRITICAL_SECTION));
     assert(result.handle);
 
@@ -5422,40 +3909,270 @@ Mutex mutex_create(u32 spin_count) {
     return result;
 }
 
-void aquire_lock(Mutex *mutex) {
+void mutex_aquire_lock(Mutex *mutex) {
     EnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
 }
 
-bool try_aquire_lock(Mutex *mutex) {
+bool mutex_try_aquire_lock(Mutex *mutex) {
     return TryEnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle) != 0;
 }
 
-void release_lock(Mutex *mutex) {
+void mutex_release_lock(Mutex *mutex) {
     LeaveCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
 }
 
 void mutex_destroy(Mutex *mutex) {
-    // @Robustness: track if it's been released before deleting?
-    DeleteCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
-    os_free(mutex->handle);
-    mutex->handle = 0;
+    if (mutex->handle)
+    {
+        DeleteCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
+        os_free(mutex->handle);
+        mutex->handle = 0;
+    }
 }
 
-#endif // OS_WINDOWS
+#elif OS_MACOS
+#include <mach/clock.h>
+#include <mach/mach_time.h>
+#include <mach/mach_host.h>
+#include <mach/mach_port.h>
+#include <mach-o/dyld.h>
 
-#if OS_MACOS
+#include <time.h>
+#include <unistd.h>
 
-#undef internal
+#include <pthread.h>
+#include <stdlib.h>
+
+#define PATH_MAX 2048
+
+static pthread_key_t macos_thread_local_key;
+
+//
+// System
+//
+
+function bool os_init() {
+    // NOTE(nick): calling these functions initializes their state
+    GetScratch(0, 0);
+    os_time();
+
+    pthread_key_create(&macos_thread_local_key, NULL);
+
+    return true;
+}
+
+function void os_exit(i32 code)
+{
+    exit(code);
+}
+
+function String os_get_system_path(Arena *arena, SystemPath path)
+{
+    String result = {};
+
+    switch (path)
+    {
+        case SystemPath_Current:
+        {
+            char *buffer = (char *)arena_push(arena, PATH_MAX);
+            getcwd(buffer, PATH_MAX);
+
+            result = string_from_cstr(buffer);
+            i64 unused_size = PATH_MAX - result.count;
+            arena_pop(arena, unused_size);
+        } break;
+
+        case SystemPath_Binary:
+        {
+            u32 length = 0;
+            _NSGetExecutablePath(0, &length);
+
+            Arena *arena = temp_arena();
+            char *buffer = (char *)arena_push(arena, length);
+
+            if (_NSGetExecutablePath(buffer, &length) >= 0)
+            {
+                u64 alloc_size = Max(length, PATH_MAX);
+
+                char *normalized = (char *)arena_push(arena, alloc_size);
+                if (realpath(buffer, normalized) != NULL)
+                {
+                    result = Str8(normalized, length);
+                    i64 unused_size = alloc_size - result.count;
+                    arena_pop(arena, unused_size);
+                }
+                else
+                {
+                    result = Str8(buffer, length);
+                }
+
+                result = string_chop_last_slash(result);
+            }
+        } break;
+
+        case SystemPath_AppData:
+        {
+            char *home_str = getenv("HOME");
+            String home = string_from_cstr(home_str);
+            result = string_concat2(arena, home, S("/Library/Application Support/"));
+        } break;
+    }
+
+    return result;
+}
+
+//
+// Timing
+//
+
+function f64 os_time() {
+    static f64 macos_perf_frequency = 0;
+    static f64 macos_perf_counter = 0;
+
+    if (macos_perf_frequency == 0)
+    {
+        mach_timebase_info_data_t rate_nsec;
+        mach_timebase_info(&rate_nsec);
+
+        macos_perf_frequency = 1000000000LL * rate_nsec.numer / rate_nsec.denom;
+        macos_perf_counter = mach_absolute_time();
+    }
+
+    f64 now = mach_absolute_time();
+    return (now - macos_perf_counter) / macos_perf_frequency;
+}
+
+function void os_sleep(f64 seconds) {
+    u32 ms = (u32)(seconds * 1000);
+    struct timespec req = {(time_t)ms / 1000, (long)((ms % 1000) * 1000000)};
+    struct timespec rem = {0, 0};
+    nanosleep(&req, &rem);
+}
+
+//
+// Clipboard
+//
+
+#include <objc/objc.h>
+#include <objc/runtime.h>
+#include <objc/message.h>
+#include <objc/NSObjCRuntime.h>
+
+struct NSString;
+struct NSURL;
+
+typedef NSString * NSPasteboardType;
+import NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
+
+#define objc_msgSend_id ((id (*)(id, SEL))objc_msgSend)
+#define objc_method(ReturnType, ...) ((ReturnType (*)(__VA_ARGS__))objc_msgSend)
+
+
+function String os_get_clipboard_text()
+{
+    // NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    id pasteboard = objc_msgSend_id((id)objc_getClass("NSPasteboard"), sel_registerName("generalPasteboard"));
+    // NSString *string = [pasteboard stringForType:NSPasteboardTypeString];
+    id string = objc_method(id, id, SEL, id)(pasteboard, sel_registerName("stringForType:"), (id)NSPasteboardTypeString);
+    // char *text = [string UTF8String];
+    char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
+
+    auto result = string_copy(temp_arena(), string_from_cstr(text));
+    return result;
+}
+
+function bool os_set_clipboard_text(String text)
+{
+    M_Temp scratch = GetScratch(0, 0);
+    char *str = string_to_cstr(scratch.arena, text);
+
+    // [NSString stringWithUTF8String: str];
+    id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
+    // NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    id pasteboard = objc_msgSend_id((id)objc_getClass("NSPasteboard"), sel_registerName("generalPasteboard"));
+    // [pasteboard clearContents];
+    objc_msgSend(pasteboard, sel_registerName("clearContents"));
+    // [pasteboard setString:str forType:NSPasteboardTypeString];
+    BOOL result = objc_method(BOOL, id, SEL, id, id)(pasteboard, sel_registerName("setString:forType:"), string, (id)NSPasteboardTypeString);
+
+    ReleaseScratch(scratch);
+    return result == YES;
+}
+
+//
+// Library
+//
+
+#include <dlfcn.h>
+
+function OS_Library os_library_load(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+
+    OS_Library result = {};
+    // TODO(bill): Should this be RTLD_LOCAL?
+    result.handle = dlopen(string_to_cstr(scratch.arena, path), RTLD_LAZY | RTLD_GLOBAL);
+
+    ReleaseScratch(scratch);
+    return result;
+}
+
+function void os_library_unload(OS_Library lib) {
+    if (lib.handle) {
+        dlclose(lib.handle);
+        lib.handle = 0;
+    }
+}
+
+function void *os_library_get_proc(OS_Library lib, char *proc_name) {
+    return (void *)dlsym(lib.handle, proc_name);
+}
+
+//
+// Shell
+//
+
+function bool os_shell_open(String path)
+{
+    M_Temp scratch = GetScratch(0, 0);
+    // [NSWorkspace sharedWorkspace]
+    id workspace = objc_method(id, id, SEL)(cast(id)objc_getClass("NSWorkspace"), sel_registerName("sharedWorkspace"));
+
+    /*
+    NSString* folder = @"/path/to/folder"  
+    [[NSWorkspace sharedWorkspace] openFile:folder withApplication:@"Finder"];
+
+    NSArray *fileURLs = [NSArray arrayWithObjects:fileURL1, nil];
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:fileURLs];
+
+    [[NSWorkspace sharedWorkspace] selectFile:fullPathString inFileViewerRootedAtPath:pathString];
+    */
+
+    char *str = string_to_cstr(scratch.arena, path);
+
+    // [NSString stringWithUTF8String: str];
+    id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
+    // NSURL *fileURL = [NSURL fileURLWithPath:@"/path/to/user/"];
+    id fileURL = objc_method(id, id, SEL, id)(cast(id)objc_getClass("NSURL"), sel_registerName("fileURLWithPath:"), string);
+
+    BOOL result = objc_method(BOOL, id, SEL, id)(workspace, sel_registerName("openURL:"), fileURL);
+
+    ReleaseScratch(scratch);
+    return result == YES;
+}
+
+//
+// Threading Primitives
+//
+
 #include <mach/mach.h>
 #include <mach/semaphore.h>
 #include <mach/task.h>
 #define SYNC_POLICY_PREPOST 0x4
-#define internal static
 
 // Make sure this fits into the handle pointer!
-StaticAssert(sizeof(semaphore_t) <= sizeof(void *));
+StaticAssert(sizeof(semaphore_t) <= sizeof(void *), "check_semaphore_size");
 
-Semaphore semaphore_create(u32 max_count) {
+function Semaphore semaphore_create(u32 max_count) {
     Semaphore result = {};
 
     mach_port_t self = mach_task_self();
@@ -5469,13 +4186,13 @@ Semaphore semaphore_create(u32 max_count) {
     return result;
 }
 
-void semaphore_signal(Semaphore *sem) {
+function void semaphore_signal(Semaphore *sem) {
     auto handle = cast(semaphore_t *)sem->handle;
     kern_return_t ret = semaphore_signal(*handle);
     assert(ret == KERN_SUCCESS);
 }
 
-void semaphore_wait_for(Semaphore *sem, bool infinite) {
+function void semaphore_wait_for(Semaphore *sem, bool infinite) {
     kern_return_t ret;
     auto handle = cast(semaphore_t *)sem->handle;
 
@@ -5489,7 +4206,7 @@ void semaphore_wait_for(Semaphore *sem, bool infinite) {
     assert(ret == KERN_SUCCESS);
 }
 
-void semaphore_destroy(Semaphore *sem) {
+function void semaphore_destroy(Semaphore *sem) {
     mach_port_t self = mach_task_self();
     auto handle = cast(semaphore_t *)sem->handle;
     semaphore_destroy(self, *handle);
@@ -5497,7 +4214,7 @@ void semaphore_destroy(Semaphore *sem) {
     handle = 0;
 }
 
-Mutex mutex_create(u32 spin_count) {
+function Mutex mutex_create(u32 spin_count) {
     Mutex result = {};
 
     result.handle = os_alloc(sizeof(pthread_mutex_t));
@@ -5508,107 +4225,1103 @@ Mutex mutex_create(u32 spin_count) {
     return result;
 }
 
-void aquire_lock(Mutex *mutex) {
+function void mutex_aquire_lock(Mutex *mutex) {
     pthread_mutex_lock(cast(pthread_mutex_t *)mutex->handle);
 }
 
-bool try_aquire_lock(Mutex *mutex) {
+function bool mutex_try_aquire_lock(Mutex *mutex) {
     return pthread_mutex_trylock(cast(pthread_mutex_t *)mutex->handle) != 0;
 }
 
-void release_lock(Mutex *mutex) {
+function void mutex_release_lock(Mutex *mutex) {
     pthread_mutex_unlock(cast(pthread_mutex_t *)mutex->handle);
 }
 
-void mutex_destroy(Mutex *mutex) {
+function void mutex_destroy(Mutex *mutex) {
     // @Robustness: track if it's been released before deleting?
     pthread_mutex_destroy(cast(pthread_mutex_t *)mutex->handle);
     os_free(mutex->handle);
     mutex->handle = 0;
 }
 
-#endif // OS_MACOS
+#include <stdlib.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <stdio.h>
 
+#include <sys/mman.h>
 
-function bool do_next_work_queue_entry(Work_Queue *queue) {
-    bool we_should_sleep = false;
+struct Unix_File_Lister {
+    char *find_path;
+    DIR *handle;
+};
 
-    u32 original_next_entry_to_read = queue->next_entry_to_read;
-    u32 new_next_entry_to_read = (original_next_entry_to_read + 1) % count_of(queue->entries);
+//
+// Timing
+//
 
-    if (original_next_entry_to_read != queue->next_entry_to_write) {
-        u32 index = atomic_compare_exchange_u32(&queue->next_entry_to_read, new_next_entry_to_read, original_next_entry_to_read);
-
-        if (index == original_next_entry_to_read) {
-            Work_Entry entry = queue->entries[index];
-            assert(entry.callback);
-            entry.callback(entry.data);
-            atomic_add_u64((u64 volatile *)&queue->completion_count, 1);
-        }
+function void os_set_high_process_priority(bool enable) {
+    if (enable) {
+        setpriority(PRIO_PROCESS, getpid(), -20);
     } else {
-        we_should_sleep = true;
+        setpriority(PRIO_PROCESS, getpid(), 0);
     }
-
-    return we_should_sleep;
 }
 
-function u32 worker_thread_proc(void *data) {
-    Worker_Params *params = (Worker_Params *)data;
-    Work_Queue *queue = params->queue;
+//
+// Memory
+//
 
-    for (;;) {
-        bool we_should_sleep = do_next_work_queue_entry(queue);
+function u64 os_page_size() {
+    int result = sysconf(_SC_PAGE_SIZE);
+    return result;
+}
 
-        if (we_should_sleep) {
-            semaphore_wait_for(&queue->semaphore, true);
+function void *os_reserve(u64 size) {
+    void *result = 0;
+
+    result = mmap(NULL, size, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    //msync(result, size, MS_SYNC | MS_INVALIDATE);
+
+    return result;
+}
+
+function bool os_commit(void *ptr, u64 size) {
+    u64 page_size = os_page_size();
+
+    i64 p = (i64)ptr;
+    i64 p_aligned = AlignDownPow2(p, page_size);
+
+    if (p != p_aligned) {
+        i64 delta = p - p_aligned;
+        ptr = (void *)((u8 *)ptr - delta);
+        size += delta;
+    }
+
+    size = AlignUpPow2(size, page_size);
+
+    // NOTE(nick): ptr must be aligned to a page boundary.
+    int result = mprotect(ptr, size, PROT_READ | PROT_WRITE);
+    madvise(ptr, size, MADV_WILLNEED);
+    return result == 0;
+}
+
+function bool os_decommit(void *ptr, u64 size) {
+    u64 page_size = os_page_size();
+
+    i64 p = (i64)ptr;
+    i64 p_aligned = AlignDownPow2(p, page_size);
+
+    if (p != p_aligned) {
+        i64 delta = p - p_aligned;
+        ptr = (void *)((u8 *)ptr - delta);
+        size += delta;
+    }
+
+    size = AlignUpPow2(size, page_size);
+
+    // NOTE(nick): ptr must be aligned to a page boundary.
+    int result = mprotect(ptr, size, PROT_NONE);
+    //madvise(ptr, size, MADV_DONTNEED); // is this too harsh?
+    return result == 0;
+}
+
+function bool os_release(void *ptr, u64 size) {
+    return munmap(ptr, size) == 0;
+}
+
+function void *os_alloc(u64 size) {
+    return calloc(size, 1);
+}
+
+function void os_free(void *memory) {
+    if (memory) {
+        free(memory);
+        memory = 0;
+    }
+}
+
+//
+// File
+//
+
+function bool os_file_rename(String from, String to) {
+    M_Temp scratch = GetScratch(0, 0);
+
+    char *from_cstr = string_to_cstr(scratch.arena, from);
+    char *to_cstr   = string_to_cstr(scratch.arena, to);
+
+    bool result = rename(from_cstr, to_cstr) == 0;
+    ReleaseScratch(scratch);
+    return result;
+}
+
+u64 unix_date_from_time(time_t time) {
+    // @Incomplete
+    return cast(u64)time;
+}
+
+u32 unix_flags_from_mode(mode_t mode, String name) {
+    u32 result = 0;
+
+    if (S_ISDIR(mode)) {
+        result |= File_IsDirectory;
+    }
+
+    if (string_starts_with(name, S("."))) {
+        result |= File_IsHidden;
+    }
+
+    // @Incomplete
+    #if 0
+    if (attributes & FILE_ATTRIBUTE_SYSTEM) {
+        result |= File_IsSystem;
+    }
+    #endif
+
+    return result;
+}
+
+u32 unix_access_from_mode(mode_t mode) {
+    u32 result = FileAccess_Read | FileAccess_Execute;
+
+    // @Incomplete
+    #if 0
+    if (!(attributes & FILE_ATTRIBUTE_READONLY)) {
+        result |= FileAccess_Write;
+    }
+    #endif
+
+    return result;
+}
+
+function File_Info os_get_file_info(Arena *arena, String path) {
+    M_Temp scratch = GetScratch(&arena, 1);
+
+    char *cpath = string_to_cstr(scratch.arena, path);
+
+    struct stat64 stat_info;
+    bool file_exists = stat64(cpath, &stat_info) == 0;
+
+    File_Info info = {};
+
+    if (file_exists)
+    {
+        info.name             = path_filename(path);
+        info.last_accessed_at = unix_date_from_time(stat_info.st_atime);
+        info.updated_at       = unix_date_from_time(stat_info.st_mtime);
+         // NOTE(nick): not really created time, but UNIX doesn't have this concept
+        info.created_at       = unix_date_from_time(stat_info.st_ctime);
+        info.flags            = unix_flags_from_mode(stat_info.st_mode, info.name);
+        info.access           = unix_access_from_mode(stat_info.st_mode);
+    }
+
+    return info;
+}
+
+void unix_file_error(File *file, char *message, String file_name = {}) {
+#if DEBUG
+    if (file_name.data) {
+        print("[file] %s: %.*s\n", message, LIT(file_name));
+    } else {
+        print("[file] %s\n", message);
+    }
+#endif
+
+    file->has_errors = true;
+}
+
+function File os_file_open(String path, File_Mode mode_flags) {
+    File result = {};
+
+    char mode[4] = {};
+    if ((mode_flags & FileMode_Read) && (mode_flags & FileMode_Write)) {
+        mode[0] = 'r';
+        mode[1] = 'b';
+        mode[2] = '+';
+    } else if (mode_flags & FileMode_Append) {
+        if (mode_flags & FileMode_Write) {
+            mode[0] = 'w';
+            mode[1] = 'b';
+            mode[2] = '+';
+        } else {
+            mode[0] = 'a';
+            mode[1] = 'b';
+            if (mode_flags & FileMode_Read) {
+                mode[2] = '+';
+            }
+        }
+    } else if (mode_flags & FileMode_Write) {
+        mode[0] = 'w';
+        mode[1] = 'b';
+    } else {
+        mode[0] = 'r';
+        mode[1] = 'b';
+    }
+
+    M_Temp scratch = GetScratch(0, 0);
+
+    FILE *f = fopen(string_to_cstr(scratch.arena, path), mode);
+    result.handle = f;
+
+    ReleaseScratch(scratch);
+
+    if (!f) {
+        unix_file_error(&result, "Failed to open file", path);
+        return result;
+    }
+
+    if ((mode_flags & FileMode_Append) && !(mode_flags & FileMode_Write)) {
+        fseek(f, 0, SEEK_END);
+        i32 size = ftell(f);
+        if (size != -1) {
+            result.offset = size;
+        }
+    }
+
+    return result;
+}
+
+function void os_file_read(File *file, u64 offset, u64 size, void *dest) {
+    if (file->has_errors) { return; }
+
+    FILE *f = (FILE *)file->handle;
+
+    if (offset != ftell(f)) {
+        int seek_result = fseek(f, offset, SEEK_SET);
+        if (seek_result != 0) { unix_file_error(file, "Failed to seek file"); }
+    }
+
+    size_t bytes_read = fread(dest, sizeof(char), size, f);
+    if (bytes_read != sizeof(char) * size) {
+        unix_file_error(file, "Failed to read file");
+    }
+}
+
+function void os_file_write(File *file, u64 offset, u64 size, void *data) {
+    if (file->has_errors) { return; }
+
+    FILE *f = (FILE *)file->handle;
+
+    if (offset != ftell(f)) {
+        int seek_result = fseek(f, offset, SEEK_SET);
+        if (seek_result != 0) { unix_file_error(file, "Failed to seek file"); }
+    }
+
+    size_t bytes_written = fwrite(data, sizeof(char), size, f);
+    if (bytes_written != sizeof(char) * size) {
+        unix_file_error(file, "Failed to write to file");
+    }
+}
+
+function void os_file_close(File *file) {
+    if (file->handle) {
+        FILE *f = (FILE *)file->handle;
+        file->handle = NULL;
+
+        int close_result = fclose(f);
+        if (close_result != 0) { unix_file_error(file, "Failed to close file"); }
+    }
+}
+
+function String os_read_entire_file(Arena *arena, String path) {
+    File file = os_file_open(path, FileMode_Read);
+
+    u64 size = 0;
+    {
+        FILE *f = (FILE *)file.handle;
+        u64 prev_position = ftell(f);
+        fseek(f, 0, SEEK_END);
+        u64 size = ftell(f);
+        fseek(f, prev_position, SEEK_SET);
+    }
+
+    String result = {};
+    result.data = cast(u8 *)arena_push(arena, size);
+    result.count = size;
+
+    os_file_read(&file, 0, size, result.data);
+    os_file_close(&file);
+
+    return result;
+}
+
+function bool os_write_entire_file(String path, String contents) {
+    File file = os_file_open(path, FileMode_Write);
+    if (!file.has_errors)
+    {
+        os_file_write(&file, 0, contents.count, contents.data);
+    }
+    os_file_close(&file);
+    return !file.has_errors;
+}
+
+//
+// File Lister
+//
+
+function File_Lister *os_file_list_begin(Arena *arena, String path) {
+    M_Temp scratch = GetScratch(&arena, 1);
+
+    char *cpath = string_to_cstr(scratch.arena, path);
+    DIR *handle = opendir(cpath);
+
+    Unix_File_Lister *it = PushStructZero(arena, Unix_File_Lister);
+    it->find_path = cpath;
+    it->handle    = handle;
+
+    ReleaseScratch(scratch);
+
+    return (File_Lister *)it;
+}
+
+function bool os_file_list_next(Arena *arena, File_Lister *iter, File_Info *info) {
+    Unix_File_Lister *it = (Unix_File_Lister *)iter;
+
+    if (!it->handle) {
+        return false;
+    }
+
+    struct dirent *data = readdir(it->handle);
+
+    if (data != NULL)
+    {
+        char buffer[PATH_MAX + 1];
+        if (realpath(data->d_name, buffer) != NULL)
+        {
+            *info = os_get_file_info(arena, string_from_cstr(buffer));
+        }
+    }
+
+    return data != NULL;
+}
+
+function void os_file_list_end(File_Lister *iter) {
+    Unix_File_Lister *it = (Unix_File_Lister *)iter;
+    if (it->handle) {
+        closedir(it->handle);
+        it->handle = 0;
+    }
+}
+
+function bool os_make_directory(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    int result = mkdir(string_to_cstr(scratch.arena, path), 0700);
+    ReleaseScratch(scratch);
+    return result == 0;
+}
+
+function bool os_delete_file(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    int result = unlink(string_to_cstr(scratch.arena, path));
+    ReleaseScratch(scratch);
+    return result == 0;
+}
+
+function bool os_delete_directory(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+    int result = rmdir(string_to_cstr(scratch.arena, path));
+    ReleaseScratch(scratch);
+    return result == 0;
+}
+
+//
+// Threads
+//
+
+#include <pthread.h>
+#include <sys/resource.h> // setpriority
+
+struct Unix_Thread_Params {
+    Thread_Proc *proc;
+    void *data;
+};
+
+void *unix_thread_proc(void *data) {
+    Unix_Thread_Params *params = (Unix_Thread_Params *)data;
+
+    // NOTE(nick): initialize scratch memory
+    GetScratch(0, 0);
+
+    assert(params->proc);
+    u32 result = params->proc(params->data);
+
+    os_free(params);
+
+    return (void *)result;
+}
+
+function Thread thread_create(Thread_Proc *proc, void *data, u64 copy_size) {
+    Unix_Thread_Params *params = (Unix_Thread_Params *)os_alloc(sizeof(Unix_Thread_Params) + copy_size);
+    params->proc = proc;
+    params->data = data;
+    if (copy_size)
+    {
+        params->data = params + sizeof(Unix_Thread_Params);
+        MemoryCopy(params->data, data, copy_size);
+    }
+
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, unix_thread_proc, params);
+
+    Thread result = {};
+    result.handle = (void *)thread_id;
+    return result;
+}
+
+function void thread_detach(Thread thread) {
+    pthread_t tid = (pthread_t)thread.handle;
+    pthread_detach(tid);
+}
+
+function u32 thread_await(Thread thread) {
+    pthread_t tid = (pthread_t)thread.handle;
+    void *result = 0;
+    pthread_join(tid, &result);
+    return *(u32 *)result;
+}
+
+#elif OS_LINUX
+    #error OS_LINUX Not implemented
+#endif
+
+//
+// Shared:
+//
+
+function f64 os_time_in_miliseconds()
+{
+    return os_time() * 1000.0;
+}
+
+function u64 os_clock_cycles(void)
+{
+    #if defined(COMPILER_MSVC) && !defined(__clang__)
+        return __rdtsc();
+    #elif defined(__i386__)
+        u64 x;
+        __asm__ volatile (".byte 0x0f, 0x31" : "=A" (x));
+        return x;
+    #elif defined(__x86_64__)
+        u32 hi, lo;
+        __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
+        return (cast(u64)lo) | ((cast(u64)hi)<<32);
+    #endif
+}
+
+function bool os_library_is_loaded(OS_Library lib)
+{
+    return lib.handle != 0;
+}
+
+function bool os_file_exists(String path)
+{
+    return os_get_file_info(path).size > 0;
+}
+
+function void os_file_append(File *file, String data)
+{
+    os_file_write(file, file->offset, data.count, data.data);
+    file->offset += data.count;
+}
+
+function void os_file_print(File *file, char *fmt, ...)
+{
+    M_Temp scratch = GetScratch(0, 0);
+
+    va_list args;
+    va_start(args, fmt);
+    String result = string_printv(scratch.arena, fmt, args);
+    va_end(args);
+
+    os_file_append(file, result);
+
+    ReleaseScratch(scratch);
+}
+
+function Dense_Time dense_time_from_date_time(Date_Time in) {
+    u32 year_encoded = (u32)((i32)in.year + 0x8000);
+    Dense_Time result = 0;
+
+    result += year_encoded;
+    result *= 12;
+    result += (in.mon - 1);
+    result *= 31;
+    result += (in.day - 1);
+    result *= 24;
+    result += in.hour;
+    result *= 60;
+    result += in.min;
+    result *= 61;
+    result += in.sec;
+    result *= 1000;
+    result += in.msec;
+
+    return result;
+}
+
+function Date_Time date_time_from_dense_time(Dense_Time in) {
+    Date_Time result = {};
+
+    result.msec = in%1000;
+    in /= 1000;
+    result.sec = in%61;
+    in /= 61;
+    result.min = in%60;
+    in /= 60;
+    result.hour = in%24;
+    in /= 24;
+    result.day = (in%31) + 1;
+    in /= 31;
+    result.mon = (in%12) + 1;
+    in /= 12;
+
+    i32 year_encoded = (i32)in;
+    result.year = (year_encoded - 0x8000);
+
+    return result;
+}
+
+#endif // NA_IMPL
+
+#ifndef NA_DATA_H
+#define NA_DATA_H
+
+//
+// Array macros for partial functionality:
+//
+
+#define Array_Alloc(a,arr,T,s) do { \
+    (arr)->data = PushArray(a,T,s); \
+    (arr)->count = 0; \
+    (arr)->capacity = s; \
+} while(0)
+
+#define ArrayPush(a) ((a)->count += 1, &(a)->data[(a)->count - 1])
+
+#define ArrayPop(a) ((a)->count -= 1, &(a)->data[(a)->count + 1])
+
+#define ArrayPeek(a) ((a)->count > 0 ? &(a)->data[(a)->count - 1] : NULL)
+
+#define ArrayCopy(d,s) do { \
+    assert(sizeof((d)->data[0]) == sizeof((s).data[0])); \
+    assert((d)->capacity != 0); \
+    (d)->count = Min((s).count, (d)->capacity); \
+    MemoryCopy((d)->data, (s).data, (d)->count * sizeof((s).data[0])); \
+} while(0)
+
+#define ArrayReset(a) ((a)->count = 0)
+
+#define ArrayBegin(a) ((a)->data ? (a)->data : NULL)
+#define ArrayEnd(a) ((a)->data ? ((a)->data + (a)->count) : NULL)
+ 
+#define ArrayEach(it, array) auto it = ArrayBegin(array); it < ArrayEnd(array); it ++
+
+#define ArrayZero(a) MemoryZero((a)->data, (a)->count * sizeof((a)->data[0]));
+
+
+#define For(T, array) \
+    for (T *it = (T *)(array).data; it != NULL && it < (T *)((array).data + ((array).item_size * (array).count)); it ++)
+
+#define For_Index(array) \
+    for (i64 index = 0; index < (array).count; index ++)
+
+//
+// Array
+//
+
+struct Array_T
+{
+    Arena *arena;
+    u64   capacity;
+    i64   count;
+    u8    *data;
+    u64   item_size;
+};
+
+#define Array(Type) Array_T
+
+function void array_init_from_arena(Array_T *it, Arena *arena, u64 item_size, u64 initial_capacity);
+function void array_init(Array_T *it, u64 item_size);
+function void array_free(Array_T *it);
+function void array_reset(Array_T *it);
+
+function void array_resize(Array_T *it, u64 next_capacity);
+function void array_reserve(Array_T *it, u64 minimum_count);
+
+function void *array_get_t(Array_T *it, i64 index);
+function void *array_peek_t(Array_T *it);
+function void *array_pop_t(Array_T *it);
+
+function void array_remove_unordered(Array_T *it, i64 index);
+function void array_remove_ordered(Array_T *it, i64 index);
+
+function void *array_push_t(Array_T *it);
+function void *array_push_items_t(Array_T *it, void *items, u64 count);
+
+#define array_get(it, T, index) (T *)(assert(sizeof(T) == (it)->item_size), array_get_t(it, index))
+#define array_peek(it, T) (T *)(assert(sizeof(T) == (it)->item_size), array_peek_t(it))
+#define array_push(it, T) (T *)(assert(sizeof(T) == (it)->item_size), array_push_t(it))
+#define array_pop(it, T) (T *)(assert(sizeof(T) == (it)->item_size), array_pop_t(it))
+#define array_add(it, T, value) do { assert(sizeof(T) == (it)->item_size); T __tmp = value; array_push_items_t(it, &__tmp, 1); } while (0)
+#define array_push_items(it, items, count) (T *)(assert(sizeof(T) == (it)->item_size), array_push_items_t(it, items, count))
+
+function void array_init_from_arena(Array_T *it, Arena *arena, u64 item_size, u64 initial_capacity) {
+    it->arena = arena;
+    it->count = 0;
+    it->capacity = Max(initial_capacity, 1);
+    it->item_size = item_size;
+    // NOTE(nick): push uses MemoryZero, so we don't need to clear the memory here
+    arena_reset(arena);
+    it->data = PushArray(arena, u8, it->capacity * it->item_size);
+}
+
+function void array_init(Array_T *it, u64 item_size) {
+    array_init_from_arena(it, arena_alloc(Gigabytes(1)), item_size, 32);
+}
+
+function void array_free(Array_T *it) {
+    if (it->data) {
+        if (it->arena) {
+            arena_free(it->arena);
+            it->arena = NULL;
+        }
+
+        it->data = NULL;
+    }
+
+    it->capacity = 0;
+    it->count = 0;
+    it->item_size = 0;
+}
+
+function void array_reset(Array_T *it) {
+    it->count = 0;
+}
+
+function void array_resize(Array_T *it, u64 next_capacity) {
+    assert(it->data);
+    assert(it->item_size > 0);
+    if (it->capacity == next_capacity) return;
+
+    arena_set_pos(it->arena, next_capacity * it->item_size);
+    it->capacity = next_capacity;
+}
+
+function void array_reserve(Array_T *it, u64 minimum_count) {
+    if (it->capacity < minimum_count) {
+        array_resize(it, minimum_count);
+    }
+}
+
+function void *array_get_t(Array_T *it, i64 index)
+{
+    assert(it->data);
+    assert(it->item_size > 0);
+    assert(index >= 0 && index < it->count);
+
+    void *result = it->data + it->item_size * index;
+    return result;
+}
+
+function void *array_peek_t(Array_T *it) {
+    assert(it->data);
+    assert(it->item_size > 0);
+
+    return it->count > 0 ? it->data + it->item_size * (it->count - 1) : NULL;
+}
+
+function void *array_pop_t(Array_T *it) {
+    void *removed = array_peek_t(it);
+    if (removed) it->count --;
+    return removed;
+}
+
+function void array_remove_unordered(Array_T *it, i64 index) {
+    assert(it->data);
+    assert(it->item_size > 0);
+    assert(index >= 0 && index < it->count);
+    
+    MemoryCopy(it->data + it->item_size * (it->count - 1), it->data + it->item_size * index, it->item_size);
+    it->count--;
+}
+
+function void array_remove_ordered(Array_T *it, i64 index) {
+    assert(it->data);
+    assert(it->item_size > 0);
+    assert(index >= 0 && index < it->count);
+
+    u64 i = index + 1;
+    u64 remaining_count = it->count - i;
+
+    MemoryMove(it->data + it->item_size * index, it->data + it->item_size * i, it->item_size * remaining_count);
+
+    it->count -= 1;
+}
+
+function void *array_push_t(Array_T *it) {
+    if (it->count >= it->capacity) {
+        u64 next_capacity = next_power_of_two(Max(it->capacity + 1, 16));
+        array_resize(it, next_capacity);
+    }
+
+    void *result = it->data + it->item_size * it->count;
+    MemoryZero(result, it->item_size);
+    it->count += 1;
+    return result;
+}
+
+function void *array_push_items_t(Array_T *it, void *items, u64 count) {
+    if (it->count + count > it->capacity) {
+        u64 next_capacity = next_power_of_two(Max(it->capacity + count, 16));
+        array_resize(it, next_capacity);
+    }
+
+    void *result = it->data + it->item_size * it->count;
+    MemoryCopy(result, items, count * it->item_size);
+    it->count += count;
+    return result;
+}
+
+//
+// Table
+//
+
+struct H_Hash
+{
+    u64 value;
+};
+
+struct H_Slot
+{
+    u64 hash;
+};
+
+struct Table_KV
+{
+    Arena *arenas[2];
+
+    u64     capacity;
+    i64     count;
+    u64     slots_filled;
+
+    H_Slot *slots;
+    u8     *keys;
+    u64    key_size;
+    u8     *data;
+    u64    item_size;
+};
+
+#define Table(K, V) Table_KV
+
+//
+// API
+//
+
+// Table
+function void table_init_from_arena(Table_KV *it, Arena *arena0, Arena *arena1, u64 key_size, u64 item_size, u64 table_size);
+function void table_init(Table_KV *it, u64 key_size, u64 item_size);
+function void table_reset(Table_KV *it);
+function void table_free(Table_KV *it);
+function void table_rehash(Table_KV *it, u64 next_capacity);
+
+function void *table_add(Table_KV *it, H_Hash hash, void *key, void *value);
+function void *table_set(Table_KV *it, H_Hash hash, void *key, void *value);
+
+function b32 table_find(Table_KV *it, H_Hash hash, void *key, i64 *found_index);
+
+function void *table_key(Table_KV *it, i64 index);
+function void *table_value(Table_KV *it, i64 index);
+function void *table_get(Table_KV *it, H_Hash hash, void *key);
+
+function b32 table_remove(Table_KV *it, H_Hash hash, void *key);
+function b32 table_delete(Table_KV *it, i64 index);
+
+//
+// Hash Functions
+//
+
+function b32 hash_equals(H_Hash a, H_Hash b) {
+    return a.value == b.value;
+}
+
+function b32 hash_is_valid(H_Hash a) {
+    return a.value > 0;
+}
+
+function H_Hash hash_i64(i64 it) {
+    H_Hash result;
+    result.value = fnv64a(&it, sizeof(i64));
+    return result;
+}
+
+//
+// Table
+//
+
+const int TABLE_NEVER_OCCUPIED_HASH = 0;
+const int TABLE_REMOVED_HASH = 1;
+const int TABLE_FIRST_VALID_HASH = 2;
+
+const int TABLE_SIZE_MIN = 32;
+
+//
+// TODO(nick):
+// - do some sort of quadratic probing thing
+//
+
+function void table_init_from_arena(Table_KV *it, Arena *arena0, Arena *arena1, u64 key_size, u64 item_size, u64 initial_capacity)
+{
+    it->arenas[0] = arena0;
+    it->arenas[1] = arena1;
+
+    it->capacity = Max(next_power_of_two(initial_capacity), TABLE_SIZE_MIN);
+    it->count = 0;
+    it->slots_filled = 0;
+
+    it->key_size   = key_size;
+    it->item_size  = item_size;
+
+    assert(it->arenas[0]);
+    assert(it->arenas[1]);
+    assert(is_power_of_two(it->capacity));
+    assert(it->item_size > 0);
+
+    arena_reset(arena0);
+    arena_reset(arena1);
+    it->slots = PushArrayZero(arena0, H_Slot, it->capacity);
+    it->keys  = PushArrayZero(arena0, u8,     it->capacity * it->key_size);
+    it->data  = PushArrayZero(arena0, u8,     it->capacity * it->item_size);
+}
+
+function void table_init(Table_KV *it, u64 key_size, u64 item_size)
+{
+    table_init_from_arena(it, arena_alloc(Gigabytes(1)), arena_alloc(Gigabytes(1)), key_size, item_size, 32);
+}
+
+function void table_reset(Table_KV *it)
+{
+    it->count = 0;
+    it->slots_filled = 0;
+
+    if (it->slots) {
+        MemoryZero(it->slots, it->capacity * sizeof(H_Slot));
+    }
+}
+
+function void table_free(Table_KV *it)
+{
+    if (it->slots) {
+        if (it->arenas[0])
+        {
+            arena_free(it->arenas[0]);
+            it->arenas[0] = NULL;
+        }
+
+        if (it->arenas[1])
+        {
+            arena_free(it->arenas[1]);
+            it->arenas[1] = NULL;
+        }
+
+        it->slots = NULL;
+        it->keys = NULL;
+        it->data = NULL;
+    }
+
+    it->capacity = 0;
+    it->count = 0;
+    it->slots_filled = 0;
+}
+
+function void table_rehash(Table_KV *it, u64 next_capacity)
+{
+    assert(is_power_of_two(it->capacity));
+    assert(it->item_size > 0);
+
+    u64 old_capacity  = it->capacity;
+    H_Slot *old_slots = it->slots;
+    u8     *old_keys  = it->keys;
+    u8     *old_data  = it->data;
+
+    Swap(Arena *, it->arenas[0], it->arenas[1]);
+
+    // count and slots_filled will be incremented by add.
+    it->capacity = Max(next_power_of_two(next_capacity), TABLE_SIZE_MIN);
+    it->count = 0;
+    it->slots_filled = 0;
+
+    Arena *arena = it->arenas[0];
+    u64 next_size = sizeof(H_Slot) * it->capacity + it->capacity * it->key_size + it->capacity * it->item_size;
+    arena_set_pos(arena, next_size);
+
+    it->slots = (H_Slot *)arena->data;
+    it->keys  = (u8 *)it->slots + sizeof(H_Slot) * it->capacity;
+    it->data  = (u8 *)it->keys  + it->capacity * it->key_size;
+
+    for (u64 index = 0; index < old_capacity; index++) {
+        H_Slot *entry = &old_slots[index];
+
+        if (entry->hash >= TABLE_FIRST_VALID_HASH) {
+            u8 *key   = old_keys + (it->key_size  * index);
+            u8 *value = old_data + (it->item_size * index);
+
+            table_add(it, {entry->hash}, key, value);
         }
     }
 }
 
-void work_queue_create(Work_Queue *queue, u32 thread_count, Worker_Params *thread_params) {
-    queue->completion_goal = 0;
-    queue->completion_count = 0;
-
-    queue->next_entry_to_write = 0;
-    queue->next_entry_to_read = 0;
-
-    queue->semaphore = semaphore_create(thread_count);
-
-    for (u32 i = 0; i < thread_count; i++) {
-        Worker_Params *params = thread_params + i;
-        params->queue = queue;
-
-        Thread thread = os_create_thread(megabytes(1), worker_thread_proc, params);
-        os_detatch_thread(thread);
+// Sets the key-value pair, replacing it if it already exists.
+function void *table_set(Table_KV *it, H_Hash hash, void *key, void *value)
+{
+    i64 index;
+    if (table_find(it, hash, key, &index))
+    {
+        void *data = table_value(it, index);
+        MemoryCopy(data, value, it->item_size);
+    }
+    else
+    {
+        table_add(it, hash, key, value);
     }
 }
 
-void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, void *data) {
-    // TODO(casey): Switch to InterlockedCompareExchange eventually
-    // so that any thread can add?
-    u32 new_next_entry_to_write = (queue->next_entry_to_write + 1) % count_of(queue->entries);
-    assert(new_next_entry_to_write != queue->next_entry_to_read);
+// Adds the given key-value pair to the table, returns a pointer to the inserted item.
+function void *table_add(Table_KV *it, H_Hash hash, void *key, void *value)
+{
+    assert(key);
+    assert(value);
 
-    Work_Entry *entry = queue->entries + queue->next_entry_to_write;
-    entry->callback = callback;
-    entry->data = data;
-    queue->completion_goal ++;
-
-    write_barrier();
-
-    queue->next_entry_to_write = new_next_entry_to_write;
-
-    semaphore_signal(&queue->semaphore);
-}
-
-void work_queue_complete_all_work(Work_Queue *queue) {
-    while (queue->completion_goal != queue->completion_count) {
-        do_next_work_queue_entry(queue);
+    // slots_filled / capacity >= 7 / 10 ...therefore:
+    // slots_filled * 10 >= capacity * 7
+    // The + 1 is here to handle the weird case where the table size is 1 and you add the first item
+    if ((it->slots_filled + 1) * 10 >= it->capacity * 7) {
+        u32 next_capacity = it->capacity ? it->capacity * 2 : TABLE_SIZE_MIN;
+        table_rehash(it, next_capacity);
     }
 
-    queue->completion_goal = 0;
-    queue->completion_count = 0;
+    assert(it->slots_filled <= it->capacity);
+
+    if (hash.value < TABLE_FIRST_VALID_HASH) hash.value += TABLE_FIRST_VALID_HASH;
+
+    u64 index = hash.value & (it->capacity - 1);
+
+    while (it->slots[index].hash) {
+        index += 1;
+        index &= (it->capacity - 1);
+    }
+
+    it->slots[index] = {hash.value};
+    it->count ++;
+    it->slots_filled ++;
+
+    void *result = (it->data) + (it->item_size * index);
+
+    MemoryCopy((it->keys) + (it->key_size * index), key, it->key_size);
+    MemoryCopy(result, value, it->item_size);
+
+    return result;
+}
+
+function b32 table_find(Table_KV *it, H_Hash hash, void *key, i64 *found_index)
+{
+    assert(key);
+
+    if (it->slots)
+    {
+        if (hash.value < TABLE_FIRST_VALID_HASH) hash.value += TABLE_FIRST_VALID_HASH;
+        u64 index = hash.value & (it->capacity - 1);
+
+        while (it->slots[index].hash) {
+            H_Slot *slot = &it->slots[index];
+            u8 *entry_key = it->keys + (it->key_size * index);
+
+            if (slot->hash == hash.value && MemoryEquals(entry_key, key, it->key_size))
+            {
+                if (found_index)
+                {
+                    *found_index = index;
+                }
+                return true;
+            }
+
+            index += 1;
+            index &= (it->capacity - 1);
+        }
+    }
+
+    return false;
+}
+
+function void *table_key(Table_KV *it, i64 index) {
+    void *result = NULL;
+    if (index >= 0 && index < it->capacity)
+    {
+        result = it->keys + (it->key_size * index);
+    }
+    return result;
+}
+
+function void *table_value(Table_KV *it, i64 index) {
+    void *result = NULL;
+    if (index >= 0 && index < it->capacity)
+    {
+        result = it->data + (it->item_size * index);
+    }
+    return result;
+}
+
+function void *table_get(Table_KV *it, H_Hash hash, void *key)
+{
+    i64 index;
+    if (table_find(it, hash, key, &index))
+    {
+        return table_value(it, index);
+    }
+    return NULL;
+}
+
+function b32 table_remove(Table_KV *it, H_Hash hash, void *key)
+{ 
+    assert(key);
+    assert(it->slots); // Must be initialized!
+
+    if (hash.value < TABLE_FIRST_VALID_HASH) hash.value += TABLE_FIRST_VALID_HASH;
+    u64 index = hash.value & (it->capacity - 1);
+
+    while (it->slots[index].hash) {
+        H_Slot *slot = &it->slots[index];
+        u8 *entry_key = it->keys + (it->key_size * index);
+
+        if (slot->hash == hash.value && MemoryEquals(entry_key, key, it->key_size)) {
+            // No valid entry will ever hash to TABLE_REMOVED_HASH.
+            it->slots[index].hash = TABLE_REMOVED_HASH;
+            it->count --;
+            return true;
+        }
+
+        index += 1;
+        index &= (it->capacity - 1);
+    }
+
+    return false;
+}
+
+function b32 table_delete(Table_KV *it, i64 index)
+{
+    b32 result = false;
+    if (index >= 0 && index < it->capacity)
+    {
+        H_Slot *slot = &it->slots[index];
+        if (slot->hash >= TABLE_FIRST_VALID_HASH)
+        {
+            it->count --;
+            slot->hash = TABLE_REMOVED_HASH;
+            result = true;
+        }
+    }
+    return result;
 }
 
 
-#endif // NA_H
+#endif // NA_DATA_H
