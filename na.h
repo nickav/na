@@ -493,6 +493,12 @@ function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count);
 #define ReleaseScratch(temp) arena_end_temp(temp)
 function Arena *temp_arena();
 
+// Helpers
+typedef i32 Compare_Proc(void *a, void *b);
+
+function void memory_swap(void *i, void *j, u64 size);
+function void memory_sort(void *base_, u64 count, u64 size, Compare_Proc cmp);
+function i64 memory_binary_search(void *base, u64 count, u64 size, void *key, Compare_Proc cmp);
 
 //
 // Allocator
@@ -756,6 +762,7 @@ function u32 random_u32(Random_State *series);
 function f32 random_f32(Random_State *series);
 function f32 random_f32_between(Random_State *series, f32 min, f32 max);
 function i32 random_i32_between(Random_State *series, i32 min, i32 max);
+function void random_shuffle(Random_State *it, void *base, u64 count, u64 size);
 
 #endif // BASE_FUNCTIONS_H
 
@@ -1310,6 +1317,135 @@ function u64 m_align_offset(void *ptr, u64 alignment){
     return align_offset;
 }
 
+function void memory_swap(void *i, void *j, u64 size)
+{
+    if (size == 4) {
+        Swap(u32, *(u32 *)i, *(u32 *)j);
+    } else if (size == 8) {
+        Swap(u64, *(u64 *)i, *(u64 *)j);
+    } else if (size < 8) {
+        u8 *a = (u8 *)i;
+        u8 *b = (u8 *)j;
+
+        if (a != b) {
+            while (size--) {
+                Swap(u8, *a, *b);
+                a++, b++;
+            }
+        }
+    } else {
+        char buffer[256];
+
+        // TODO(bill): Is the recursion ever a problem?
+        while (size > sizeof(buffer))
+        {
+            memory_swap(i, j, sizeof(buffer));
+            i = (void *)((u8 *)i + sizeof(buffer));
+            j = (void *)((u8 *)j + sizeof(buffer));
+            size -= sizeof(buffer);
+        }
+
+        MemoryCopy(buffer, i, size);
+        MemoryCopy(i, j, size);
+        MemoryCopy(j, buffer, size);
+    }
+}
+
+function void memory_sort(void *base_, u64 count, u64 size, Compare_Proc cmp)
+{
+    // TODO(bill): Make user definable?
+    #define GB__SORT_STACK_SIZE            64
+    #define GB__SORT_INSERT_SORT_THRESHOLD  8
+
+    #define GB__SORT_PUSH(_base, _limit) do { \
+        stack_ptr[0] = (_base); \
+        stack_ptr[1] = (_limit); \
+        stack_ptr += 2; \
+    } while (0)
+
+    #define GB__SORT_POP(_base, _limit) do { \
+        stack_ptr -= 2; \
+        (_base)  = stack_ptr[0]; \
+        (_limit) = stack_ptr[1]; \
+    } while (0)
+
+    u8 *i, *j;
+    u8 *base = (u8 *)base_;
+    u8 *limit = base + count*size;
+    u64 threshold = GB__SORT_INSERT_SORT_THRESHOLD * size;
+
+    // NOTE(bill): Prepare the stack
+    u8 *stack[GB__SORT_STACK_SIZE] = {0};
+    u8 **stack_ptr = stack;
+
+    for (;;) {
+        if ((limit-base) > threshold) {
+            // NOTE(bill): Quick sort
+            i = base + size;
+            j = limit - size;
+
+            memory_swap(((limit-base)/size/2) * size + base, base, size);
+            if (cmp(i, j) > 0)    memory_swap(i, j, size);
+            if (cmp(base, j) > 0) memory_swap(base, j, size);
+            if (cmp(i, base) > 0) memory_swap(i, base, size);
+
+            for (;;) {
+                do i += size; while (cmp(i, base) < 0);
+                do j -= size; while (cmp(j, base) > 0);
+                if (i > j) break;
+                memory_swap(i, j, size);
+            }
+
+            memory_swap(base, j, size);
+
+            if (j - base > limit - i) {
+                GB__SORT_PUSH(base, j);
+                base = i;
+            } else {
+                GB__SORT_PUSH(i, limit);
+                limit = j;
+            }
+        } else {
+            // NOTE(bill): Insertion sort
+            for (j = base, i = j+size;
+                     i < limit;
+                     j = i, i += size) {
+                for (; cmp(j, j+size) > 0; j -= size) {
+                    memory_swap(j, j+size, size);
+                    if (j == base) break;
+                }
+            }
+
+            if (stack_ptr == stack) break; // NOTE(bill): Sorting is done!
+            GB__SORT_POP(base, limit);
+        }
+    }
+
+    #undef GB__SORT_PUSH
+    #undef GB__SORT_POP
+}
+
+function i64 memory_binary_search(void *base, u64 count, u64 size, void *key, Compare_Proc cmp)
+{
+    u64 start = 0;
+    u64 end = count;
+
+    while (start < end) {
+        u64 mid = start + (end-start)/2;
+        i64 result = cmp(key, cast(u8 *)base + mid*size);
+
+        if (result < 0) {
+            end = mid;
+        } else if (result > 0) {
+            start = mid+1;
+        } else {
+            return mid;
+        }
+    }
+
+    return -1;
+}
+
 //
 // Allocator
 //
@@ -1456,7 +1592,6 @@ Allocator arena_allocator(Arena *arena) {
     assert(arena);
     return Allocator{arena_allocator_proc, arena};
 }
-
 
 //
 // Strings
@@ -2846,19 +2981,15 @@ function i32 random_i32_between(Random_State *series, i32 min, i32 max) {
     return min + (i32)(random_u32(series) % (max - min + 1));
 }
 
-#if 0
-void random_shuffle(Random_State *it, void *base, u64 count, u64 size) {
-    u8 *a;
-    isize i, j;
-
-    a = cast(u8 *)base + (count-1) * size;
-    for (i = count; i > 1; i--) {
-        j = random_next_u32(it) % i;
-        memory_swap(a, cast(u8 *)base + j*size, size);
-        a -= size;
+function void random_shuffle(Random_State *it, void *base, u64 count, u64 size) {
+    u8 *at = cast(u8 *)base + (count-1) * size;
+    for (i64 i = count; i > 1; i--)
+    {
+        i64 j = random_u32(it) % i;
+        memory_swap(at, (u8 *)base + j*size, size);
+        at -= size;
     }
 }
-#endif
 
 //
 // Platform-Specific:

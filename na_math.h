@@ -27,34 +27,11 @@ VERSION HISTORY
 #ifndef NA_MATH_H
 #define NA_MATH_H
 
-#include <math.h>
-
-#define PI  3.14159265359f
-#define TAU 6.28318530717958647692f
-
-#define EPSILON_F32 1.1920929e-7f
-#define EPSILON_F64 2.220446e-16
-
-#define SQRT_2 0.70710678118
-
-#define Mod(x, y) fmodf(x, y)
-#define AbsF32(x) fabsf(x)
-#define Sqrt(x) sqrtf(x)
-#define Sin(x) sinf(x)
-#define Cos(x) cosf(x)
-#define Tan(x) tanf(x)
-#define Pow(x, e) powf(x, e)
-
-#define v2f(x, y)       v2((f32)(x), (f32)(y))
-#define v3f(x, y, z)    v2((f32)(x), (f32)(y), (f32)(z))
-#define v4f(x, y, z, w) v2((f32)(x), (f32)(y), (f32)(z), (f32)(w))
-
-
 //
 // NOTE(nick): shared imports to make this standalone
 //
 
-#define function       static
+#define function static
 
 #define Min(a, b) (((a) < (b)) ? (a) : (b))
 #define Max(a, b) (((a) > (b)) ? (a) : (b))
@@ -77,7 +54,6 @@ VERSION HISTORY
     #define true 1
     #define false 0
 #endif
-
 
 typedef int8_t    i8;
 typedef int16_t   i16;
@@ -115,6 +91,28 @@ typedef void VoidFunction(void);
 //
 // end of shared imports
 //
+
+#include <math.h>
+
+#define PI  3.14159265359f
+#define TAU 6.28318530717958647692f
+
+#define EPSILON_F32 1.1920929e-7f
+#define EPSILON_F64 2.220446e-16
+
+#define SQRT_2 0.70710678118
+
+#define Mod(x, y) fmodf(x, y)
+#define AbsF32(x) fabsf(x)
+#define Sqrt(x) sqrtf(x)
+#define Sin(x) sinf(x)
+#define Cos(x) cosf(x)
+#define Tan(x) tanf(x)
+#define Pow(x, e) powf(x, e)
+
+#define v2f(x, y)       v2((f32)(x), (f32)(y))
+#define v3f(x, y, z)    v2((f32)(x), (f32)(y), (f32)(z))
+#define v4f(x, y, z, w) v2((f32)(x), (f32)(y), (f32)(z), (f32)(w))
 
 
 union Vector2
@@ -1429,6 +1427,32 @@ function Matrix3 matrix3_identity() {
 function Vector3 matrix3_column(Matrix3 *it, u32 i) {
     assert(i >= 0 && i < 3);
     return {it->e[0][i], it->e[1][i], it->e[2][i]};
+}
+
+function Matrix3 matrix3_transpose(Matrix3 a) {
+    f32 tmp;
+
+    tmp = a.e[1][0];
+    a.e[1][0] = a.e[0][1];
+    a.e[0][1] = tmp;
+
+    tmp = a.e[2][0];
+    a.e[2][0] = a.e[0][2];
+    a.e[0][2] = tmp;
+
+    tmp = a.e[2][1];
+    a.e[2][1] = a.e[1][2];
+    a.e[1][2] = tmp;
+
+    return a;
+}
+
+function Vector3 matrix3_transform_v3(Matrix3 a, Vector3 p) {
+    return {
+        v3_dot(p, a.rows[0]),
+        v3_dot(p, a.rows[1]),
+        v3_dot(p, a.rows[2]),
+    };
 }
 
 //
