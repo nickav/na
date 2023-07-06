@@ -1,3 +1,4 @@
+#define impl
 #include "../na.h"
 #include "../na_math.h"
 
