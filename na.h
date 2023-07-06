@@ -1,5 +1,5 @@
 /*
-    na.h - v0.04
+    na.h - v0.05
     Nick Aversano's C++ helper library
 
     This is a single header file with a bunch of useful stuff
@@ -9,6 +9,7 @@
 USAGE
     Define this in your source file:
 
+    #define impl
     #include "na.h"
 
 LICENSE
@@ -21,6 +22,7 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.05  - fix problem with not including Win32 headers, add back #impl
     0.04  - breaking API changes, lots of new stuff!
     0.03  - arena improvements
     0.02  - replace nja with na, arena and thread clean up
@@ -620,7 +622,7 @@ function char *string_to_cstr(Arena *arena, String str);
 function String16 string16_make(u16 *data, i64 count);
 function String16 string16_from_cstr(u16 *data);
 function String32 string32_make(u32 *data, i64 count);
-#define S(x) {(u8 *)(x), sizeof(x)-1}
+#define S(x) String{(u8 *)(x), sizeof(x)-1}
 #define Str8(data, count) string_make((u8 *)data, count)
 #define Str16(data, count) string16_make((u16 *)data, count)
 #define Str32(data, count) string32_make((u32 *)data, count)
@@ -1005,6 +1007,7 @@ function bool mutex_try_aquire_lock(Mutex *mutex);
 function void mutex_release_lock(Mutex *mutex);
 function void mutex_destroy(Mutex *mutex);
 
+
 //
 // Platform-Specific Headers:
 //
@@ -1033,8 +1036,7 @@ function void mutex_destroy(Mutex *mutex);
 
 #endif // NA_H
 
-#ifndef NA_IMPL
-#define NA_IMPL
+#ifdef impl
 
 //
 // Memory
@@ -2997,6 +2999,19 @@ function void random_shuffle(Random_State *it, void *base, u64 count, u64 size) 
 
 #if OS_WINDOWS
 
+#pragma push_macro("function")
+#pragma push_macro("Free")
+#undef function
+#undef Free
+#define WIN32_LEAN_AND_MEAN
+#define VC_EXTRALEAN
+#define NOMINMAX
+#include <windows.h>
+#include <Shlobj.h>
+#pragma pop_macro("function")
+#pragma pop_macro("Free")
+
+
 #pragma comment(lib, "user32")
 #pragma comment(lib, "shell32")
 
@@ -4913,8 +4928,6 @@ function Date_Time date_time_from_dense_time(Dense_Time in) {
     return result;
 }
 
-#endif // NA_IMPL
-
 #ifndef NA_DATA_H
 #define NA_DATA_H
 
@@ -5456,3 +5469,6 @@ function b32 table_delete(Table_KV *it, i64 index)
 
 
 #endif // NA_DATA_H
+
+
+#endif // impl
