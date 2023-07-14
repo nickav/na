@@ -1379,6 +1379,52 @@ function Vector2i r2i_size(Rectangle2i r) {
     return {r.x1 - r.x0, r.y1 - r.y0};
 }
 
+function i32 r2i_width(Rectangle2i r) {
+    return r.x1 - r.x0;
+}
+
+function i32 r2i_height(Rectangle2i r) {
+    return r.y1 - r.y0;
+}
+
+function Rectangle2i aspect_ratio_fit(u32 src_width, u32 src_height, u32 dest_width, u32 dest_height)
+{
+    Rectangle2i result = {};
+
+    // can't divide by zero!
+    if (src_width != 0 && src_height != 0 && dest_width != 0 && dest_height != 0)
+    {
+        f32 optimal_window_width = (f32)dest_height * ((f32)src_width / (f32)src_height);
+        f32 optimal_window_height = (f32)dest_width * ((f32)src_height / (f32)src_width);
+
+        if (optimal_window_width > (f32)dest_width) {
+            // NOTE: width-constrained display - top and bottom black bars
+            result.x0 = 0;
+            result.x1 = dest_width;
+
+            f32 empty = (f32)dest_height - optimal_window_height;
+            i32 half_empty = round_i32(0.5f * empty);
+            i32 use_height = round_i32(optimal_window_height);
+
+            result.y0 = half_empty;
+            result.y1 = result.y0 + use_height;
+        } else {
+            // NOTE: Height-constrained display - left and right black bars
+            result.y0 = 0;
+            result.y1 = dest_height;
+
+            f32 empty = (f32)dest_width - optimal_window_width;
+            i32 half_empty = round_i32(0.5f * empty);
+            i32 use_width = round_i32(optimal_window_width);
+
+            result.x0 = half_empty;
+            result.x1 = result.x0 + use_width;
+        }
+    }
+
+    return result;
+}
+
 //
 // Rectangle3
 //
