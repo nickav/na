@@ -1,5 +1,5 @@
 /*
-    na.h - v0.05
+    na.h - v0.06
     Nick Aversano's C++ helper library
 
     This is a single header file with a bunch of useful stuff
@@ -22,6 +22,8 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.06  - added comparision helpers, improved stretchy arrays API, added Timing_f64,
+            actually seed random with os time
     0.05  - fix problem with not including Win32 headers, add back #impl
     0.04  - breaking API changes, lots of new stuff!
     0.03  - arena improvements
@@ -190,6 +192,9 @@ VERSION HISTORY
 #define MemoryZero(p,s) do { assert((p)!=NULL); MemorySet((p), 0, (s)); } while(0)
 #define MemoryZeroStruct(p) MemoryZero((p), sizeof(*(p)))
 #define MemoryZeroArray(a) MemoryZero((a), sizeof(a))
+
+#define QuickSort(data, count, item_size, cmp) qsort(data, count, item_size, cmp)
+#define BinarySearch(key, base, count, item_size, cmp) bsearch(key, base, count, item_size, cmp)
 
 #define ArrayCount(a) (sizeof(a) / sizeof((a)[0]))
 #define IntFromPtr(p) (u64)(((u8*)p) - 0)
@@ -727,17 +732,35 @@ function b32 path_is_absolute(String path);
 #ifndef BASE_FUNCTIONS_H
 #define BASE_FUNCTIONS_H
 
-struct Random_State
+typedef i32 (*Compare_Func)(const void *, const void *);
+
+struct Random_LCG
+{
+    u32 state;
+};
+
+struct Random_PCG
 {
     u64 state;
     u64 selector;
+};
+
+struct Timing_f64
+{
+    f64 current;
+
+    f64 min;
+    f64 max;
+    f64 average;
+
+    i64 count;
 };
 
 //
 // API
 //
 
-// Math
+// Functions
 function b32 is_power_of_two(i64 x);
 function u64 next_power_of_two(u64 x);
 function u64 previous_power_of_two(u64 x);
@@ -749,6 +772,10 @@ function u64 endian_swap64(u64 i);
 function u32 rotate_left_u32(u32 value, i32 amount);
 function u32 rotate_right_u32(u32 value, i32 amount);
 
+// Comparisons
+function i32 compare_i32(const void *a, const void *b);
+function i64 compare_i64(const void *a, const void *b);
+
 // Hashing
 function u32 murmur32_seed(void const *data, i64 len, u32 seed);
 function u64 murmur64_seed(void const *data_, i64 len, u64 seed);
@@ -757,14 +784,38 @@ function u64 murmur64(void const *data, i64 len);
 function u32 fnv32a(void const *data, i64 len);
 function u64 fnv64a(void const *data, i64 len);
 
-// Random PCG
-function Random_State random_make_default();
-function void random_set_seed(Random_State *series, u64 state, u64 selector);
-function u32 random_u32(Random_State *series);
-function f32 random_f32(Random_State *series);
-function f32 random_f32_between(Random_State *series, f32 min, f32 max);
-function i32 random_i32_between(Random_State *series, i32 min, i32 max);
-function void random_shuffle(Random_State *it, void *base, u64 count, u64 size);
+function u64 murmur64_from_string(String str);
+function u64 fnv64a_from_string(String str);
+
+// Random
+function Random_LCG random_make_lcg();
+function void random_lcg_set_seed(Random_LCG *series, u32 state);
+function u32 random_lcg_u32(Random_LCG *series);
+function f32 random_lcg_f32(Random_LCG *series);
+function f32 random_lcg_f32_between(Random_LCG *series, f32 min, f32 max);
+function i32 random_lcg_i32_between(Random_LCG *series, i32 min, i32 max);
+function void random_lcg_shuffle(Random_LCG *it, void *base, u64 count, u64 size);
+
+function Random_PCG random_make_pcg();
+function void random_pcg_set_seed(Random_PCG *series, u64 state, u64 selector);
+function u32 random_pcg_u32(Random_PCG *series);
+function f32 random_pcg_f32(Random_PCG *series);
+function f32 random_pcg_f32_between(Random_PCG *series, f32 min, f32 max);
+function i32 random_pcg_i32_between(Random_PCG *series, i32 min, i32 max);
+function void random_pcg_shuffle(Random_PCG *it, void *base, u64 count, u64 size);
+
+function void random_init();
+function void random_set_seed(u64 seed);
+function u32 random_next_u32();
+function f32 random_next_f32();
+function f32 random_f32_between(f32 min, f32 max);
+function i32 random_i32_between(i32 min, i32 max);
+function f32 random_zero_to_one();
+
+// Timing
+function void timing_add_value(Timing_f64 *it, f64 current);
+function void timing_reset(Timing_f64 *it, f64 current);
+function void timing_update(Timing_f64 *it, f64 current, u64 fps);
 
 #endif // BASE_FUNCTIONS_H
 
@@ -2797,6 +2848,26 @@ function u32 rotate_right_u32(u32 value, i32 amount) {
 }
 
 //
+// Comparisons
+//
+
+function i32 compare_i32(const void *a, const void *b)
+{
+    i32 a0 = *(i32 *)a;
+    i32 b0 = *(i32 *)b;
+
+    return a0 - b0;
+}
+
+function i64 compare_i64(const void *a, const void *b)
+{
+    i64 a0 = *(i64 *)a;
+    i64 b0 = *(i64 *)b;
+
+    return a0 - b0;
+}
+
+//
 // Hashing
 //
 
@@ -2938,25 +3009,86 @@ function u64 fnv64a(void const *data, i64 len) {
     return h;
 }
 
+function u64 murmur64_from_string(String str)
+{
+    return fnv64a(str.data, str.count);
+}
+
+function u64 fnv64a_from_string(String str)
+{
+    return fnv64a(str.data, str.count);
+}
+
 //
 // Random
 //
 
-function Random_State random_make_default()
+function Random_LCG random_make_lcg()
 {
-    Random_State result = {0};
-    // TODO(nick): seed with os_time
-    //random_set_seed();
+    Random_LCG result = {0};
+
+    f64 time = os_time();
+    u64 seed =  *(u64 *)&time;
+    random_lcg_set_seed(&result, (u32)seed);
+
     return result;
 }
 
-function void random_set_seed(Random_State *it, u64 state, u64 selector)
+function void random_lcg_set_seed(Random_LCG *it, u32 state)
+{
+    it->state = state;
+}
+
+function u32 random_lcg_u32(Random_LCG *it)
+{
+    u32 result = (it->state * 1103515245 + 12345) & U32_MAX;
+    it->state = result;
+    return result;
+}
+
+function f32 random_lcg_f32(Random_LCG *it) 
+{
+    f32 divisor = 1.0f / (f32)U32_MAX;
+    return divisor * (f32)random_lcg_u32(it);
+}
+
+function f32 random_lcg_f32_between(Random_LCG *it, f32 min, f32 max) {
+    return min + (max - min) * random_lcg_f32(it);
+}
+
+function i32 random_lcg_i32_between(Random_LCG *it, i32 min, i32 max) {
+    assert(max >= min);
+    return min + (i32)(random_lcg_u32(it) % (max - min + 1));
+}
+
+function void random_lcg_shuffle(Random_LCG *it, void *base, u64 count, u64 size) {
+    u8 *at = cast(u8 *)base + (count-1) * size;
+    for (i64 i = count; i > 1; i--)
+    {
+        i64 j = random_lcg_u32(it) % i;
+        memory_swap(at, (u8 *)base + j*size, size);
+        at -= size;
+    }
+}
+
+function Random_PCG random_make_pcg()
+{
+    Random_PCG result = {0};
+
+    f64 time = os_time();
+    u64 seed =  *(u64 *)&time;
+    random_pcg_set_seed(&result, seed, 6364136223846793005u);
+
+    return result;
+}
+
+function void random_pcg_set_seed(Random_PCG *it, u64 state, u64 selector)
 {
     it->state = state;
     it->selector = (selector << 1) | 1;
 }
 
-function u32 random_u32(Random_State *it)
+function u32 random_pcg_u32(Random_PCG *it)
 {
     u64 state = it->state;
     state = state * 6364136223846793005ULL + it->selector;
@@ -2968,29 +3100,100 @@ function u32 random_u32(Random_State *it)
     return result;
 }
 
-function f32 random_f32(Random_State *series) 
+function f32 random_pcg_f32(Random_PCG *it) 
 {
     f32 divisor = 1.0f / (f32)U32_MAX;
-    return divisor * (f32)random_u32(series);
+    return divisor * (f32)random_pcg_u32(it);
 }
 
-function f32 random_f32_between(Random_State *series, f32 min, f32 max) {
-    return min + (max - min) * random_f32(series);
+function f32 random_pcg_f32_between(Random_PCG *it, f32 min, f32 max) {
+    return min + (max - min) * random_pcg_f32(it);
 }
 
-function i32 random_i32_between(Random_State *series, i32 min, i32 max) {
+function i32 random_pcg_i32_between(Random_PCG *it, i32 min, i32 max) {
     assert(max >= min);
-    return min + (i32)(random_u32(series) % (max - min + 1));
+    return min + (i32)(random_pcg_u32(it) % (max - min + 1));
 }
 
-function void random_shuffle(Random_State *it, void *base, u64 count, u64 size) {
+function void random_pcg_shuffle(Random_PCG *it, void *base, u64 count, u64 size) {
     u8 *at = cast(u8 *)base + (count-1) * size;
     for (i64 i = count; i > 1; i--)
     {
-        i64 j = random_u32(it) % i;
+        i64 j = random_pcg_u32(it) % i;
         memory_swap(at, (u8 *)base + j*size, size);
         at -= size;
     }
+}
+
+static Random_PCG g_random = {0x4d595df4d0f33173, 6364136223846793005u};
+
+function void random_init()
+{
+    f64 time = os_time();
+    u64 seed =  *(u64 *)&time;
+    random_set_seed(seed);
+}
+
+function void random_set_seed(u64 seed)
+{
+    random_pcg_set_seed(&g_random, seed, 6364136223846793005u);
+}
+
+function u32 random_next_u32()
+{
+    return random_pcg_u32(&g_random);
+}
+
+function f32 random_next_f32()
+{
+    return random_pcg_f32(&g_random);
+}
+
+function f32 random_f32_between(f32 min, f32 max)
+{
+    return random_pcg_f32_between(&g_random, min, max);
+}
+
+function i32 random_i32_between(i32 min, i32 max)
+{
+    return random_pcg_i32_between(&g_random, min, max);
+}
+
+function f32 random_zero_to_one()
+{
+    return random_pcg_f32_between(&g_random, 0, 1);
+}
+
+//
+// Timing
+//
+
+function void timing_add_value(Timing_f64 *it, f64 current)
+{
+    it->current = current;
+
+    it->average = 0.9 * it->average + 0.1 * current;
+    it->min = Min(it->min, current);
+    it->max = Max(it->max, current);
+
+    it->count += 1;
+}
+
+function void timing_reset(Timing_f64 *it, f64 current)
+{
+    it->current = current;
+    it->min = current;
+    it->max = current;
+}
+
+function void timing_update(Timing_f64 *it, f64 current, u64 fps)
+{
+    if (it->count % fps == fps / 2)
+    {
+        timing_reset(it, current);
+    }
+    
+    timing_add_value(it, current);
 }
 
 //
@@ -4954,13 +5157,6 @@ function Date_Time date_time_from_dense_time(Dense_Time in) {
     MemoryCopy((d)->data, (s).data, (d)->count * sizeof((s).data[0])); \
 } while(0)
 
-#define ArrayReset(a) ((a)->count = 0)
-
-#define ArrayBegin(a) ((a)->data ? (a)->data : NULL)
-#define ArrayEnd(a) ((a)->data ? ((a)->data + (a)->count) : NULL)
- 
-#define ArrayEach(it, array) auto it = ArrayBegin(array); it < ArrayEnd(array); it ++
-
 #define ArrayZero(a) MemoryZero((a)->data, (a)->count * sizeof((a)->data[0]));
 
 
@@ -4974,156 +5170,239 @@ function Date_Time date_time_from_dense_time(Dense_Time in) {
 // Array
 //
 
-struct Array_T
-{
-    Arena *arena;
-    u64   capacity;
-    i64   count;
-    u8    *data;
-    u64   item_size;
+#define Array(T) T ## _Array
+
+#define ArrayEach(T, it, array) T *it = array_begin(array); it && it < array_begin(array); it ++
+
+#define For_It_Index(array) \
+    for (i64 index = 0; index < (array).count; index ++) \
+        if (auto *it = &(array).data[index])
+
+
+#define DynamicArray(T) \
+struct CONCAT(T, _Array) { \
+    DynamicArrayStructBody(T); \
 };
 
-#define Array(Type) Array_T
+#define DynamicArrayStructBody(T) \
+    Arena *arena; \
+    ArrayStructBody(T); \
 
-function void array_init_from_arena(Array_T *it, Arena *arena, u64 item_size, u64 initial_capacity);
-function void array_init(Array_T *it, u64 item_size);
-function void array_free(Array_T *it);
-function void array_reset(Array_T *it);
+#define ArrayStructBody(T) \
+    i64   capacity; \
+    i64   count; \
+    T     *data;
 
-function void array_resize(Array_T *it, u64 next_capacity);
-function void array_reserve(Array_T *it, u64 minimum_count);
+#define StaticArrayStructBody(T, capacity_) \
+    i64 count; \
+    static const i64 capacity = capacity_; \
+    T data[capacity_];
 
-function void *array_get_t(Array_T *it, i64 index);
-function void *array_peek_t(Array_T *it);
-function void *array_pop_t(Array_T *it);
-
-function void array_remove_unordered(Array_T *it, i64 index);
-function void array_remove_ordered(Array_T *it, i64 index);
-
-function void *array_push_t(Array_T *it);
-function void *array_push_items_t(Array_T *it, void *items, u64 count);
-
-#define array_get(it, T, index) (T *)(assert(sizeof(T) == (it)->item_size), array_get_t(it, index))
-#define array_peek(it, T) (T *)(assert(sizeof(T) == (it)->item_size), array_peek_t(it))
-#define array_push(it, T) (T *)(assert(sizeof(T) == (it)->item_size), array_push_t(it))
-#define array_pop(it, T) (T *)(assert(sizeof(T) == (it)->item_size), array_pop_t(it))
-#define array_add(it, T, value) do { assert(sizeof(T) == (it)->item_size); T __tmp = value; array_push_items_t(it, &__tmp, 1); } while (0)
-#define array_push_items(it, items, count) (T *)(assert(sizeof(T) == (it)->item_size), array_push_items_t(it, items, count))
-
-function void array_init_from_arena(Array_T *it, Arena *arena, u64 item_size, u64 initial_capacity) {
-    it->arena = arena;
-    it->count = 0;
-    it->capacity = Max(initial_capacity, 1);
-    it->item_size = item_size;
-    // NOTE(nick): push uses MemoryZero, so we don't need to clear the memory here
-    arena_reset(arena);
-    it->data = PushArray(arena, u8, it->capacity * it->item_size);
-}
-
-function void array_init(Array_T *it, u64 item_size) {
-    array_init_from_arena(it, arena_alloc(Gigabytes(1)), item_size, 32);
-}
-
-function void array_free(Array_T *it) {
-    if (it->data) {
-        if (it->arena) {
-            arena_free(it->arena);
-            it->arena = NULL;
+#if LANG_CPP
+    #undef ArrayStructBody
+    #define ArrayStructBody(T) \
+        i64   count; \
+        i64   capacity; \
+        T     *data; \
+        \
+        T &operator[](i64 i) \
+        { \
+            assert(i >= 0 && i < count); \
+            return data[i]; \
         }
 
-        it->data = NULL;
-    }
+    #undef StaticArrayStructBody
+    #define StaticArrayStructBody(T, capacity_) \
+        i64 count; \
+        static const i64 capacity = capacity_; \
+        T data[capacity_]; \
+        \
+        T &operator[](i64 i) \
+        { \
+            assert(i >= 0 && i < count); \
+            return data[i]; \
+        }
+#endif
 
-    it->capacity = 0;
-    it->count = 0;
-    it->item_size = 0;
-}
+//
+// Stretchy Array functions
+//
 
-function void array_reset(Array_T *it) {
-    it->count = 0;
-}
+#define array_init_from_arena(it, arena_, initial_capacity) \
+    array__init_from_arena(array__to_ref(it), arena_, initial_capacity)
 
-function void array_resize(Array_T *it, u64 next_capacity) {
-    assert(it->data);
-    assert(it->item_size > 0);
-    if (it->capacity == next_capacity) return;
+#define array_free(it) \
+    array__free(array__to_ref(it))
 
-    arena_set_pos(it->arena, next_capacity * it->item_size);
-    it->capacity = next_capacity;
-}
+#define array_reserve(it, num) \
+    (array__maybe_grow(array__to_ref(it), num))
 
-function void array_reserve(Array_T *it, u64 minimum_count) {
-    if (it->capacity < minimum_count) {
-        array_resize(it, minimum_count);
-    }
-}
+#define array_push(it, value) \
+    (array__maybe_grow(array__to_ref(it), 0), (it)->data[(it)->count] = value, (it)->count += 1, &(it)->data[(it)->count - 1])
 
-function void *array_get_t(Array_T *it, i64 index)
+//
+// Basic Array functions
+//
+
+#define array_reset(it) ((it)->count = 0)
+
+#define array_peek(it) \
+    ((it)->count > 0 ? &(it)->data[(it)->count - 1] : NULL)
+
+#define array_pop(it) \
+    ((it)->count > 0 ? ((it)->count --, array_peek(it)) : NULL)
+
+#define array_get(it, index) \
+    ((index >= 0 && index < (it)->count) ? &(it)->data[index] : NULL)
+
+#define array_add(it, value) \
+    (assert((it)->count < (it)->capacity), ((it)->data[(it)->count] = value), ((it)->count += 1), &(it)->data[(it)->count - 1])
+
+#define array_remove_unordered(it, index) \
+    do { \
+        assert((it)->data); \
+        assert(index >= 0 && index < (it)->count); \
+        const u64 size = sizeof((it)->data[0]); \
+        MemoryCopy((u8 *)((it)->data) + size * ((it)->count - 1), (u8 *)((it)->data) + size * index, size); \
+        (it)->count --; \
+    } while(0)
+
+#define array_remove_ordered(it, index) \
+    do { \
+        assert((it)->data); \
+        assert(index >= 0 && index < (it)->count); \
+        \
+        u64 i = index + 1; \
+        u64 remaining_count = (it)->count - i; \
+        const u64 size = sizeof((it)->data[0]); \
+        MemoryMove((u8 *)((it)->data) + size * index, (u8 *)((it)->data) + size * i, size * remaining_count); \
+        (it)->count --; \
+    } while(0)
+
+#define array_begin(a) ((a)->data ? (a)->data : NULL)
+
+#define array_end(a) ((a)->data ? ((a)->data + (a)->count) : NULL)
+
+#define array_sort(a, cmp) (array__sort(array__to_basic_ref(a), cmp))
+
+#define array_search(a, key, cmp) (array__search(array__to_basic_ref(a), key, cmp))
+
+#define array_find(a, key, cmp) (array__find(array__to_basic_ref(a), key, cmp))
+
+//
+// Hopefully the compiler is smart enough to figure out what we're doing here...
+//
+
+struct Array_Ref
 {
-    assert(it->data);
-    assert(it->item_size > 0);
-    assert(index >= 0 && index < it->count);
+    Arena **arena;
+    i64 *count;
+    i64 *capacity;
+    void **data;
+    u32 item_size;
+};
 
-    void *result = it->data + it->item_size * index;
+struct Array_Basic_Ref
+{
+    i64 count;
+    i64 capacity;
+    void *data;
+    u32 item_size;
+};
+
+#define array__to_ref(it) \
+    {&(it)->arena, &(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
+
+#define array__to_basic_ref(it) \
+    {(it)->count, (it)->capacity, (void *)(it)->data, sizeof((it)->data[0])}
+
+function void array__init_from_arena(Array_Ref it, Arena *arena, i32 initial_capacity)
+{
+    *it.arena = arena;
+    *it.count = 0;
+    *it.capacity = Max(initial_capacity, 1);
+    arena_reset(*it.arena);
+    *it.data = PushArray(*it.arena, u8, (*it.capacity) * it.item_size);
+}
+
+function i32 array__maybe_grow(Array_Ref it, i64 num)
+{
+    if (!(*it.data))
+    {
+        if (!(*it.arena))
+        {
+            *it.arena = arena_alloc(Gigabytes(1));
+        }
+
+        array__init_from_arena(it, *it.arena, 32);
+    }
+
+    if (*it.count - num >= *it.capacity)
+    {
+        assert(*it.arena != NULL);
+
+        i64 next_capacity = next_power_of_two(Max(*it.capacity + 1, 16));
+        if (*it.capacity != next_capacity)
+        {
+            arena_set_pos(*it.arena, next_capacity * it.item_size);
+            *it.capacity = next_capacity;
+        }
+    }
+
+    return 0;
+}
+
+function void array__free(Array_Ref it)
+{
+    if (*it.data)
+    {
+        if (*it.arena)
+        {
+            arena_free(*it.arena);
+            *it.arena = NULL;
+        }
+        *it.data = NULL;
+    }
+
+    *it.capacity = 0;
+    *it.count = 0;
+}
+
+function void array__sort(Array_Basic_Ref it, Compare_Func cmp)
+{
+    QuickSort(it.data, it.count, it.item_size, cmp);
+}
+
+function i64 array__search(Array_Basic_Ref it, void *key, Compare_Func cmp)
+{
+    void *item = BinarySearch(key, it.data, it.count, it.item_size, cmp);
+    i64 result = -1;
+    if (item)
+    {
+        result = (i64) ((((u8 *)item) - ((u8 *)it.data)) / it.item_size);
+    }
     return result;
 }
 
-function void *array_peek_t(Array_T *it) {
-    assert(it->data);
-    assert(it->item_size > 0);
+function i64 array__find(Array_Basic_Ref it, void *key, Compare_Func cmp)
+{
+    i64 result = -1;
 
-    return it->count > 0 ? it->data + it->item_size * (it->count - 1) : NULL;
-}
+    u8 *at = (u8 *)it.data;
+    for (i64 index = 0; index < it.count; index += 1)
+    {
+        const void *a = (const void *)key;
+        const void *b = (const void *)at;
 
-function void *array_pop_t(Array_T *it) {
-    void *removed = array_peek_t(it);
-    if (removed) it->count --;
-    return removed;
-}
+        if (cmp(a, b) == 0)
+        {
+            result = index;
+            break;
+        }
 
-function void array_remove_unordered(Array_T *it, i64 index) {
-    assert(it->data);
-    assert(it->item_size > 0);
-    assert(index >= 0 && index < it->count);
-    
-    MemoryCopy(it->data + it->item_size * (it->count - 1), it->data + it->item_size * index, it->item_size);
-    it->count--;
-}
-
-function void array_remove_ordered(Array_T *it, i64 index) {
-    assert(it->data);
-    assert(it->item_size > 0);
-    assert(index >= 0 && index < it->count);
-
-    u64 i = index + 1;
-    u64 remaining_count = it->count - i;
-
-    MemoryMove(it->data + it->item_size * index, it->data + it->item_size * i, it->item_size * remaining_count);
-
-    it->count -= 1;
-}
-
-function void *array_push_t(Array_T *it) {
-    if (it->count >= it->capacity) {
-        u64 next_capacity = next_power_of_two(Max(it->capacity + 1, 16));
-        array_resize(it, next_capacity);
+        at += it.item_size;
     }
 
-    void *result = it->data + it->item_size * it->count;
-    MemoryZero(result, it->item_size);
-    it->count += 1;
-    return result;
-}
-
-function void *array_push_items_t(Array_T *it, void *items, u64 count) {
-    if (it->count + count > it->capacity) {
-        u64 next_capacity = next_power_of_two(Max(it->capacity + count, 16));
-        array_resize(it, next_capacity);
-    }
-
-    void *result = it->data + it->item_size * it->count;
-    MemoryCopy(result, items, count * it->item_size);
-    it->count += count;
     return result;
 }
 
