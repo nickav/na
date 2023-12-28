@@ -335,7 +335,11 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 #endif
 
 #if LANG_C
-    #define bool int
+    #ifdef __STDC_VERSION__ // >= C99
+        #define bool _Bool
+    #else
+        #define bool int
+    #endif
     #define true 1
     #define false 0
 #endif
@@ -1057,6 +1061,39 @@ function void mutex_aquire_lock(Mutex *mutex);
 function bool mutex_try_aquire_lock(Mutex *mutex);
 function void mutex_release_lock(Mutex *mutex);
 function void mutex_destroy(Mutex *mutex);
+
+//
+// Workers
+//
+
+#define WORKER_PROC(name) void name(void *data)
+typedef WORKER_PROC(Worker_Proc);
+
+struct Work_Entry
+{
+    Worker_Proc *callback;
+    void *data;
+};
+
+struct Work_Queue
+{
+    u32 volatile completion_goal;
+    u32 volatile completion_count;
+
+    u32 volatile next_entry_to_write;
+    u32 volatile next_entry_to_read;
+    Semaphore semaphore;
+
+    Work_Entry entries[256];
+};
+
+struct Worker_Params
+{
+    Work_Queue *queue;
+};
+
+function void work_queue_init(Work_Queue *queue, u64 thread_count);
+function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, void *data);
 
 
 //
@@ -5129,6 +5166,81 @@ function Date_Time date_time_from_dense_time(Dense_Time in) {
     result.year = (year_encoded - 0x8000);
 
     return result;
+}
+
+function b32 os__do_next_work_queue_entry(Work_Queue *queue)
+{
+    b32 we_should_sleep = false;
+
+    u32 original_next_entry_to_read = queue->next_entry_to_read;
+    u32 new_next_entry_to_read = (original_next_entry_to_read + 1) % count_of(queue->entries);
+
+    if (original_next_entry_to_read != queue->next_entry_to_write) {
+        u32 index = atomic_compare_exchange_u32(&queue->next_entry_to_read, new_next_entry_to_read, original_next_entry_to_read);
+
+        if (index == original_next_entry_to_read) {
+            Work_Entry entry = queue->entries[index];
+            assert(entry.callback);
+            entry.callback(entry.data);
+            atomic_add_u64((u64 volatile *)&queue->completion_count, 1);
+        }
+    } else {
+        we_should_sleep = true;
+    }
+
+    return we_should_sleep;
+}
+
+function u32 os__worker_thread_proc(void *data)
+{
+    Worker_Params *params = (Worker_Params *)data;
+    Work_Queue *queue = params->queue;
+
+    for (;;) {
+        b32 we_should_sleep = os__do_next_work_queue_entry(queue);
+
+        if (we_should_sleep) {
+            semaphore_wait_for(&queue->semaphore, true);
+        }
+    }
+}
+
+function void work_queue_init(Work_Queue *queue, u64 thread_count)
+{
+    queue->completion_goal = 0;
+    queue->completion_count = 0;
+
+    queue->next_entry_to_write = 0;
+    queue->next_entry_to_read = 0;
+
+    queue->semaphore = semaphore_create(thread_count);
+
+    for (u32 i = 0; i < thread_count; i++) {
+        Worker_Params params = {};
+        params.queue = queue;
+
+        Thread thread = thread_create(os__worker_thread_proc, &params, sizeof(Worker_Params));
+        thread_detach(thread);
+    }
+}
+
+function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, void *data)
+{
+    // TODO(casey): Switch to InterlockedCompareExchange eventually
+    // so that any thread can add?
+    u32 new_next_entry_to_write = (queue->next_entry_to_write + 1) % count_of(queue->entries);
+    assert(new_next_entry_to_write != queue->next_entry_to_read);
+
+    Work_Entry *entry = queue->entries + queue->next_entry_to_write;
+    entry->callback = callback;
+    entry->data = data;
+    queue->completion_goal ++;
+
+    atomic_write_barrier();
+
+    queue->next_entry_to_write = new_next_entry_to_write;
+
+    semaphore_signal(&queue->semaphore);
 }
 
 #ifndef NA_DATA_H
