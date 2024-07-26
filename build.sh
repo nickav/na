@@ -20,6 +20,6 @@ mkdir -p $build_folder
 # Build executable
 pushd $build_folder
   rm -rf cyan*
-  time g++ $flags $libs -I$project_root/deps/ -D DEBUG=1 $src_file -o $exe_name
+  time clang++ $flags $libs -I$project_root/deps/ -D DEBUG=1 $src_file -o $exe_name
   ./$exe_name
 popd
