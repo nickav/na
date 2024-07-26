@@ -2,14 +2,13 @@
 //  cl /Od -nologo -Zo -Z7 nja_inliner.cpp /link -subsystem:windows -incremental:no -opt:ref -OUT:inliner.cpp
 //
 
-#include "na.h"
+#define impl
+#include "../na.h"
 
 #include <stdio.h>
 
-const String include_str = S("#include \"");
 static Arena *g_arena = {};
 
-#if 0
 String path_dirname(String path) {
     // normalize path
     if (path.data[path.count - 1] == '/') path.count -= 1;
@@ -22,58 +21,93 @@ String path_dirname(String path) {
 
     return S("./");
 }
-#endif
 
 bool na_inliner__file(String in_file, FILE *output)
 {
-    auto content = os_read_entire_file(g_arena, in_file);
+    if (!os_file_exists(in_file)) return false;
+
+    String content = os_read_entire_file(g_arena, in_file);
     if (!content.data)
     {
-        printf("File doesn't exist! %.*s\n", LIT(in_file));
         return false;
     }
 
-    i64 index = string_index(content, include_str, 0);
-    if (index >= 0)
+    for (i64 index = 0; index < content.count; index += 1)
     {
-        i64 prev_index = 0;
+        u8 at = content.data[index];
 
-        while (index >= 0)
+        if (index < content.count - 1)
         {
-            i64 end_quote_index = string_index(content, S("\""), index + include_str.count);
-            if (end_quote_index < 0)
+            // NOTE(nick): skip comments
+            if (at == '/')
             {
-                break;
-            }
-
-            auto prev = string_slice(content, prev_index, index);
-            fprintf(output, "%.*s", LIT(prev));
-
-            auto inc = string_slice(content, index + include_str.count, end_quote_index);
-            if (inc.count)
-            {
-                auto inc_path = path_join(path_dirname(in_file), inc);
-                auto inc_content = os_read_entire_file(g_arena, inc_path);
-                if (inc_content.count)
+                if (content.data[index + 1] == '*')
                 {
-                    //print("\n// #include "%.*s"\n", LIT(inc));
-                    fprintf(output, "%.*s", LIT(inc_content));
-                    fprintf(output, "\n");
+                    i64 start = index;
+                    index += 2;
+
+                    while (true)
+                    {
+                        if (content.data[index] == '*' && (index < content.count - 1 && content.data[index + 1] == '/'))
+                        {
+                            index += 2;
+                            break;
+                        }
+
+                        index += 1;
+                    }
+
+                    String comment = string_slice(content, start, index);
+                    fprintf(output, "%.*s", LIT(comment));
+                    index -= 1;
+                    continue;
+                }
+
+                if (content.data[index + 1] == '/')
+                {
+                    i64 start = index;
+                    index += 2;
+
+                    while (index < content.count && content.data[index] != '\n') { index += 1; }
+
+                    String comment = string_slice(content, start, index);
+                    fprintf(output, "%.*s\n", LIT(comment));
+                    continue;
                 }
             }
 
-            index = end_quote_index + 1;
+            if (at == '#')
+            {
+                String substr = string_slice(content, index, content.count);
 
-            prev_index = index;
-            index = string_index(content, include_str, index + 1);
+                if (string_starts_with(substr, S("#pragma once")))
+                {
+                    index += S("#pragma once").count;
+                    continue;
+                }
+
+                if (string_starts_with(substr, S("#include \"")))
+                {
+                    i64 start = index + S("#include \"").count;
+
+                    index = start;
+                    while (content.data[index] != '"') index += 1;
+
+                    String file_name = string_slice(content, start, index);
+                    String include_path = path_join(path_dirname(in_file), file_name);
+                    if (!na_inliner__file(include_path, output))
+                    {
+                        fprintf(output, "#include \"%.*s\"", LIT(file_name));
+                        continue;
+                    }
+
+                    index += 1;
+                    continue;
+                }
+            }
         }
 
-        auto rest = string_slice(content, prev_index, content.count);
-        fprintf(output, "%.*s", LIT(rest));
-    }
-    else
-    {
-        fprintf(output, "%.*s", LIT(content));
+        fprintf(output, "%c", at);
     }
 
     fflush(output);
@@ -111,15 +145,15 @@ int main(int argc, char **argv)
 
     if (argc == 2)
     {
-        auto in_file = string_from_cstr(argv[1]);
+        String in_file = string_from_cstr(argv[1]);
         CHECK(na_inliner_print(in_file));
         return 0;
     }
 
     if (argc == 3)
     {
-        auto in_file = string_from_cstr(argv[1]);
-        auto out_file = string_from_cstr(argv[2]);
+        String in_file = string_from_cstr(argv[1]);
+        String out_file = string_from_cstr(argv[2]);
         CHECK(na_inliner_write(in_file, out_file));
         return 0;
     }

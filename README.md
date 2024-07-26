@@ -4,8 +4,8 @@ single-file public domain libraries for C++
 
 library                         | latest version | category    | description
 --------------------------------|----------------|-------------|-------------
-[**na.h**](./na.h)              | 0.06           | base        | Cross-platform helpers
-[**na_math.h**](./na_math.h)    | 0.03           | math        | Math functions
+[**na.h**](./na.h)              | 0.07           | base        | Cross-platform helpers
+[**na_math.h**](./na_math.h)    | 0.04           | math        | Math functions
 [**na_net.h**](./na_net.h)      | 0.01           | networking  | Networking library for TCP/UDP and HTTP
 
 ## Usage
