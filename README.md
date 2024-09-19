@@ -1,6 +1,6 @@
 # na
 
-single-file public domain libraries for C++
+single-file public domain libraries for C/C++
 
 library                         | latest version | category    | description
 --------------------------------|----------------|-------------|-------------
