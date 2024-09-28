@@ -5210,7 +5210,7 @@ function void os_sleep(f64 seconds)
 {
     u64 nanoseconds = (u64)((seconds) * (1e9));
 
-    timespec rqtp;
+    struct timespec rqtp;
     rqtp.tv_sec = nanoseconds / 1000000000;
     rqtp.tv_nsec = nanoseconds - rqtp.tv_sec * 1000000000;
     nanosleep(&rqtp, 0);
@@ -5242,7 +5242,7 @@ function String os_get_clipboard_text()
     // char *text = [string UTF8String];
     char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
 
-    auto result = string_copy(temp_arena(), string_from_cstr(text));
+    String result = string_copy(temp_arena(), string_from_cstr(text));
     return result;
 }
 
@@ -5352,14 +5352,14 @@ function Semaphore semaphore_create(u32 max_count) {
 }
 
 function void semaphore_signal(Semaphore *sem) {
-    auto handle = cast(semaphore_t *)sem->handle;
+    semaphore_t *handle = cast(semaphore_t *)sem->handle;
     kern_return_t ret = semaphore_signal(*handle);
     assert(ret == KERN_SUCCESS);
 }
 
 function void semaphore_wait_for(Semaphore *sem, bool infinite) {
     kern_return_t ret;
-    auto handle = cast(semaphore_t *)sem->handle;
+    semaphore_t *handle = cast(semaphore_t *)sem->handle;
 
     if (infinite) {
         ret = semaphore_wait(*handle);
@@ -5373,7 +5373,7 @@ function void semaphore_wait_for(Semaphore *sem, bool infinite) {
 
 function void semaphore_destroy(Semaphore *sem) {
     mach_port_t self = mach_task_self();
-    auto handle = cast(semaphore_t *)sem->handle;
+    semaphore_t *handle = cast(semaphore_t *)sem->handle;
     semaphore_destroy(self, *handle);
     os_free(handle); // @Memory @Cleanup
     handle = 0;

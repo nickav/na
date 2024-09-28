@@ -75,7 +75,7 @@ VERSION HISTORY
 #define Sign(x) (((x) > 0) - ((x) < 0))
 #define Abs(x) (((x) < 0) ? (0u - x) : (0u + x))
 
-#if !defined(__cplusplus)
+#if !defined(__cplusplus) && !defined(bool)
     #define bool int
     #define true 1
     #define false 0
@@ -1785,8 +1785,8 @@ function f32 r2_aspect_ratio(Rectangle2 r)
 
 function Rectangle2 r2_scale_to_fit(Rectangle2 r01, Rectangle2 dest) {
     Rectangle2 result = {0};
-    result.p0 = dest.p0 + r01.p0 * r2_size(dest);
-    result.p1 = dest.p0 + r01.p1 * r2_size(dest);
+    result.p0 = v2_add(dest.p0, v2_mul(r01.p0, r2_size(dest)));
+    result.p1 = v2_add(dest.p0, v2_mul(r01.p1, r2_size(dest)));
     return result;
 }
 
@@ -2805,6 +2805,26 @@ function Vector4 v4_rgba_from_u32(u32 hex)
     return result;
 }
 
+function Vector4 v4_rgba_from_u8(u8 r, u8 g, u8 b, u8 a)
+{
+    Vector4 result = {0};
+    result.r = (f32)(r) / 255.f;
+    result.g = (f32)(g) / 255.f;
+    result.b = (f32)(b) / 255.f;
+    result.a = (f32)(a) / 255.f;
+    return result;
+}
+
+function Vector4 v4_rgb_from_u8(u8 r, u8 g, u8 b)
+{
+    Vector4 result = {0};
+    result.r = (f32)(r) / 255.f;
+    result.g = (f32)(g) / 255.f;
+    result.b = (f32)(b) / 255.f;
+    result.a = 1;
+    return result;
+}
+
 function u32 u32_rgba_from_v4(Vector4 v)
 {
     u32 result =
@@ -3028,6 +3048,22 @@ function Vector3 world_to_screen(Matrix4 proj, Vector3 world, Vector2 window)
     f32 z = ndc.z;
 
     return v3(x, y, z);
+}
+
+function b32 point_in_triangle(Vector2 point, Vector2 v1, Vector2 v2, Vector2 v3)
+{
+    #define triangle_sign(p1, p2, p3) (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y)
+
+    f32 d1 = triangle_sign(point, v1, v2);
+    f32 d2 = triangle_sign(point, v2, v3);
+    f32 d3 = triangle_sign(point, v3, v1);
+
+    #undef triangle_sign
+
+    b32 has_neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    b32 has_pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+    return !(has_neg && has_pos);
 }
 
 #endif // NA_MATH_H
