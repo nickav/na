@@ -5225,8 +5225,13 @@ function void os_sleep(f64 seconds)
 #include <objc/message.h>
 #include <objc/NSObjCRuntime.h>
 
-typedef void* macos_NSString;
-typedef macos_NSString* NSPasteboardType;
+#ifdef __OBJC__
+@class NSString;
+#else
+typedef void NSString;
+#endif
+
+typedef NSString* NSPasteboardType;
 import NSPasteboardType const NSPasteboardTypeString; // Available MacOS 10.6
 
 #define objc_msgSend_id ((id (*)(id, SEL))objc_msgSend)

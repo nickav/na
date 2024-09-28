@@ -16,145 +16,16 @@ VERSION HISTORY
     0.01  - Initial release
 */
 
-#ifndef NA_NET_H
-#define NA_NET_H
-
-//
-// Simple HTTP Example:
-//
-#if 0
-    socket_init();
-
-    auto r = http_get(S("http://nickav.co/"));
-
-    while (r.status == HttpStatus_Pending) {
-        reset_temporary_storage();
-
-        http_process(&r);
-        os_sleep(1.0f);
-    }
-
-    if (r.status == HttpStatus_Completed)
-    {
-        dump(r.status_code);
-        dump(r.content_type);
-
-        auto headers = http_parse_headers(r.response_headers);
-        For (headers) {
-            print("%S = %S\n", it.key, it.value);
-        }
-
-        dump(r.response_body);
-    }
-#endif
-
-//
-// HTTP Request Manager Example:
-//
-#if 0
-    socket_init();
-
-    auto r1 = http_get(S("http://nickav.co/"));
-    http_add(&man, r1);
-
-    auto r2 = http_get(S("http://nickav.co/images/dronepollock.jpg"));
-    http_add(&man, r2);
-
-    while (man.requests.count > 0)
-    {
-        http_update(&man);
-
-        Forp (man.requests)
-        {
-            if (it->status == HttpStatus_Pending) continue;
-
-            print("finished! ");
-            dump(it->status_code);
-            dump(it->content_type);
-        }
-
-        os_sleep(1.0f);
-    }
-#endif
-
-//
-// Simple TCP Example
-//
-#if 0
-    Socket socket = socket_create_tcp_server(socket_make_address_from_url(S("127.0.0.1:3000")));
-    Socket client;
-
-    while (1)
-    {
-        reset_temporary_storage();
-
-        Socket client;
-        Socket_Address client_address;
-        if (socket_accept(&socket, &client, &client_address))
-        {
-            print("Got request from %S:%d\n", socket_get_address_name(client_address), client_address.port);
-            
-            auto request = socket_recieve_entire_stream(temp_arena(), &client);
-            socket_send(&client, {}, S("HTTP/1.1 200 OK\r\n\r\nHello, World!\r\n\r\n"));
-            socket_close(&client);
-        }
-
-        os_sleep(1);
-    }
-#endif
-
-//
-// UDP Client/Server Example
-//
-#if 0
-    socket_init();
-
-    Socket_Address server_address = socket_make_address_from_url(S("127.0.0.1:9999"));
-
-    Socket sock = socket_create_udp_server(server_address);
-    bool is_server = socket_is_valid(sock);
-    if (!is_server)
-    {
-        sock = socket_create_udp_client(server_address);
-    }
-
-    if (is_server)
-    {
-        print("Server started!\n");
-    }
-    else
-    {
-        print("Client started!\n");
-    }
-
-    if (!is_server)
-    {
-        socket_send(&sock, server_address, S("Hello from Hawaii's amazing adventure"));
-    }
-
-    while (true)
-    {
-        if (is_server)
-        {
-            String buffer = make_string((char *)talloc(1024), 1024);
-            Socket_Address address;
-            if (socket_recieve(&sock, &buffer, &address))
-            {
-                print("Got bytes: %S\n", buffer);
-            }
-        }
-
-        os_sleep(1);
-    }
-
-    return 0;
-#endif
-
 //
 // TODO(nick):
 // - handle chunked responses
 // - replace `select` calls with Linux epoll / win32 / MacOS kqueue solution
+// - support IPV6 addresses
+// - fix HTTP server slowness on Chrome/Windows?
 //
+
+#ifndef NA_NET_H
+#define NA_NET_H
 
 typedef u32 Socket_Type;
 enum
@@ -162,6 +33,7 @@ enum
     SocketType_TCP,
     SocketType_UDP,
 };
+
 
 typedef struct Socket Socket;
 struct Socket
@@ -189,8 +61,6 @@ enum
 typedef struct Http Http;
 struct Http
 {
-    Http *next;
-
     Socket      socket;
     Http_Status status;
 
@@ -218,9 +88,9 @@ struct Http_Header
 typedef struct Http_Header_Array Http_Header_Array;
 struct Http_Header_Array
 {
+    i64 capacity;
+    i64 count;
     Http_Header *data;
-    u64 count;
-    u64 capacity;
 };
 
 typedef struct Http_Request Http_Request;
@@ -240,24 +110,25 @@ struct Http_Response
     String body;
 };
 
-
-typedef struct Http_Url_Parts Http_Url_Parts;
-struct Http_Url_Parts
-{
-    String protocol; // http or https
-    String host;     // nickav.co
-    i64    port;     // 80
-    String path;     // robots.txt
-};
-
-typedef struct Http_Manager Http_Manager;
-struct Http_Manager
+typedef struct Http_Pool Http_Pool;
+struct Http_Pool
 {
     Arena *arena;
-    Http *first_request;
-    Http *last_request;
+    struct {
+        Http *data;
+        u64 count;
+        u64 capacity;
+    } requests;
 };
 
+typedef struct Http_Server Http_Server;
+struct Http_Server
+{
+    Socket socket;
+};
+
+#define HTTP_REQUEST_CALLBACK(name) void name(Http_Request *request, Http_Response *response)
+typedef HTTP_REQUEST_CALLBACK(Http_Request_Callback);
 
 //
 // Socket methods
@@ -266,13 +137,15 @@ struct Http_Manager
 function bool socket_init();
 function void socket_shutdown();
 
+function bool socket_is_valid(Socket socket);
+
 function Socket socket_open(Socket_Type type);
 function void socket_close(Socket *socket);
 
 function bool socket_bind(Socket *socket, Socket_Address address);
 function bool socket_connect(Socket *socket, Socket_Address address);
 function bool socket_listen(Socket *socket);
-function bool socket_accept(Socket *socket, Socket_Address *address);
+function bool socket_accept(Socket *socket, Socket *from_socket, Socket_Address *from_address);
 
 function bool socket_can_write(Socket *socket);
 
@@ -280,15 +153,16 @@ function bool socket_is_ready(Socket *socket);
 function bool socket_send(Socket *socket, Socket_Address address, String message);
 function i64 socket_recieve_bytes(Socket *socket, u8 *data, u64 count, Socket_Address *address);
 function bool socket_recieve(Socket *socket, String *buffer, Socket_Address *address);
+function String socket_recieve_entire_stream(Arena *arena, Socket *socket);
 
 function String socket_get_address_name(Socket_Address address);
 
-function Socket_Address socket_make_address(const char *host, u16 port);
+function Socket_Address socket_make_address(String host, u16 port);
 function Socket_Address socket_make_address_from_url(String url);
 
+function Socket socket_create_tcp_connection(Socket_Address address);
 function Socket socket_create_udp_server(Socket_Address address);
 function Socket socket_create_udp_client(Socket_Address address);
-
 
 //
 // HTTP methods
@@ -303,27 +177,30 @@ function Http http_delete(String url);
 
 function void http_process(Http *http);
 
-
 function Http_Header_Array http_parse_headers(Arena *arena, String headers);
 function Http_Request http_parse_request(String request);
+function String http_status_name_from_code(i32 status_code);
+function String http_content_type_from_extension(String ext);
 
-function void http_manager_init(Http_Manager *manager);
-function void http_manager_add(Http_Manager *manager, Http *request);
-function void http_manager_update(Http_Manager *manager);
-function Http *http_manager_get_completed(Http_Manager *manager);
+//
+// high-level HTTP APIs
+//
+
+function void http_pool_init(Http_Pool *pool);
+function void http_pool_add(Http_Pool *pool, Http request);
+function void http_pool_update(Http_Pool *pool);
+
+function Http_Server http_server_init(String server_url);
+function bool http_server_poll(Http_Server *server, Socket *client, Socket_Address *client_address);
+function void http_server_tick(Http_Server *server, Http_Request_Callback request_handler);
+function void http_server_run(String server_url, Http_Request_Callback request_handler);
 
 
+//
+// Implementation:
+//
 
-#endif // NA_NET_H
-
-
-#ifdef impl
-
-#if _WIN32
-
-#ifndef OS_WINDOWS
-#define OS_WINDOWS 1
-#endif
+#if OS_WINDOWS
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -349,7 +226,7 @@ static WSACleanup_Func *W32_WSACleanup;
 #define SOCKET_IN_PROGRESS WSAEINPROGRESS 
 #define SOCKET_LAST_ERROR() WSAGetLastError()
 
-#else // _WIN32
+#else // OS_WINDOWS
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -357,9 +234,6 @@ static WSACleanup_Func *W32_WSACleanup;
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
-#include <sys/select.h>
 
 #define SOCKET_ERROR   -1
 #define INVALID_SOCKET -1
@@ -368,31 +242,54 @@ static WSACleanup_Func *W32_WSACleanup;
 #define SOCKET_IN_PROGRESS WINPROGRESS 
 #define SOCKET_LAST_ERROR() errno
 
-#endif // _WIN32
+#endif // OS_WINDOWS
+
+#if defined(__APPLE__)
+#include <arpa/inet.h>
+
+#define TIMEVAL struct timeval
+#define SOCKADDR_IN struct sockaddr_in
+#endif
 
 
-function Socket_Address socket_make_address(const char *host, u16 port)
+typedef struct Http_URL_Parts Http_URL_Parts;
+struct Http_URL_Parts
+{
+    String protocol; // http or https
+    String host;     // nickav.co
+    i64    port;     // 80
+    String path;     // robots.txt
+};
+
+
+function Socket_Address socket_make_address(String host, u16 port)
 {
     Socket_Address result = {0};
 
-    if (host == NULL)
+    if (host.data == NULL)
     {
         result.host = INADDR_ANY;
     }
     else
     {
-        inet_pton(AF_INET, host, &result.host);
+        char host_cstr[1024];
+
+        assert(host.count < count_of(host_cstr));
+        MemoryCopy(host_cstr, host.data, host.count);
+        host_cstr[host.count] = '\0';
+
+        inet_pton(AF_INET, host_cstr, &result.host);
         if (result.host == 0 || result.host == INADDR_NONE)
         {
-            struct hostent *hostent = gethostbyname(host);
+            struct hostent *hostent = gethostbyname(host_cstr);
             if (hostent)
             {
-                MemoryCopy(hostent->h_addr, &result.host, hostent->h_length);
+                MemoryCopy(&result.host, hostent->h_addr, hostent->h_length);
+                result.port = port;
             }
             else
             {
-                print("[socket] Invalid host name: %s\n", host);
-                return result;
+                print("[socket] Invalid host name: %.*s\n", LIT(host));
             }
         }
 
@@ -401,14 +298,12 @@ function Socket_Address socket_make_address(const char *host, u16 port)
         */
     }
 
-    result.port = port;
-
     return result;
 }
 
-function Http_Url_Parts socket_parse_url(String url)
+function Http_URL_Parts http__socket_parse_url(String url)
 {
-    Http_Url_Parts result = {0};
+    Http_URL_Parts result = {0};
 
     i64 index;
 
@@ -416,7 +311,7 @@ function Http_Url_Parts socket_parse_url(String url)
     if (index < url.count)
     {
         result.protocol = string_slice(url, 0, index);
-        url = string_slice(url, index + S("://").count, url.count);
+        url = string_slice(url, index + 3, url.count);
     }
 
     index = string_find(url, S("/"), 0, 0);
@@ -445,10 +340,11 @@ function Http_Url_Parts socket_parse_url(String url)
     return result;
 }
 
+static bool __socket_initted = false;
+
 function bool socket_init()
 {
-    static bool initted = false;
-    if (initted) return true;
+    if (__socket_initted) return true;
 
     #if OS_WINDOWS
     w32_socket_lib = LoadLibraryA("ws2_32.dll");
@@ -471,16 +367,33 @@ function bool socket_init()
     WSADATA wsdata;
     if (W32_WSAStartup(0x202, &wsdata))
     {
-      print("WSAStartup failed: %d", W32_WSAGetLastError());
-      return false;
+        print("WSAStartup failed: %d", W32_WSAGetLastError());
+        return false;
     }
     #endif // OS_WINDOWS
 
-    initted = true;
+    __socket_initted = true;
     return true;
 }
 
-function bool socket_set_non_blocking_internal(i64 handle)
+function void socket_shutdown()
+{
+    if (!__socket_initted) return;
+
+    #if OS_WINDOWS
+    if (w32_socket_lib)
+    {
+        FreeLibrary(w32_socket_lib);
+        w32_socket_lib = 0;
+    }
+
+    W32_WSACleanup();
+    #endif // OS_WINDOWS
+
+    __socket_initted = false;
+}
+
+function bool socket__set_non_blocking(i64 handle)
 {
     int ret;
     #if OS_WINDOWS
@@ -515,7 +428,7 @@ function Socket socket_open(Socket_Type type)
 
     // Set non-blocking
     {
-        bool success = socket_set_non_blocking_internal(result.handle);
+        bool success = socket__set_non_blocking(result.handle);
         if (!success)
         {
             print("[socket] Failed to set socket to non-blocking!\n");
@@ -525,20 +438,6 @@ function Socket socket_open(Socket_Type type)
     }
 
     return result;
-}
-
-function void socket_close(Socket *socket)
-{
-    if (socket && socket->handle)
-    {
-        #if OS_WINDOWS
-        closesocket(socket->handle);
-        #else
-        close(socket->handle);
-        #endif
-
-        socket->handle = 0;
-    }
 }
 
 function bool socket_bind(Socket *socket, Socket_Address address)
@@ -579,7 +478,7 @@ function bool socket_accept(Socket *socket, Socket *from_socket, Socket_Address 
 
     if (sock != INVALID_SOCKET)
     {
-        socket_set_non_blocking_internal(sock);
+        socket__set_non_blocking(sock);
 
         if (from_address != NULL)
         {
@@ -611,12 +510,12 @@ function bool socket_connect(Socket *socket, Socket_Address address)
     if (result == SOCKET_ERROR)
     {
         #ifdef _WIN32
-            if ( WSAGetLastError() != WSAEWOULDBLOCK && WSAGetLastError() != WSAEINPROGRESS )
+            if (WSAGetLastError() != WSAEWOULDBLOCK && WSAGetLastError() != WSAEINPROGRESS)
             {
                 return false;
             }
         #else
-            if ( errno != EWOULDBLOCK && errno != EINPROGRESS && errno != EAGAIN )
+            if (errno != EWOULDBLOCK && errno != EINPROGRESS && errno != EAGAIN)
             {
                 return false;
             }
@@ -624,6 +523,20 @@ function bool socket_connect(Socket *socket, Socket_Address address)
     }
 
     return true;
+}
+
+function void socket_close(Socket *socket)
+{
+    if (socket && socket->handle)
+    {
+        #if OS_WINDOWS
+        closesocket(socket->handle);
+        #else
+        close(socket->handle);
+        #endif
+
+        socket->handle = 0;
+    }
 }
 
 function bool socket_can_write(Socket *socket)
@@ -634,7 +547,7 @@ function bool socket_can_write(Socket *socket)
     FD_ZERO(&write_fds);
     FD_SET(socket->handle, &write_fds);
 
-    struct timeval timeout;
+    TIMEVAL timeout;
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
 
@@ -650,6 +563,8 @@ function bool socket_can_write(Socket *socket)
     return false;
 }
 
+// @Cleanup @Incomplete: socket_is_ready should really be socket_is_ready_to_write
+// Also merge this with socket_can_write if possible??
 function bool socket_is_ready(Socket *socket)
 {
     if (!socket) return false;
@@ -658,7 +573,7 @@ function bool socket_is_ready(Socket *socket)
     FD_ZERO(&write_fds);
     FD_SET(socket->handle, &write_fds);
 
-    struct timeval timeout;
+    TIMEVAL timeout;
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
 
@@ -679,9 +594,14 @@ function bool socket_send(Socket *socket, Socket_Address address, String message
         addr.sin_port        = htons(address.port);
 
         int sent_bytes = sendto(socket->handle, (char *)message.data, message.count, 0, (struct sockaddr *)&addr, sizeof(addr));
+        if (sent_bytes < 0)
+        {
+            return false;
+        }
+
+        // @Incomplete: should this send the message in chunks?
         if (sent_bytes != message.count)
         {
-            //return zed_net__error("Failed to send data");
             return false;
         }
 
@@ -692,10 +612,27 @@ function bool socket_send(Socket *socket, Socket_Address address, String message
         // @Incomplete: non-blocking TCP
 
         int sent_bytes = send(socket->handle, (char *)message.data, message.count, 0);
+        if (sent_bytes < 0)
+        {
+            return false;
+        }
+
+        // @Incomplete: check errno == EAGAIN or errno == EWOULDBLOCK
+        // and use select to determine when we can send again?
         if (sent_bytes != message.count)
         {
-            //return zed_net__error("Failed to send data");
-            return false;
+            u8 *data = message.data + sent_bytes;
+            while (sent_bytes < message.count)
+            {
+                i64 bytes_remaining = message.count - sent_bytes;
+                i64 s = send(socket->handle, (char *)(message.data + sent_bytes), bytes_remaining, 0);
+                if (s > 0)
+                {
+                    sent_bytes += s;
+                }
+            }
+
+            return true;
         }
 
         return true;
@@ -714,12 +651,12 @@ function i64 socket_recieve_bytes(Socket *socket, u8 *data, u64 count, Socket_Ad
 
     if (socket->type == SocketType_UDP)
     {
-        struct sockaddr_in from;
+        SOCKADDR_IN from;
         int from_size = sizeof(from);
 
         int bytes_received = recvfrom(
             socket->handle,
-            (char *)data, count, 0, (struct sockaddr *)&from, (socklen_t *)&from_size
+            (char *)data, count, 0, (sockaddr *)&from, (socklen_t *)&from_size
         );
 
         if (address != NULL)
@@ -758,29 +695,21 @@ function String socket_recieve_entire_stream(Arena *arena, Socket *socket)
     for (;;)
     {
         i64 count = socket_recieve_bytes(socket, at, buffer_size, NULL);
-        if (count <= 0) break;
+        if (count <= 0)
+        {
+            // @Incomplete: test this?
+            if (bytes_received > 0) break;
+            else continue;
+        }
 
         bytes_received += count;
         at += count;
-        buffer_size *= 2;
+        buffer_size += 4096;
         assert(arena_push(arena, buffer_size));
     }
 
     arena_pop(arena, buffer_size - bytes_received);
     return string_make(buffer, bytes_received);
-}
-
-function void socket_shutdown()
-{
-    #if OS_WINDOWS
-    if (w32_socket_lib)
-    {
-        FreeLibrary(w32_socket_lib);
-        w32_socket_lib = 0;
-    }
-
-    W32_WSACleanup();
-    #endif // OS_WINDOWS
 }
 
 function String socket_get_address_name(Socket_Address address)
@@ -805,20 +734,19 @@ function bool socket_is_valid(Socket socket)
 
 function Socket_Address socket_make_address_from_url(String url)
 {
-    Http_Url_Parts parts = socket_parse_url(url);
-    return socket_make_address(string_to_cstr(temp_arena(), parts.host), parts.port);
+    Http_URL_Parts parts = http__socket_parse_url(url);
+    Socket_Address result = socket_make_address(parts.host, parts.port);
+    return result;
 }
 
 function Socket socket_create_udp_server(Socket_Address address)
 {
-    socket_init();
-
     Socket result = socket_open(SocketType_UDP);
 
     if (!socket_bind(&result, address))
     {
         String url = socket_get_address_name(address);
-        print("[socket] Failed to bind to address: %.*s\n", LIT(url));
+        print("[socket] Failed to bind to address: %S\n", url);
         socket_close(&result);
         return result;
     }
@@ -828,8 +756,6 @@ function Socket socket_create_udp_server(Socket_Address address)
 
 function Socket socket_create_udp_client(Socket_Address address)
 {
-    socket_init();
-
     Socket result = socket_open(SocketType_UDP);
 
     //socket_bind(&result, socket_make_address(0, 0));
@@ -837,7 +763,7 @@ function Socket socket_create_udp_client(Socket_Address address)
     if (!socket_connect(&result, address))
     {
         String url = socket_get_address_name(address);
-        print("[socket] Failed to connect to server address: %.*s\n", LIT(url));
+        print("[socket] Failed to connect to server address: %S\n", url);
         socket_close(&result);
         return result;
     }
@@ -845,86 +771,31 @@ function Socket socket_create_udp_client(Socket_Address address)
     return result;
 }
 
-function Http http_request(String verb, String url, String headers, String data)
+function Socket socket_create_tcp_server(Socket_Address address)
 {
-    socket_init();
+    Socket result = socket_open(SocketType_TCP);
 
-    Http result = {0};
-
-    Http_Url_Parts parts = socket_parse_url(url);
-    if (!parts.path.count)
+    if (!socket_bind(&result, address))
     {
-        parts.path = S("/");
-    }
-
-    if (parts.protocol.count > 0 && !string_equals(parts.protocol, S("http")))
-    {
-        print("[http] Protocol not supported: %.*s\n", LIT(parts.protocol));
-        result.status = HttpStatus_Failed;
+        String url = socket_get_address_name(address);
+        print("[socket] Failed to bind to address: %S:%d\n", url, address.port);
+        socket_close(&result);
         return result;
     }
 
-    if (parts.port == 0)
+    if (!socket_listen(&result))
     {
-        print("[http] Invalid port\n");
-        result.status = HttpStatus_Failed;
+        print("[socket] Failed to listen\n");
+        socket_close(&result);
         return result;
     }
-
-    Socket_Address address = socket_make_address(string_to_cstr(temp_arena(), parts.host), parts.port);
-
-    result.socket = socket_open(SocketType_TCP);
-    if (!socket_connect(&result.socket, address))
-    {
-        print("[http] Failed to connect to TCP socket\n");
-        socket_close(&result.socket);
-        result.status = HttpStatus_Failed;
-        return result;
-    }
-
-    assert(string_starts_with(parts.path, S("/")));
-
-    M_Temp scratch = GetScratch(0, 0);
-
-    String_Array chunks = {0};
-    chunks.data = PushArray(scratch.arena, String, 16);
-    chunks.count = 0;
-
-    String request_data = string_print(scratch.arena, "%.*s %.*s HTTP/1.0\r\nHost: %.*s:%d\r\n", LIT(verb), LIT(parts.path), LIT(parts.host), parts.port);
-    chunks.data[chunks.count] = request_data;
-    chunks.count += 1;
-
-    if (data.count)
-    {
-        String content_header = string_print(scratch.arena, "Content-Length: %d", data.count);
-        chunks.data[chunks.count] = content_header;
-        chunks.count += 1;
-    }
-
-    if (headers.count)
-    {
-        chunks.data[chunks.count] = headers;
-        chunks.count += 1;
-    }
-
-    chunks.data[chunks.count] = string_print(scratch.arena, "\r\n\r\n");
-    request_data.count += 1;
-
-    if (data.count)
-    {
-        chunks.data[chunks.count] = data;
-        chunks.count += 1;
-    }
-
-    String request = string_concat_array(scratch.arena, chunks.data, chunks.count);
-
-    result.request_data = string_alloc(request);
-    result.status       = HttpStatus_Pending;
-
-    ReleaseScratch(scratch);
 
     return result;
 }
+
+//
+// HTTP methods
+//
 
 function Http http_get(String url)
 {
@@ -946,51 +817,129 @@ function Http http_delete(String url)
     return http_request(S("DELETE"), url, S(""), S(""));
 }
 
-function Http_Header_Array http_parse_headers(Arena *arena, String headers)
+function Http http_request(String verb, String url, String headers, String data)
 {
-    Http_Header_Array result = {0};
+    Http result = {0};
 
-    result.data = PushArray(arena, Http_Header, 1024);
-    result.count = 0;
-    result.capacity = 1024;
-
-    i64 prev_index = 0;
-    i64 index = string_find(headers, S("\r\n"), 0, 0);
-
-    while (index < headers.count)
+    Http_URL_Parts parts = http__socket_parse_url(url);
+    if (!parts.path.count)
     {
-        String line = string_slice(headers, prev_index, index);
-        i64 i = string_find(line, S(":"), 0, 0);
-        if (i < line.count)
-        {
-            assert(result.count < result.capacity);
-            Http_Header *it = &result.data[result.count];
-            result.count += 1;
-            it->key   = string_slice(line, 0, i);
-            it->value = string_trim_whitespace(string_slice(line, i + 1, line.count));
-        }
-
-        prev_index = index + S("\r\n").count;
-        index = string_find(headers, S("\r\n"), prev_index + 1, 0);
+        parts.path = S("/");
     }
 
-    String line = string_slice(headers, prev_index, index);
-    i64 i = string_find(line, S(":"), 0, 0);
-    if (i < line.count)
+    if (parts.protocol.count > 0 && !string_equals(parts.protocol, S("http")))
     {
-        assert(result.count < result.capacity);
-        Http_Header *it = &result.data[result.count];
-        result.count += 1;
-        it->key   = string_slice(line, 0, i);
-        it->value = string_trim_whitespace(string_slice(line, i + 1, line.count));
+        print("[http] Protocol not supported: %S\n", parts.protocol);
+        result.status = HttpStatus_Failed;
+        return result;
     }
 
-    // @Memory: release over-allocated count
+    if (parts.port == 0)
+    {
+        print("[http] Invalid port\n");
+        result.status = HttpStatus_Failed;
+        return result;
+    }
+
+    Socket_Address address = socket_make_address(parts.host, parts.port);
+
+    result.socket = socket_open(SocketType_TCP);
+    if (!socket_connect(&result.socket, address))
+    {
+        print("[http] Failed to connect to TCP socket\n");
+        socket_close(&result.socket);
+        result.status = HttpStatus_Failed;
+        return result;
+    }
+
+    assert(string_starts_with(parts.path, S("/")));
+
+    String array[10] = {0};
+    u32 count = 0;
+
+    array[count++] = sprint("%S %S HTTP/1.0\r\nHost: %S:%d\r\n", verb, parts.path, parts.host, parts.port);
+
+    if (data.count)
+    {
+        array[count++] = sprint("Content-Length: %d", data.count);
+    }
+
+    if (headers.count)
+    {
+        array[count++] = headers;
+    }
+
+    array[count++] = S("\r\n\r\n");
+
+    if (data.count)
+    {
+        array[count++] = data;
+    }
+
+    assert(count < count_of(array));
+
+    String request_data = string_alloc(string_concat_array(temp_arena(), array, count));
+    result.request_data = request_data;
+    result.status       = HttpStatus_Pending;
 
     return result;
 }
 
-void http_process(Http *http)
+function Http_Header_Array http_parse_headers(Arena *arena, String headers)
+{
+    Http_Header_Array results = {0};
+
+    String_List lines = string_split(arena, headers, S("\r\n"));
+
+    results.count = 0;
+    results.capacity = lines.node_count;
+    results.data = PushArray(arena, Http_Header, lines.node_count);
+
+    for (String_Node *node = lines.first; node != NULL; node = node->next)
+    {
+        String line = node->string;
+
+        i64 index = string_find(line, S(":"), 0, 0);
+        if (index < line.count)
+        {
+            Http_Header *it = &results.data[results.count];
+            results.count += 1;
+            it->key   = string_slice(line, 0, index);
+            it->value = string_trim_whitespace(string_slice(line, index + 1, line.count));
+        }
+    }
+
+    return results;
+}
+
+function Http_Request http_parse_request(String request)
+{
+    Http_Request result = {0};
+
+    i64 index;
+
+    index = string_find(request, S("\r\n"), 0, 0);
+    if (index < request.count)
+    {
+        request = string_slice(request, 0, index);
+    }
+
+    index = string_find(request, S(" "), 0, 0);
+    if (index < request.count)
+    {
+        result.method = string_slice(request, 0, index);
+
+        i64 index2 = string_find(request, S(" "), index + 1, 0);
+        if (index2 < request.count)
+        {
+            result.url = string_slice(request, index + 1, index2);
+        }
+    }
+
+    return result;
+}
+
+function void http_process(Http *http)
 {
     if (http->status == HttpStatus_Failed || http->status == HttpStatus_Completed)
     {
@@ -1058,20 +1007,24 @@ void http_process(Http *http)
         if (index < response_data.count)
         {
             String first = string_slice(response_data, 0, index);
-            String_Array first_parts = string_array_from_list(temp_arena(), string_split(temp_arena(), first, S(" ")));
 
-            i64 status_code = string_to_i64(first_parts.data[1], 10);
-            if (!(status_code > 0 && status_code < 1000))
+            i64 space0 = string_find(first, S(" "), 0, 0);
+            i64 space1 = string_find(first, S(" "), space0 + 1, 0);
+            if (space0 < first.count && space1 < first.count)
             {
-                status_code = 0;
-            }
-            http->status_code = status_code;
+                i64 status_code = string_to_i64(string_slice(first, space0 + 1, space1), 10);
+                if (!(status_code > 0 && status_code < 1000))
+                {
+                    status_code = 0;
+                }
+                http->status_code = status_code;
 
-            i64 header_end_index = string_find(response_data, S("\r\n\r\n"), index + S("\r\n").count, 0);
-            if (header_end_index < response_data.count)
-            {
-                http->response_headers = string_slice(response_data, index + S("\r\n").count, header_end_index);
-                http->response_body = string_slice(response_data, header_end_index + S("\r\n\r\n").count, response_data.count);
+                i64 header_end_index = string_find(response_data, S("\r\n\r\n"), index + 2 /*S("\r\n").count*/, 0);
+                if (header_end_index < response_data.count)
+                {
+                    http->response_headers = string_slice(response_data, index + 2 /*S("\r\n").count*/, header_end_index);
+                    http->response_body = string_slice(response_data, header_end_index + 4 /*S("\r\n\r\n").count*/, response_data.count);
+                }
             }
         }
 
@@ -1098,87 +1051,44 @@ void http_process(Http *http)
     }
 }
 
+//
+// high-level HTP APIs
+//
 
-function void http_init(Http_Manager *manager)
+function void http_pool_init(Http_Pool *pool)
 {
-    manager->arena = arena_alloc(Gigabytes(1));
+    pool->arena = arena_alloc(Gigabytes(1));
+    pool->requests.capacity = 1024;
+    pool->requests.count = 0;
+    pool->requests.data = PushArrayZero(pool->arena, Http, pool->requests.capacity);
 }
 
-function void http_add(Http_Manager *manager, Http request)
+function void http_pool_add(Http_Pool *pool, Http request)
 {
-    // @Incomplete!
-    //array_push(&manager->requests, request);
+    assert(pool->requests.count < pool->requests.capacity);
+    pool->requests.data[pool->requests.count] = request;
+    pool->requests.count += 1;
 }
 
-function void http_update(Http_Manager *manager)
+function void http_pool_update(Http_Pool *pool)
 {
-    // @Incomplete!
-    /*
-    For_Index (manager->requests)
+    for (i64 index = 0; index < pool->requests.count; index += 1)
     {
-        auto it = &manager->requests[index];
+        Http *it = &pool->requests.data[index];
         if (it->status != HttpStatus_Pending)
         {
-            array_remove_ordered(&manager->requests, index);
-            index --;
+            Swap(Http, pool->requests.data[index], pool->requests.data[pool->requests.count - 1]);
+            pool->requests.count -= 1;
+            index -= 1;
+            continue;
         }
     }
 
-    Forp (manager->requests)
+    for (i64 index = 0; index < pool->requests.count; index += 1)
     {
+        Http *it = &pool->requests.data[index];
         http_process(it);
     }
-    */
-}
-
-
-function Http_Request http_parse_request(String request)
-{
-    Http_Request result = {0};
-
-    i64 index;
-
-    index = string_find(request, S("\r\n"), 0, 0);
-    if (index < request.count)
-    {
-        request = string_slice(request, 0, index);
-    }
-
-    index = string_find(request, S(" "), 0, 0);
-    if (index < request.count)
-    {
-        result.method = string_slice(request, 0, index);
-
-        i64 index2 = string_find(request, S(" "), index + 1, 0);
-        if (index2 < request.count)
-        {
-            result.url = string_slice(request, index + 1, index2);
-        }
-    }
-
-    return result;
-}
-
-function Socket socket_create_tcp_server(Socket_Address address)
-{
-    Socket result = socket_open(SocketType_TCP);
-
-    if (!socket_bind(&result, address))
-    {
-        String url = socket_get_address_name(address);
-        print("[socket] Failed to bind to address: %.*s:%d\n", LIT(url), address.port);
-        socket_close(&result);
-        return result;
-    }
-
-    if (!socket_listen(&result))
-    {
-        print("[socket] Failed to listen\n");
-        socket_close(&result);
-        return result;
-    }
-
-    return result;
 }
 
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
@@ -1252,41 +1162,30 @@ function String http_content_type_from_extension(String ext)
 {
     String result = {0};
 
-    string_to_lower(&ext);
-
     if (false) {}
-    else if (string_equals(ext, S(".html"))) { result = S("text/html"); }
-    else if (string_equals(ext, S(".css")))  { result = S("text/css"); }
-    else if (string_equals(ext, S(".js")))   { result = S("text/javascript"); }
-    else if (string_equals(ext, S(".json"))) { result = S("application/json"); }
-    else if (string_equals(ext, S(".txt")))  { result = S("text/plain"); }
-    else if (string_equals(ext, S(".md")))   { result = S("text/plain"); }
-    else if (string_equals(ext, S(".bmp")))  { result = S("image/bmp"); }
-    else if (string_equals(ext, S(".gif")))  { result = S("image/gif"); }
-    else if (string_equals(ext, S(".png")))  { result = S("image/png"); }
-    else if (string_equals(ext, S(".jpg")))  { result = S("image/jpeg"); }
-    else if (string_equals(ext, S(".jpeg"))) { result = S("image/jpeg"); }
-    else if (string_equals(ext, S(".jpe")))  { result = S("image/jpeg"); }
-    else if (string_equals(ext, S(".ico")))  { result = S("image/x-icon"); }
-    else if (string_equals(ext, S(".svg")))  { result = S("image/svg+xml"); }
-    else if (string_equals(ext, S(".mp3")))  { result = S("audio/mpeg"); }
-    else if (string_equals(ext, S(".mp4")))  { result = S("audio/mp4"); }
-    else if (string_equals(ext, S(".wav")))  { result = S("audio/x-wav"); }
-    else if (string_equals(ext, S(".bin")))  { result = S("application/octet-stream"); }
-    else if (string_equals(ext, S(".exe")))  { result = S("application/octet-stream"); }
-    else if (string_equals(ext, S(".pdf")))  { result = S("application/pdf"); }
-    
+    else if (string_match(ext, S(".html"), MatchFlag_IgnoreCase)) { result = S("text/html"); }
+    else if (string_match(ext, S(".css"), MatchFlag_IgnoreCase))  { result = S("text/css"); }
+    else if (string_match(ext, S(".js"), MatchFlag_IgnoreCase))   { result = S("text/javascript"); }
+    else if (string_match(ext, S(".json"), MatchFlag_IgnoreCase)) { result = S("application/json"); }
+    else if (string_match(ext, S(".txt"), MatchFlag_IgnoreCase))  { result = S("text/plain"); }
+    else if (string_match(ext, S(".md"), MatchFlag_IgnoreCase))   { result = S("text/plain"); }
+    else if (string_match(ext, S(".bmp"), MatchFlag_IgnoreCase))  { result = S("image/bmp"); }
+    else if (string_match(ext, S(".gif"), MatchFlag_IgnoreCase))  { result = S("image/gif"); }
+    else if (string_match(ext, S(".png"), MatchFlag_IgnoreCase))  { result = S("image/png"); }
+    else if (string_match(ext, S(".jpg"), MatchFlag_IgnoreCase))  { result = S("image/jpeg"); }
+    else if (string_match(ext, S(".jpeg"), MatchFlag_IgnoreCase)) { result = S("image/jpeg"); }
+    else if (string_match(ext, S(".jpe"), MatchFlag_IgnoreCase))  { result = S("image/jpeg"); }
+    else if (string_match(ext, S(".ico"), MatchFlag_IgnoreCase))  { result = S("image/x-icon"); }
+    else if (string_match(ext, S(".svg"), MatchFlag_IgnoreCase))  { result = S("image/svg+xml"); }
+    else if (string_match(ext, S(".mp3"), MatchFlag_IgnoreCase))  { result = S("audio/mpeg"); }
+    else if (string_match(ext, S(".mp4"), MatchFlag_IgnoreCase))  { result = S("audio/mp4"); }
+    else if (string_match(ext, S(".wav"), MatchFlag_IgnoreCase))  { result = S("audio/x-wav"); }
+    else if (string_match(ext, S(".bin"), MatchFlag_IgnoreCase))  { result = S("application/octet-stream"); }
+    else if (string_match(ext, S(".exe"), MatchFlag_IgnoreCase))  { result = S("application/octet-stream"); }
+    else if (string_match(ext, S(".pdf"), MatchFlag_IgnoreCase))  { result = S("application/pdf"); }
+
     return result;
 }
-
-typedef struct Http_Server Http_Server;
-struct Http_Server
-{
-    Socket socket;
-};
-
-#define HTTP_REQUEST_CALLBACK(name) void name(Http_Request *request, Http_Response *response)
-typedef HTTP_REQUEST_CALLBACK(Http_Request_Callback);
 
 typedef struct Http_Thread_Params Http_Thread_Params;
 struct Http_Thread_Params
@@ -1301,7 +1200,10 @@ THREAD_PROC(http_responder_thread)
     Http_Thread_Params *params = (Http_Thread_Params *)data;
     Socket *client = &params->client;
 
-    String raw_request = socket_recieve_entire_stream(temp_arena(), client);
+    M_Temp scratch = GetScratch(0, 0);
+    Arena *arena = scratch.arena;
+
+    String raw_request = socket_recieve_entire_stream(arena, client);
     Http_Request request = http_parse_request(raw_request);
     request.address = params->client_address;
 
@@ -1311,63 +1213,61 @@ THREAD_PROC(http_responder_thread)
     if (!response.status_code) response.status_code = (response.body.count > 0) ? 200 : 500;
     if (!response.content_type.count) response.content_type = S("text/plain");
 
-    
-    M_Temp scratch = GetScratch(0, 0);
-
-    String_Array chunks = {0};
-    chunks.data = PushArray(scratch.arena, String, 2048);
-    chunks.count = 0;
+    u32 capacity = 16 + response.headers.count;
+    String *array = PushArray(arena, String, capacity);
+    u32 count = 0;
 
     String status_name = http_status_name_from_code(response.status_code);
-    String response_data = string_print(scratch.arena, "HTTP/1.0 %d %.*s\r\n", response.status_code, LIT(status_name));
-    chunks.data[chunks.count] = response_data;
-    chunks.count += 1;
+
+    array[count++] = sprint("HTTP/1.0 %d %S\r\n", response.status_code, status_name);
 
     if (response.content_type.count)
     {
-        chunks.data[chunks.count] = string_print(scratch.arena, "Content-Type: %.*s\r\n", LIT(response.content_type));
-        chunks.count += 1;
+        array[count++] = sprint("Content-Type: %S\r\n", response.content_type);
     }
 
     if (response.body.count)
     {
-        chunks.data[chunks.count] = string_print(scratch.arena, "Content-Length: %d\r\n", response.body.count);
-        chunks.count += 1;
+        array[count++] = sprint("Content-Length: %d\r\n", response.body.count);
     }
 
     if (response.headers.count > 0)
     {
-        for (int index = 0; index < response.headers.count; index += 1)
+        for (i64 index = 0; index < response.headers.count; index += 1)
         {
             Http_Header it = response.headers.data[index];
-
-            assert(chunks.count < 2048);
-            chunks.data[chunks.count] = string_print(scratch.arena, "%.*s: %.*s\r\n", LIT(it.key), LIT(it.value));
-            chunks.count += 1;
+            array[count++] = sprint("%S: %S\r\n", it.key, it.value);
         }
     }
 
-    assert(chunks.count < 2048);
-    chunks.data[chunks.count] = S("\r\n");
-    chunks.count += 1;
+    array[count++] = S("\r\n");
 
-    String response_payload = string_concat_array(scratch.arena, chunks.data, chunks.count);
-    socket_send(client, {}, response_payload);
+    String response_data = string_concat_array(arena, array, count);
+
+    socket_send(client, {}, response_data);
 
     if (response.body.count)
     {
-        socket_send(client, {}, response.body);
+        while (!socket_send(client, {}, response.body))
+        {
+        }
     }
 
     socket_close(client);
+    ReleaseScratch(scratch);
+
     return 0;
 }
 
 function Http_Server http_server_init(String server_url)
 {
-    Http_Server result = {0};
+    Http_Server result =  {};
     Socket_Address address = socket_make_address_from_url(server_url);
     result.socket = socket_create_tcp_server(address);
+    if (!socket_is_valid(result.socket))
+    {
+        print("[http] Failed to start server at %S\n", server_url);
+    }
     return result;
 }
 
@@ -1396,14 +1296,7 @@ function void http_server_tick(Http_Server *server, Http_Request_Callback reques
 function void http_server_run(String server_url, Http_Request_Callback request_handler)
 {
     socket_init();
-
     Http_Server server = http_server_init(server_url);
-    if (!socket_is_valid(server.socket))
-    {
-        print("Failed to start HTTP server at %.*s\n", LIT(server_url));
-        return;
-    }
-
     while (1)
     {
         arena_reset(temp_arena());
@@ -1412,4 +1305,174 @@ function void http_server_run(String server_url, Http_Request_Callback request_h
     }
 }
 
-#endif // impl
+//
+// Examples:
+//
+
+#if DEBUG
+void http__simple_example()
+{
+    socket_init();
+
+    Http r = http_get(S("http://nickav.co/"));
+
+    while (r.status == HttpStatus_Pending) {
+        arena_reset(temp_arena());
+
+        http_process(&r);
+        os_sleep(1.0f);
+    }
+
+    if (r.status == HttpStatus_Completed)
+    {
+        printf("status_code = %d\n", r.status_code);
+        printf("content_type = %.*s\n", LIT(r.content_type));
+
+        Http_Header_Array headers = http_parse_headers(temp_arena(), r.response_headers);
+        for (i64 index = 0; index < headers.count; index += 1) {
+            Http_Header it = headers.data[index];
+            printf("%.*s = %.*s\n", LIT(it.key), LIT(it.value));
+        }
+
+        printf("response_body = %.*s\n", LIT(r.response_body));
+    }
+}
+
+void http__request_manager_example()
+{
+    socket_init();
+
+    Http_Pool pool = {0};
+    http_pool_init(&pool);
+
+    Http r1 = http_get(S("http://nickav.co/"));
+    http_pool_add(&pool, r1);
+
+    Http r2 = http_get(S("http://nickav.co/images/dronepollock.jpg"));
+    http_pool_add(&pool, r2);
+
+    while (pool.requests.count > 0)
+    {
+        http_pool_update(&pool);
+
+        for (i64 index = 0; index < pool.requests.count; index += 1)
+        {
+            Http *it = &pool.requests.data[index];
+            if (it->status == HttpStatus_Pending) continue;
+
+            // print("finished! ");
+            // Dump(it->status_code);
+            // Dump(it->content_type);
+        }
+
+        os_sleep(1.0f);
+    }
+}
+
+void http__udp_client_server_example()
+{
+    socket_init();
+
+    Socket_Address server_address = socket_make_address_from_url(S("127.0.0.1:9999"));
+
+    Socket sock = socket_create_udp_server(server_address);
+    bool is_server = socket_is_valid(sock);
+    if (!is_server)
+    {
+        sock = socket_create_udp_client(server_address);
+    }
+
+    if (is_server)
+    {
+        print("Server started!\n");
+    }
+    else
+    {
+        print("Client started!\n");
+    }
+
+    if (!is_server)
+    {
+        socket_send(&sock, server_address, S("Hello from Hawaii's amazing adventure"));
+    }
+
+    while (true)
+    {
+        if (is_server)
+        {
+            char temp[1024];
+            String buffer = Str8(temp, count_of(temp));
+
+            Socket_Address address;
+            if (socket_recieve(&sock, &buffer, &address))
+            {
+                print("Got bytes: %.*s\n", LIT(buffer));
+            }
+        }
+
+        os_sleep(1);
+    }
+}
+
+void http__tcp_client_example()
+{
+    Socket socket = socket_create_tcp_server(socket_make_address_from_url(S("127.0.0.1:3000")));
+    Socket client;
+
+    while (1)
+    {
+        arena_reset(temp_arena());
+
+        Socket client;
+        Socket_Address client_address;
+        if (socket_accept(&socket, &client, &client_address))
+        {
+            print("Got request from %S:%d\n", socket_get_address_name(client_address), client_address.port);
+            
+            String request = socket_recieve_entire_stream(temp_arena(), &client);
+            socket_send(&client, {}, S("HTTP/1.1 200 OK\r\n\r\nHello, World!\r\n\r\n"));
+            socket_close(&client);
+        }
+
+        os_sleep(1);
+    }
+}
+
+static String http__server_public_path = {0};
+HTTP_REQUEST_CALLBACK(http__request_callback)
+{
+    String file = request->url;
+    if (string_equals(file, S("/"))) file = S("index.html");
+    if (string_ends_with(file, S("/"))) file = string_slice(file, 0, file.count - 1);
+
+    String ext = path_extension(file);
+    if (!ext.count) {
+        file = string_concat(file, S(".html"));
+        ext = S(".html");
+    }
+
+    String file_path = path_join(http__server_public_path, file);
+    String contents = os_read_entire_file(temp_arena(), file_path);
+    if (!contents.data)
+    {
+        response->status_code = 404;
+        response->body = S("Not Found");
+        return;
+    }
+
+    response->status_code = 200;
+    response->body = contents;
+    response->content_type = http_content_type_from_extension(ext);
+}
+
+void http__run_server_example(String server_url, String public_path)
+{
+    socket_init();
+    http__server_public_path = public_path;
+    http_server_run(server_url, http__request_callback);
+}
+
+#endif // NA_NET_TEST
+
+#endif // NA_NET_H
+
