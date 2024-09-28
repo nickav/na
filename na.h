@@ -986,6 +986,11 @@ function String string_strip(Arena *arena, String str, String chars);
 
 function u64 string_hash(String str);
 
+function void string_to_lower(String *str);
+function void string_to_upper(String *str);
+function String string_lower(Arena *arena, String str);
+function String string_upper(Arena *arena, String str);
+
 // Path Helpers
 function String path_filename(String path);
 function String path_basename(String path);
@@ -3343,6 +3348,36 @@ function u64 string_hash(String str)
         u8 c = str.data[i];
         result = ((result << 5) + result) + c;
     }
+    return result;
+}
+
+function void string_to_lower(String *str)
+{
+    for (i64 i = 0; i < str->count; i += 1)
+    {
+        str->data[i] = char_to_lower(str->data[i]);
+    }
+}
+
+function void string_to_upper(String *str)
+{
+    for (i64 i = 0; i < str->count; i += 1)
+    {
+        str->data[i] = char_to_upper(str->data[i]);
+    }
+}
+
+function String string_lower(Arena *arena, String str)
+{
+    String result = string_copy(arena, str);
+    string_to_lower(&result);
+    return result;
+}
+
+function String string_upper(Arena *arena, String str)
+{
+    String result = string_copy(arena, str);
+    string_to_upper(&result);
     return result;
 }
 
