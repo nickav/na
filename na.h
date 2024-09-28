@@ -981,6 +981,7 @@ function String string_chop_last_slash(String string);
 function String string_skip_last_slash(String string);
 
 function String string_trim_whitespace(String str);
+function String string_eat_whitespace(String str);
 function String string_remove(Arena *arena, String str, String remove);
 function String string_strip(Arena *arena, String str, String chars);
 
@@ -3318,6 +3319,17 @@ function String string_trim_whitespace(String str)
 
     while (result.count > 0 && char_is_whitespace(result.data[result.count - 1]))
     {
+        result.count -= 1;
+    }
+    return result;
+}
+
+function String string_eat_whitespace(String str)
+{
+    String result = str;
+    while (result.count > 0 && char_is_whitespace(result.data[0]))
+    {
+        result.data  += 1;
         result.count -= 1;
     }
     return result;
