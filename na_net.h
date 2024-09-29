@@ -656,7 +656,7 @@ function i64 socket_recieve_bytes(Socket *socket, u8 *data, u64 count, Socket_Ad
 
         int bytes_received = recvfrom(
             socket->handle,
-            (char *)data, count, 0, (sockaddr *)&from, (socklen_t *)&from_size
+            (char *)data, count, 0, (struct sockaddr *)&from, (socklen_t *)&from_size
         );
 
         if (address != NULL)
@@ -958,7 +958,7 @@ function void http_process(Http *http)
 
     if (!http->request_sent)
     {
-        if (!socket_send(&http->socket, {}, http->request_data))
+        if (!socket_send(&http->socket, (Socket_Address){0, 0}, http->request_data))
         {
             http->status = HttpStatus_Failed;
             return;
@@ -1288,8 +1288,8 @@ function void http_server_tick(Http_Server *server, Http_Request_Callback reques
         params.request_handler = request_handler;
 
         // TODO(nick): we should spin up a bunch of threads ahead of time
-        Thread thread = thread_create(http_responder_thread, &params, sizeof(Http_Thread_Params));
-        thread_detach(thread);
+        Thread thread = os_thread_create(http_responder_thread, &params, sizeof(Http_Thread_Params));
+        os_thread_detach(thread);
     }
 }
 
@@ -1360,9 +1360,9 @@ void http__request_manager_example()
             Http *it = &pool.requests.data[index];
             if (it->status == HttpStatus_Pending) continue;
 
-            // print("finished! ");
-            // Dump(it->status_code);
-            // Dump(it->content_type);
+            print("finished! ");
+            Dump(it->status_code);
+            Dump(it->content_type);
         }
 
         os_sleep(1.0f);
