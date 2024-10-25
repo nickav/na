@@ -9,6 +9,9 @@
 USAGE
     Define this in your source file:
 
+    #define impl
+    #include "na.h"
+
 LICENSE
     This software is dual-licensed to the public domain and under the following
     license: you are granted a perpetual, irrevocable license to copy, modify,
@@ -871,10 +874,12 @@ function b32 char_is_digit(u8 c);
 function b32 char_is_space(u8 c);
 function b32 char_is_whitespace(u8 c);
 function b32 char_is_symbol(u8 c);
+function b32 char_is_separator(u8 c);
+function b32 char_is_slash(u8 c);
+
 function u8 char_to_upper(u8 c);
 function u8 char_to_lower(u8 c);
 function u8 char_to_forward_slash(u8 c);
-function b32 char_is_separator(u8 c);
 
 // C-Style Strings
 function i64 cstr_length(const char *cstr);
@@ -994,7 +999,7 @@ function String string_upper(Arena *arena, String str);
 
 // Path Helpers
 function String path_filename(String path);
-function String path_basename(String path);
+function String path_dirname(String path);
 function String path_extension(String path);
 function String path_strip_extension(String path);
 
@@ -1434,7 +1439,6 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 // Platform-Specific Headers:
 //
 
-#ifdef impl
 #if OS_WINDOWS
     #pragma push_macro("function")
 #pragma push_macro("Free")
@@ -1452,13 +1456,14 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #else
     #error OS layer not implemented.
 #endif
-#endif
 
 #endif // OS_H
 
 //
 // impl:
 //
+
+#ifdef impl
 
 
 //
@@ -2162,6 +2167,11 @@ function b32 char_is_symbol(u8 c)
 function b32 char_is_separator(u8 c)
 {
     return char_is_space(c) || char_is_symbol(c);
+}
+
+function b32 char_is_slash(u8 c)
+{
+    return c == '\\' || c == '/';
 }
 
 function u8 char_to_upper(u8 c) {
@@ -3469,9 +3479,32 @@ function String path_filename(String path)
     return string_skip_last_slash(path);
 }
 
-function String path_basename(String path)
+function String path_dirname(String in_path)
 {
-    return string_chop_last_slash(path);
+    String path = in_path;
+    if (path.count > 0 && char_is_slash(path.data[path.count - 1]))
+    {
+        path.count -= 1;
+        while (path.count > 0 && char_is_slash(path.data[path.count - 1]))
+        {
+            path.count -= 1;
+        }
+    }
+
+    String result = string_chop_last_slash(path);
+    print("result: %.*s\n", LIT(result));
+    if (!result.count)
+    {
+        if (path_is_absolute(in_path))
+        {
+            result = S("/");
+        }
+        else
+        {
+            result = S(".");
+        }
+    }
+    return result;
 }
 
 function String path_extension(String path)
@@ -6929,5 +6962,7 @@ function b32 table_delete(Table_KV *it, i64 index)
     }
     return result;
 }
+
+#endif // impl
 
 #endif // NA_H

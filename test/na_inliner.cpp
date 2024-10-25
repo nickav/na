@@ -1,26 +1,18 @@
 //
-//  cl /Od -nologo -Zo -Z7 nja_inliner.cpp /link -subsystem:windows -incremental:no -opt:ref -OUT:inliner.cpp
+// Compile:
+// clang++ na_inliner.cpp -o na_inliner
+// cl /Od -nologo -Zo -Z7 na_inliner.cpp /link -subsystem:console -incremental:no -opt:ref -OUT:na_inliner.exe
+//
+// Run:
+// inliner <input> (output)
 //
 
-#define impl
 #include "../na.h"
 
 #include <stdio.h>
 
 static Arena *g_arena = {};
-
-String path_dirname(String path) {
-    // normalize path
-    if (path.data[path.count - 1] == '/') path.count -= 1;
-
-    for (i32 i = path.count - 1; i >= 0; i--) {
-        if (path.data[i] == '/') {
-            return string_slice(path, 0, i + 1);
-        }
-    }
-
-    return S("./");
-}
+static b32 ignore_comment = false;
 
 bool na_inliner__file(String in_file, FILE *output)
 {
@@ -65,6 +57,22 @@ bool na_inliner__file(String in_file, FILE *output)
 
                 if (content.data[index + 1] == '/')
                 {
+                    // NOTE(nick): hanlde special :InlinerIgnoreBegin / :InlinerIgnoreEnd blocks
+                    String substr = string_eat_whitespace(string_slice(content, index+2, content.count));
+                    if (string_starts_with(substr, S(":InlinerIgnoreBegin")))
+                    {
+                        while (!string_starts_with(substr, S(":InlinerIgnoreEnd")))
+                        {
+                            index += 1;
+                            substr = string_slice(content, index, content.count);
+                        }
+
+                        index += S(":InlinerIgnoreEnd").count;
+                        while (content.data[index] != '\n') { index += 1; }
+                        continue;
+                    }
+
+                    // NOTE(nick): print other comments normally
                     i64 start = index;
                     index += 2;
 
@@ -80,12 +88,14 @@ bool na_inliner__file(String in_file, FILE *output)
             {
                 String substr = string_slice(content, index, content.count);
 
+                // NOTE(nick): ignore #pragma once
                 if (string_starts_with(substr, S("#pragma once")))
                 {
                     index += S("#pragma once").count;
                     continue;
                 }
 
+                // NOTE(nick): handle includes
                 if (string_starts_with(substr, S("#include \"")))
                 {
                     i64 start = index + S("#include \"").count;

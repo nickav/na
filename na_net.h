@@ -958,7 +958,7 @@ function void http_process(Http *http)
 
     if (!http->request_sent)
     {
-        if (!socket_send(&http->socket, (Socket_Address){0, 0}, http->request_data))
+        if (!socket_send(&http->socket, Socket_Address{0, 0}, http->request_data))
         {
             http->status = HttpStatus_Failed;
             return;
