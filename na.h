@@ -1008,18 +1008,29 @@ function b32 path_is_absolute(String path);
 // Timing
 function String string_from_time(f64 time_in_seconds, String_Time_Options options);
 
-
+// Dump
 #if DEBUG
-#if LANG_CPP
-    #define Dump(x) print("%s = %S\n", #x, to_string(x))
-    #define Dump2(x, y) print("%s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y))
+    #define DUMP_SELECT_HELPER2(args) DUMP_SELECT_HELPER args
+    #define DUMP_SELECT_HELPER(_1, _2, _3, _4, NAME, ...) NAME
+    #define Dump(...) DUMP_SELECT_HELPER2((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
+
+    #if LANG_CPP
+        #define Dump1(x) print("%s = %S\n", #x, to_string(x))
+        #define Dump2(x, y) print("%s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y))
+        #define Dump3(x, y, z) print("%s = %S, %s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y), #z, to_string(z))
+        #define Dump4(x, y, z, w) print("%s = %S, %s = %S, %s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y), #z, to_string(z), #w, to_string(w))
+    #else
+        #define Dump1(x)
+        #define Dump2(x, y)
+        #define Dump3(x, y, z)
+        #define Dump4(x, y, z, w)
+    #endif
 #else
-    #define Dump(x)
+    #define Dump(...)
+    #define Dump1(x)
     #define Dump2(x, y)
-#endif
-#else
-    #define Dump(x)
-    #define Dump2(x, y)
+    #define Dump3(x, y, z)
+    #define Dump4(x, y, z, w)
 #endif
 
 #endif // BASE_STRINGS_H
@@ -1449,9 +1460,6 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 // impl:
 //
 
-
-// TODO(nick): track all allocations in the app!
-static Arena *g_arenas_in_use[2048] = {0};
 
 //
 // Memory
@@ -5066,19 +5074,19 @@ function u32 os_thread_await(Thread thread) {
 // Data Structures
 //
 
-function Semaphore semaphore_create(u32 max_count) {
+function Semaphore os_semaphore_create(u32 max_count) {
     Semaphore result = {0};
     result.handle = CreateSemaphoreExA(NULL, 0, max_count, 0, 0, SEMAPHORE_ALL_ACCESS);
     assert(result.handle != NULL);
     return result;
 }
 
-function void semaphore_signal(Semaphore *sem) {
+function void os_semaphore_signal(Semaphore *sem) {
     BOOL ok = ReleaseSemaphore(sem->handle, 1, 0);
     // assert(ok);
 }
 
-function void semaphore_wait_for(Semaphore *sem, bool infinite) {
+function void os_semaphore_wait_for(Semaphore *sem, bool infinite) {
     DWORD res;
 
     if (infinite) {
@@ -5090,12 +5098,12 @@ function void semaphore_wait_for(Semaphore *sem, bool infinite) {
     assert(res != WAIT_FAILED);
 }
 
-function void semaphore_destroy(Semaphore *sem) {
+function void os_semaphore_destroy(Semaphore *sem) {
     CloseHandle(sem->handle);
     sem->handle = 0;
 }
 
-function Mutex mutex_create(u32 spin_count) {
+function Mutex os_mutex_create(u32 spin_count) {
     Mutex result = {0};
 
     // TODO(nick): this is only 40 bytes, should we just bake this into the Mutex itself?
@@ -5111,19 +5119,19 @@ function Mutex mutex_create(u32 spin_count) {
     return result;
 }
 
-function void mutex_aquire_lock(Mutex *mutex) {
+function void os_mutex_aquire_lock(Mutex *mutex) {
     EnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
 }
 
-function bool mutex_try_aquire_lock(Mutex *mutex) {
+function bool os_mutex_try_aquire_lock(Mutex *mutex) {
     return TryEnterCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle) != 0;
 }
 
-function void mutex_release_lock(Mutex *mutex) {
+function void os_mutex_release_lock(Mutex *mutex) {
     LeaveCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
 }
 
-function void mutex_destroy(Mutex *mutex) {
+function void os_mutex_destroy(Mutex *mutex) {
     if (mutex->handle)
     {
         DeleteCriticalSection(cast(LPCRITICAL_SECTION)mutex->handle);
@@ -5487,7 +5495,7 @@ function void os_mutex_destroy(Mutex *mutex) {
     #error Not implemented
 #endif
 
-#if OS_WINDOWS || OS_MACOS
+#if OS_LINUX || OS_MACOS
     #include <stdlib.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -6525,15 +6533,25 @@ function i64 array__find(Array_Basic_Ref it, void *key, Compare_Func cmp)
 }
 
 #if 0
-struct i32_Array
+struct Array_i32
 {
     Arena *arena;
-    ArrayStructBody(i32);
+    i32 *data;
+    i64 count;
+    i64 capacity;
+};
+
+struct Array_i64
+{
+    Arena *arena;
+    i64 *data;
+    i64 count;
+    i64 capacity;
 };
 
 function void array__test()
 {
-    i32_Array array = {0};
+    Array_i32 array = {0};
     array_push(&array, 42);
     array_push(&array, 23);
     array_push(&array, 0);
@@ -6555,7 +6573,7 @@ function void array__test()
 
     i32 key = 42;
     i64 index = array_find(&array, &key, compare_i32);
-    dump(index);
+    Dump(index);
 }
 #endif
 //
