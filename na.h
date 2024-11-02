@@ -614,6 +614,32 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
 #define NotImplemented assert(!"Not Implemented")
 #define InvalidPath assert(!"Invalid Path")
 
+//
+// Variadic Macros
+//
+
+#define NameConcat2(A, B) A##B
+#define NameConcat(A, B) NameConcat2(A, B)
+
+#define ArgCount(...) _COUNTOF_CAT( _COUNTOF_A, ( 0, ##__VA_ARGS__, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 ) )
+#define _COUNTOF_CAT( a, b ) a b
+#define _COUNTOF_A( a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, n, ... ) n
+
+//
+// NOTE(nick): you have to define the functions in reverse order, as in:
+// #define Dump(...) ArgSelectHelper4((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
+//
+
+#define ArgSelectHelper4_(_1, _2, _3, _4, NAME, ...) NAME
+#define ArgSelectHelper4(args) ArgSelectHelper4_ args
+
+#define ArgSelectHelper2_(_1, _2, NAME, ...) NAME
+#define ArgSelectHelper2(args) ArgSelectHelper2_ args
+
+// TODO(nick): implement these
+#define Likely(x) (x)
+#define Unlikely(x) (x)
+
 #endif // BASE_TYPES_H
 #ifndef BASE_MEMORY_H
 #define BASE_MEMORY_H
@@ -748,9 +774,9 @@ function Allocator arena_allocator(Arena *arena);
 #define Str(x) #x
 
 #if LANG_CPP
-    #define S(x) String{(u8 *)(x), sizeof(x)-1}
+    #define S(x) (String{(u8 *)(x), sizeof(x)-1})
 #else
-    #define S(x) (String){(u8 *)(x), sizeof(x)-1}
+    #define S(x) ((String){(u8 *)(x), sizeof(x)-1})
 #endif
 
 #if 0
@@ -833,8 +859,8 @@ struct String_List
     u64 total_size;
 };
 
-typedef struct String_Join String_Join;
-struct String_Join
+typedef struct String_Join_Params String_Join_Params;
+struct String_Join_Params
 {
     String pre;
     String sep;
@@ -967,18 +993,19 @@ function void string_list_push(Arena *arena, String_List *list, String str);
 function void string_list_concat(String_List *list, String_List *to_push);
 function String_List string_splits(Arena *arena, String string, int split_count, String *splits);
 function String_List string_split(Arena *arena, String string, String split);
-function String string_list_joins(Arena *arena, String_List list, String_Join *optional_params);
-function String string_list_join(Arena *arena, String_List list, String join);
+function String string_list_join(Arena *arena, String_List list, String_Join_Params join);
 function String string_list_print(Arena *arena, String_List *list, char *fmt, ...);
 function String string_list_to_string(Arena *arena, String_List *list);
 function String_Array string_array_from_list(Arena *arena, String_List list);
+#define string_join(list, join) string_list_join(temp_arena(), list, { .sep = join })
 
 // Misc Helpers
 function String string_concat2(Arena *arena, String a, String b);
 function String string_concat3(Arena *arena, String a, String b, String c);
 function String string_concat4(Arena *arena, String a, String b, String c, String d);
 function String string_concat_array(Arena *arena, String *array, u32 count);
-#define string_concat(a, b) string_concat2(temp_arena(), a, b)
+// #define string_concat(a, b) string_concat2(temp_arena(), a, b)
+#define string_concat(...) ArgSelectHelper4((__VA_ARGS__, string_concat4, string_concat3, string_concat2, string_concat1))(temp_arena(), __VA_ARGS__)
 
 function String string_chop_last_period(String string);
 function String string_skip_last_period(String string);
@@ -1006,7 +1033,8 @@ function String path_strip_extension(String path);
 function String path_join2(Arena *arena, String a, String b);
 function String path_join3(Arena *arena, String a, String b, String c);
 function String path_join4(Arena *arena, String a, String b, String c, String d);
-#define path_join(a, b) path_join2(temp_arena(), a, b)
+// #define path_join(a, b) path_join2(temp_arena(), a, b)
+#define path_join(...) ArgSelectHelper4((__VA_ARGS__, path_join4, path_join3, path_join2, path_join1))(temp_arena(), __VA_ARGS__)
 
 function b32 path_is_absolute(String path);
 
@@ -1015,9 +1043,7 @@ function String string_from_time(f64 time_in_seconds, String_Time_Options option
 
 // Dump
 #if DEBUG
-    #define DUMP_SELECT_HELPER2(args) DUMP_SELECT_HELPER args
-    #define DUMP_SELECT_HELPER(_1, _2, _3, _4, NAME, ...) NAME
-    #define Dump(...) DUMP_SELECT_HELPER2((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
+    #define Dump(...) ArgSelectHelper4((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
 
     #if LANG_CPP
         #define Dump1(x) print("%s = %S\n", #x, to_string(x))
@@ -3189,14 +3215,8 @@ function String_List string_split(Arena *arena, String string, String split)
     return string_splits(arena, string, 1, &split);
 }
 
-function String string_list_joins(Arena *arena, String_List list, String_Join *optional_params)
+function String string_list_join(Arena *arena, String_List list, String_Join_Params join)
 {
-    String_Join join = {0};
-    if (optional_params)
-    {
-        MemoryCopy(&join, optional_params, sizeof(join));
-    }
-    
     u64 sep_count = 0;
     if (list.node_count > 1)
     {
@@ -3225,13 +3245,6 @@ function String string_list_joins(Arena *arena, String_List list, String_Join *o
     return result;
 }
 
-function String string_list_join(Arena *arena, String_List list, String join)
-{
-    String_Join params = {0};
-    params.sep = join;
-    return string_list_joins(arena, list, &params);
-}
-
 function String string_list_print(Arena *arena, String_List *list, char *fmt, ...)
 {
     String result = {0};
@@ -3247,12 +3260,13 @@ function String string_list_print(Arena *arena, String_List *list, char *fmt, ..
 
 function String string_list_to_string(Arena *arena, String_List *list)
 {
-    return string_list_join(arena, *list, S(""));
+    String_Join_Params params = {0};
+    return string_list_join(arena, *list, params);
 }
 
 function String_Array string_array_from_list(Arena *arena, String_List list)
 {
-    String_Array result = {};
+    String_Array result = {0};
     result.data = PushArrayZero(arena, String, list.node_count);
     result.count = list.node_count;
 
@@ -3280,7 +3294,7 @@ function String string_concat2(Arena *arena, String a, String b) {
         MemoryCopy(data + a.count, b.data, b.count);
     }
 
-    return string_make(data, count);
+    return Str8(data, count);
 }
 
 function String string_concat3(Arena *arena, String a, String b, String c) {
@@ -3293,7 +3307,7 @@ function String string_concat3(Arena *arena, String a, String b, String c) {
         MemoryCopy(data + a.count + b.count, c.data, c.count);
     }
 
-    return string_make(data, count);
+    return Str8(data, count);
 }
 
 function String string_concat4(Arena *arena, String a, String b, String c, String d) {
@@ -3307,7 +3321,7 @@ function String string_concat4(Arena *arena, String a, String b, String c, Strin
         MemoryCopy(data + a.count + b.count + c.count, d.data, d.count);
     }
 
-    return string_make(data, count);
+    return Str8(data, count);
 }
 
 function String string_insert(Arena *arena, String text, i64 index, String insert, i64 replace_count)
@@ -3492,7 +3506,6 @@ function String path_dirname(String in_path)
     }
 
     String result = string_chop_last_slash(path);
-    print("result: %.*s\n", LIT(result));
     if (!result.count)
     {
         if (path_is_absolute(in_path))
@@ -3628,7 +3641,7 @@ function String b32_to_string(b32 x)   { if (x) return S("true"); return S("fals
 
 #if LANG_CPP
 
-function String to_string(bool x)   { if (x) return S("true"); return S("false"); }
+function String to_string(bool x)   { return b32_to_string(x); }
 function String to_string(char x)   { return sprint("%c", x); }
 function String to_string(char *x)  { return string_from_cstr(x); }
 function String to_string(i8 x)     { return sprint("%d", x); }
@@ -5853,29 +5866,39 @@ function u64 os_file_get_size(File file)
     return result;
 }
 
-function String os_read_entire_file(Arena *arena, String path) {
-    File file = os_file_open(path, FileMode_Read);
+function String os_read_entire_file(Arena *arena, String path)
+{
+    M_Temp scratch = GetScratch(&arena, 1);
+    FILE *f = fopen(string_to_cstr(scratch.arena, path), "rb");
+    ReleaseScratch(scratch);
+
+    if (!f)
+    {
+        print("[file] Failed to open file: %.*s\n", LIT(path));
+    }
 
     u64 size = 0;
-    if (!file.has_errors)
+    if (f)
     {
-        FILE *f = (FILE *)file.handle;
-        u64 prev_position = ftell(f);
         fseek(f, 0, SEEK_END);
         size = ftell(f);
-        fseek(f, prev_position, SEEK_SET);
+        fseek(f, 0, SEEK_SET);
     }
 
     String result = {0};
     result.data = cast(u8 *)arena_push(arena, size);
     result.count = size;
 
-    if (!file.has_errors)
+    if (f)
     {
-        os_file_read(&file, 0, size, result.data);
+        size_t bytes_read = fread(result.data, sizeof(char), size, f);
+        if (bytes_read != size)
+        {
+            print("[file] Failed to read entire file: %.*s\n", LIT(path));
+        }
     }
-    os_file_close(&file);
 
+    fclose(f);
     return result;
 }
 
@@ -6385,6 +6408,38 @@ struct CONCAT(T, _Array) { \
 // Stretchy Array functions
 //
 
+struct Array_i32
+{
+    Arena *arena;
+    i32 *data;
+    i64 count;
+    i64 capacity;
+};
+
+struct Array_i64
+{
+    Arena *arena;
+    i64 *data;
+    i64 count;
+    i64 capacity;
+};
+
+struct Array_f32
+{
+    Arena *arena;
+    f32 *data;
+    i64 count;
+    i64 capacity;
+};
+
+struct Array_f64
+{
+    Arena *arena;
+    f64 *data;
+    i64 count;
+    i64 capacity;
+};
+
 #define array_init_from_arena(it, arena_, initial_capacity) \
     array__init_from_arena(array__to_ref(it), arena_, initial_capacity)
 
@@ -6565,23 +6620,72 @@ function i64 array__find(Array_Basic_Ref it, void *key, Compare_Func cmp)
     return result;
 }
 
+//
+// String Conversions
+//
+
+#ifdef BASE_STRINGS_H
+
+function String Array_i32_to_string(Array_i32 a)
+{
+    String_List list = {0};
+    for (int i = 0; i < a.count; i += 1)
+    {
+        String item = sprint("    %d", a.data[i]);
+        string_list_push(temp_arena(), &list, item);
+    }
+    String items = string_join(list, S(",\n"));
+    return sprint("Array_i32[%d] {\n%S\n}", a.count, items);
+}
+
+function String Array_i64_to_string(Array_i64 a)
+{
+    String_List list = {0};
+    for (int i = 0; i < a.count; i += 1)
+    {
+        String item = sprint("    %lld", a.data[i]);
+        string_list_push(temp_arena(), &list, item);
+    }
+    String items = string_join(list, S(",\n"));
+    return sprint("Array_i64[%d] {\n%S\n}", a.count, items);
+}
+
+function String Array_f32_to_string(Array_f32 a)
+{
+    String_List list = {0};
+    for (int i = 0; i < a.count; i += 1)
+    {
+        String item = sprint("    %.16f", a.data[i]);
+        string_list_push(temp_arena(), &list, item);
+    }
+    String items = string_join(list, S(",\n"));
+    return sprint("Array_f32[%d] {\n%S\n}", a.count, items);
+}
+
+function String Array_f64_to_string(Array_f64 a)
+{
+    String_List list = {0};
+    for (int i = 0; i < a.count; i += 1)
+    {
+        String item = sprint("    %.32f", a.data[i]);
+        string_list_push(temp_arena(), &list, item);
+    }
+    String items = string_join(list, S(",\n"));
+    return sprint("Array_f64[%d] {\n%S\n}", a.count, items);
+}
+
+#if LANG_CPP
+
+function String to_string(Array_i32 a) { return Array_i32_to_string(a); }
+function String to_string(Array_i64 a) { return Array_i64_to_string(a); }
+function String to_string(Array_f32 a) { return Array_f32_to_string(a); }
+function String to_string(Array_f64 a) { return Array_f64_to_string(a); }
+
+#endif // LANG_CPP
+
+#endif // BASE_STRINGS_H
+
 #if 0
-struct Array_i32
-{
-    Arena *arena;
-    i32 *data;
-    i64 count;
-    i64 capacity;
-};
-
-struct Array_i64
-{
-    Arena *arena;
-    i64 *data;
-    i64 count;
-    i64 capacity;
-};
-
 function void array__test()
 {
     Array_i32 array = {0};

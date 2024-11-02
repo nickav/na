@@ -56,6 +56,9 @@ VERSION HISTORY
 #define Cos(x) cosf(x)
 #define Tan(x) tanf(x)
 #define Pow(x, e) powf(x, e)
+#define Exp(x) expf(x)
+#define Log(x) logf(x)
+#define Log2(x) log2f(x)
 
 #define v2f(x, y)       v2((f32)(x), (f32)(y))
 #define v3f(x, y, z)    v3((f32)(x), (f32)(y), (f32)(z))
@@ -403,6 +406,13 @@ const Vector2 v2_one  = {1, 1};
 const Vector2 v2_half = {0.5, 0.5};
 const Vector2 v2_center = {0.5, 0.5};
 
+const Vector2 v2_top_left     = {0, 0};
+const Vector2 v2_bottom_left  = {0, 1};
+const Vector2 v2_center_left  = {0, 0.5};
+const Vector2 v2_top_right    = {1, 0};
+const Vector2 v2_bottom_right = {1, 1};
+const Vector2 v2_center_right = {1, 0.5};
+
 const Vector3 v3_zero = {0, 0, 0};
 const Vector3 v3_one  = {1, 1, 1};
 const Vector3 v3_half = {0.5, 0.5, 0.5};
@@ -517,11 +527,13 @@ function f32 floor_f32(f32 x) { return (f32)floor_i32(x); }
 function f64 floor_f64(f64 x) { return (f64)floor_i64(x); }
 
 function i32 ceil_i32(f32 x) {
-    return (i32)(x + 1 - EPSILON_F32);
+    // NOTE(nick): handle negative numbers properly and if the number is already whole
+    return (i32)(x + (((f32)(i32)x) != x) * (1.0f - (x < 0.0f)));
 }
 
 function i64 ceil_i64(f64 x) {
-    return (i64)(x + 1 - EPSILON_F64);
+    // NOTE(nick): handle negative numbers properly and if the number is already whole
+    return (i64)(x + (((f64)(i64)x) != x) * (1.0 - (x < 0.0)));
 }
 
 function f32 ceil_f32(f32 x) { return (f32)ceil_i32(x); }
@@ -533,6 +545,16 @@ function f64 mod_f64(f64 x, f64 y) { return (f64)Mod(x, y); }
 function b32 f32_is_zero(f32 x) {
     return abs_f32(x) <= EPSILON_F32;
 }
+
+function f32 pow_f32(f32 x, f32 n) {
+    return Pow(x, n);
+}
+
+function f32 log_f32(f32 x) { return Log(x); }
+function f32 log2_f32(f32 x) { return Log2(x); }
+function f32 logn_f32(f32 n, f32 x) { return Log(x) / Log(n); }
+
+function f32 exp_f32(f32 x) { return Exp(x); }
 
 //
 // Integers
@@ -2026,6 +2048,32 @@ function Rectangle2i aspect_ratio_fill(u32 src_width, u32 src_height, u32 dest_w
     return result;
 }
 
+function Rectangle2i aspect_ratio_fill_pixel_perfect(u32 src_width, u32 src_height, u32 dest_width, u32 dest_height)
+{
+    Rectangle2i result = {0};
+
+    // can't divide by zero!
+    if (src_width != 0 && src_height != 0 && dest_width != 0 && dest_height != 0)
+    {
+        int scalex = ceil_f32((f32)dest_width / (f32)src_width);
+        int scaley = ceil_f32((f32)dest_height / (f32)src_height);
+
+        int scale = Max(scalex, scaley);
+        int width  = scale * src_width;
+        int height = scale * src_height;
+
+        i32 centerx = ((i32)dest_width - width) / 2;
+        i32 centery = ((i32)dest_height - height) / 2;
+
+        result.x0 = centerx;
+        result.y0 = centery;
+        result.x1 = centerx + width;
+        result.y1 = centery + height;
+    }
+
+    return result;
+}
+
 //
 // Rectangle3
 //
@@ -2835,10 +2883,20 @@ function u32 u32_rgba_from_v4(Vector4 v)
     return result;
 }
 
-function u32 rgba_u32_from_u8(u8 r, u8 g, u8 b, u8 a)
+function u32 u32_rgba_from_u8(u8 r, u8 g, u8 b, u8 a)
 {
     u32 result =
         ((u32)(a)) << 24 |
+        ((u32)(b)) << 16 |
+        ((u32)(g)) << 8  |
+        ((u32)(r)) << 0;
+    return result;
+}
+
+function u32 u32_rgb_from_u8(u8 r, u8 g, u8 b)
+{
+    u32 result =
+        ((u32)(0xFF)) << 24 |
         ((u32)(b)) << 16 |
         ((u32)(g)) << 8  |
         ((u32)(r)) << 0;
@@ -2875,41 +2933,45 @@ function Vector4 v4_premultiply_alpha(Vector4 color)
 // String Conversions
 //
 
-#if defined(BASE_STRINGS_H) && LANG_CPP
+#ifdef BASE_STRINGS_H
 
-function String to_string(Vector2 a) {
+function String Vector2_to_string(Vector2 a) {
     return sprint("Vector2 {%f, %f}", a.x, a.y);
 }
 
-function String to_string(Vector2i a) {
+function String Vector2i_to_string(Vector2i a) {
     return sprint("Vector2i {%d, %d}", a.x, a.y);
 }
 
-function String to_string(Vector3 a) {
+function String Vector3_to_string(Vector3 a) {
     return sprint("Vector3 {%f, %f, %f}", a.x, a.y, a.z);
 }
 
-function String to_string(Vector3i a) {
+function String Vector3i_to_string(Vector3i a) {
     return sprint("Vector3i {%d, %d, %d}", a.x, a.y, a.z);
 }
 
-function String to_string(Vector4 a) {
+function String Vector4_to_string(Vector4 a) {
     return sprint("Vector4 {%f, %f, %f, %f}", a.x, a.y, a.z, a.w);
 }
 
-function String to_string(Rectangle2 a) {
+function String Vector4i_to_string(Vector4i a) {
+    return sprint("Vector4i {%d, %d, %d, %d}", a.x, a.y, a.z, a.w);
+}
+
+function String Rectangle2_to_string(Rectangle2 a) {
     return sprint("Rectangle2 {{%f, %f}, {%f, %f}}", a.x0, a.y0, a.x1, a.y1);
 }
 
-function String to_string(Rectangle2i a) {
+function String Rectangle2i_to_string(Rectangle2i a) {
     return sprint("Rectangle2i {{%d, %d}, {%d, %d}}", a.x0, a.y0, a.x1, a.y1);
 }
 
-inline String to_string(Rectangle3 a) {
+inline String Rectangle3_to_string(Rectangle3 a) {
   return sprint("Rectangle3 {{%f, %f, %f}, {%f, %f, %f}}", a.x0, a.y0, a.z0, a.x1, a.y1, a.z1);
 }
 
-function String to_string(Matrix3 a) {
+function String Matrix3_to_string(Matrix3 a) {
     return sprint(
         "Matrix3 {\n  {%f, %f, %f},\n  {%f, %f, %f},\n  {%f, %f, %f},\n}",
         a.rows[0].x, a.rows[0].y, a.rows[0].z,
@@ -2918,7 +2980,7 @@ function String to_string(Matrix3 a) {
     );
 }
 
-function String to_string(Matrix4 a) {
+function String Matrix4_to_string(Matrix4 a) {
     return sprint(
         "Matrix4 {\n  {%f, %f, %f, %f},\n  {%f, %f, %f, %f},\n  {%f, %f, %f, %f},\n  {%f, %f, %f, %f}\n}",
         a.rows[0].x, a.rows[0].y, a.rows[0].z, a.rows[0].w,
@@ -2928,9 +2990,24 @@ function String to_string(Matrix4 a) {
     );
 }
 
-function String to_string(Quaternion a) {
+function String Quaternion_to_string(Quaternion a) {
     return sprint("Quaternion {%f, %f, %f, %f}", a.x, a.y, a.z, a.w);
 }
+
+#if LANG_CPP
+
+function String to_string(Vector2 a) { return Vector2_to_string(a); }
+function String to_string(Vector2i a) { return Vector2i_to_string(a); }
+function String to_string(Vector3 a) { return Vector3_to_string(a); }
+function String to_string(Vector3i a) { return Vector3i_to_string(a); }
+function String to_string(Vector4 a) { return Vector4_to_string(a); }
+function String to_string(Vector4i a) { return Vector4i_to_string(a); }
+function String to_string(Rectangle2 a) { return Rectangle2_to_string(a); }
+function String to_string(Rectangle2i a) { return Rectangle2i_to_string(a); }
+function String to_string(Matrix3 a) { return Matrix3_to_string(a); }
+function String to_string(Matrix4 a) { return Matrix4_to_string(a); }
+
+#endif // LANG_CPP
 
 #endif // BASE_STRINGS_H
 
