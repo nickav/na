@@ -2607,8 +2607,7 @@ function String string_replace(Arena *arena, String str, String find, String rep
 //
 
 function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
-    // String_Decode result = {S_UTF8_INVALID, 1};
-    String_Decode result = {'?', 1};
+    String_Decode result = {S_UTF8_INVALID, 1};
 
     static u8 utf8_class[] = {
         1, 1, 1, 1, 1, 1, 1, 1,
@@ -2650,20 +2649,10 @@ function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
                         ((str[1] & 0x3F) << 6) |
                         ((str[2] & 0x3F))
                     );
-                    if (codepoint >= 0x800 && codepoint <= 0xDFFF)
+                    if (codepoint >= 0x800 && codepoint <= 0xFFFF)
                     {
-                        if (!(codepoint >= 0xD800 && codepoint <= 0xDFFF))
-                        {
-                            result.codepoint = codepoint;
-                            result.advance = 3;
-                        }
-                    }
-                }
-                else
-                {
-                    if (utf8_class[str[1] >> 3] == 0)
-                    {
-                        result.advance = 2;
+                        result.codepoint = codepoint;
+                        result.advance = 3;
                     }
                 }
             } break;
@@ -2683,17 +2672,6 @@ function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
                     {
                         result.codepoint = codepoint;
                         result.advance = 4;
-                    }
-                }
-                else
-                {
-                    if (utf8_class[str[1] >> 3] == 0)
-                    {
-                        result.advance = 2;
-                        if (utf8_class[str[2] >> 3] == 0)
-                        {
-                            result.advance = 3;
-                        }
                     }
                 }
             } break;
