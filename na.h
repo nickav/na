@@ -997,7 +997,7 @@ function String string_list_join(Arena *arena, String_List list, String_Join_Par
 function String string_list_print(Arena *arena, String_List *list, char *fmt, ...);
 function String string_list_to_string(Arena *arena, String_List *list);
 function String_Array string_array_from_list(Arena *arena, String_List list);
-#define string_join(list, join) string_list_join(temp_arena(), list, { .sep = join })
+function String string_join(String_List list, String join);
 
 // Misc Helpers
 function String string_concat2(Arena *arena, String a, String b);
@@ -2069,7 +2069,6 @@ Allocator arena_allocator(Arena *arena) {
 #if !defined(PrintToBuffer) && defined(STB_SPRINTF_H_INCLUDE)
 
 #if OS_WINDOWS
-    #include "engine/os/win32/win32_main.h"
 
     function char *win32__print_callback(const char *buf, void *user, int len) {
         DWORD bytes_written;
@@ -3257,6 +3256,13 @@ function String_Array string_array_from_list(Arena *arena, String_List list)
     }
 
     return result;
+}
+
+function String string_join(String_List list, String join)
+{
+    String_Join_Params params = {0};
+    params.sep = join;
+    return string_list_join(temp_arena(), list, params);
 }
 
 //
@@ -5980,7 +5986,7 @@ void *unix_thread_proc(void *data) {
     GetScratch(0, 0);
 
     assert(params->proc);
-    u32 result = params->proc(params->data);
+    u64 result = (u64)params->proc(params->data);
 
     os_free(params);
 
@@ -6386,6 +6392,7 @@ struct CONCAT(T, _Array) { \
 // Stretchy Array functions
 //
 
+typedef struct Array_i32 Array_i32;
 struct Array_i32
 {
     Arena *arena;
@@ -6394,6 +6401,7 @@ struct Array_i32
     i64 capacity;
 };
 
+typedef struct Array_i64 Array_i64;
 struct Array_i64
 {
     Arena *arena;
@@ -6402,6 +6410,7 @@ struct Array_i64
     i64 capacity;
 };
 
+typedef struct Array_f32 Array_f32;
 struct Array_f32
 {
     Arena *arena;
@@ -6410,6 +6419,7 @@ struct Array_f32
     i64 capacity;
 };
 
+typedef struct Array_f64 Array_f64;
 struct Array_f64
 {
     Arena *arena;
