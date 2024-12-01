@@ -1150,6 +1150,7 @@ function f32 random_next_f32();
 function f32 random_f32_between(f32 min, f32 max);
 function i32 random_i32_between(i32 min, i32 max);
 function f32 random_zero_to_one();
+function void random_shuffle(void *base, u64 count, u64 size);
 
 // Timing
 function void timing_add_value(Timing_f64 *it, f64 current);
@@ -2398,7 +2399,7 @@ function i64 string_find(String str, String search, i64 start_index, Match_Flags
 
 function b32 string_includes(String str, String search)
 {
-    return string_find(str, search, 0, 0) >= 0;
+    return string_find(str, search, 0, 0) < str.count;
 }
 
 function b32 string_starts_with(String str, String prefix) {
@@ -4031,6 +4032,11 @@ function i32 random_i32_between(i32 min, i32 max)
 function f32 random_zero_to_one()
 {
     return random_pcg_f32_between(&g_random, 0, 1);
+}
+
+function void random_shuffle(void *base, u64 count, u64 size)
+{
+    return random_pcg_shuffle(&g_random, base, count, size);
 }
 
 //
