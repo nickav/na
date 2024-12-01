@@ -1286,6 +1286,7 @@ function String os_get_app_data_path(String app_name);
 // Timing
 function f64 os_time();
 function f64 os_time_in_miliseconds();
+function f64 os_clock();
 function u64 os_clock_cycles();
 function void os_sleep(f64 seconds);
 function void os_set_high_process_priority(bool enable);
@@ -3998,8 +3999,7 @@ static Random_PCG g_random = {0x4d595df4d0f33173, 6364136223846793005u};
 
 function void random_init()
 {
-    // @Incomplete: this should be os_system_time or something
-    f64 time = os_time();
+    f64 time = os_clock();
     u64 seed =  *(u64 *)&time;
     random_set_seed(seed);
 }
@@ -4351,6 +4351,31 @@ function f64 os_time()
     LARGE_INTEGER perf_counter;
     if (QueryPerformanceCounter(&perf_counter)) {
         perf_counter.QuadPart -= win32_counter_offset;
+        result = (f64)(perf_counter.QuadPart) / win32_ticks_per_second;
+    }
+
+    return result;
+}
+
+function f64 os_clock()
+{
+    static u64 win32_ticks_per_second = 0;
+    static u64 win32_counter_offset = 0;
+
+    if (win32_ticks_per_second == 0)
+    {
+        LARGE_INTEGER perf_frequency = {0};
+        if (QueryPerformanceFrequency(&perf_frequency)) {
+            win32_ticks_per_second = perf_frequency.QuadPart;
+        }
+
+        assert(win32_ticks_per_second != 0);
+    }
+
+    f64 result = 0;
+
+    LARGE_INTEGER perf_counter;
+    if (QueryPerformanceCounter(&perf_counter)) {
         result = (f64)(perf_counter.QuadPart) / win32_ticks_per_second;
     }
 
@@ -5304,6 +5329,32 @@ function f64 os_time()
 
     f64 now = mach_absolute_time();
     return (now - macos_perf_counter) / macos_perf_frequency;
+
+    #endif
+}
+
+function f64 os_clock()
+{
+    #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101200
+
+        #ifndef CLOCK_MONOTONIC_RAW
+            #error "CLOCK_MONOTONIC_RAW not found. Please verify that <time.h> is included from the MacOSX SDK rather than /usr/local/include"
+        #endif
+
+        return (f64)(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / (f64)(1e9);
+    #else
+
+    static f64 macos_perf_frequency = 0;
+    if (macos_perf_frequency == 0)
+    {
+        mach_timebase_info_data_t rate_nsec;
+        mach_timebase_info(&rate_nsec);
+
+        macos_perf_frequency = 1000000000LL * rate_nsec.numer / rate_nsec.denom;
+    }
+
+    f64 now = mach_absolute_time();
+    return (now) / macos_perf_frequency;
 
     #endif
 }
