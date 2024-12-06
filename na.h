@@ -920,6 +920,7 @@ function String16 string16_make(u16 *data, i64 count);
 function String16 string16_from_cstr(u16 *data);
 function String32 string32_make(u32 *data, i64 count);
 
+#define CStr(x) string_to_cstr(temp_arena(), (x))
 #define Str8(data, count) string_make((u8 *)data, count)
 #define Str16(data, count) string16_make((u16 *)data, count)
 #define Str32(data, count) string32_make((u32 *)data, count)
@@ -1045,16 +1046,16 @@ function String string_from_time(f64 time_in_seconds, String_Time_Options option
 #if DEBUG
     #define Dump(...) ArgSelectHelper4((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
 
-    #if LANG_CPP
+    #if defined(STB_SPRINTF_H_INCLUDE)
         #define Dump1(x) print("%s = %S\n", #x, to_string(x))
         #define Dump2(x, y) print("%s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y))
         #define Dump3(x, y, z) print("%s = %S, %s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y), #z, to_string(z))
         #define Dump4(x, y, z, w) print("%s = %S, %s = %S, %s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y), #z, to_string(z), #w, to_string(w))
     #else
-        #define Dump1(x)
-        #define Dump2(x, y)
-        #define Dump3(x, y, z)
-        #define Dump4(x, y, z, w)
+        #define Dump1(x) print("%s = %s\n", #x, CStr(to_string(x)))
+        #define Dump2(x, y) print("%s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)))
+        #define Dump3(x, y, z) print("%s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)))
+        #define Dump4(x, y, z, w) print("%s = %s, %s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)), #w, CStr(to_string(w)))
     #endif
 #else
     #define Dump(...)
@@ -3624,24 +3625,49 @@ function String string_from_time(f64 time_in_seconds, String_Time_Options option
 //
 
 function String b32_to_string(b32 x)   { if (x) return S("true"); return S("false"); }
+function String char_to_string(char x) { return sprint("%c", x); }
+function String cstr_to_string(char *x) { return string_from_cstr(x); }
+function String int_to_string(int x) { return sprint("%d", x); }
+function String i64_to_string(i64 x) { return sprint("%lld", x); }
+function String u64_to_string(u64 x) { return sprint("%llu", x); }
+function String f32_to_string(f32 x) { return sprint("%.2f", x); }
+function String f64_to_string(f64 x) { return sprint("%.4f", x); }
+function String ptr_to_string(void *x) { return sprint("%p", x); }
+function String String_to_string(String x) { return x; }
 
 #if LANG_CPP
 
 function String to_string(bool x)   { return b32_to_string(x); }
-function String to_string(char x)   { return sprint("%c", x); }
-function String to_string(char *x)  { return string_from_cstr(x); }
-function String to_string(i8 x)     { return sprint("%d", x); }
-function String to_string(u8 x)     { return sprint("%d", x); }
-function String to_string(i16 x)    { return sprint("%d", x); }
-function String to_string(u16 x)    { return sprint("%d", x); }
-function String to_string(i32 x)    { return sprint("%d", x); }
-function String to_string(u32 x)    { return sprint("%d", x); }
-function String to_string(i64 x)    { return sprint("%lld", x); }
-function String to_string(u64 x)    { return sprint("%llu", x); }
-function String to_string(f32 x)    { return sprint("%f", x); }
-function String to_string(f64 x)    { return sprint("%f", x); }
-function String to_string(void *x)  { return sprint("%p", x); }
-function String to_string(String x) { return x; }
+function String to_string(char x)   { return char_to_string(x); }
+function String to_string(char *x)  { return cstr_to_string(x); }
+function String to_string(i8 x)     { return int_to_string(x); }
+function String to_string(u8 x)     { return int_to_string(x); }
+function String to_string(i16 x)    { return int_to_string(x); }
+function String to_string(u16 x)    { return int_to_string(x); }
+function String to_string(i32 x)    { return int_to_string(x); }
+function String to_string(u32 x)    { return int_to_string(x); }
+function String to_string(i64 x)    { return i64_to_string(x); }
+function String to_string(u64 x)    { return u64_to_string(x); }
+function String to_string(f32 x)    { return f32_to_string(x); }
+function String to_string(f64 x)    { return f64_to_string(x); }
+function String to_string(void *x)  { return ptr_to_string(x); }
+function String to_string(String x) { return String_to_string(x); }
+
+#else
+
+#define Array__to_string
+#define Math__to_string
+
+#define to_string(x) _Generic((x), \
+    bool: b32_to_string, \
+    char: char_to_string, \
+    int: int_to_string, \
+    f32: f32_to_string, \
+    f64: f64_to_string, \
+    void*: ptr_to_string, \
+    String: String_to_string, \
+    Array__to_string Math__to_string default: S("<Unknown>") \
+)( (x) )
 
 #endif // LANG_CPP
 
@@ -6680,7 +6706,7 @@ function String Array_i32_to_string(Array_i32 a)
         string_list_push(temp_arena(), &list, item);
     }
     String items = string_join(list, S(",\n"));
-    return sprint("Array_i32[%d] {\n%S\n}", a.count, items);
+    return sprint("Array_i32[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
 function String Array_i64_to_string(Array_i64 a)
@@ -6692,7 +6718,7 @@ function String Array_i64_to_string(Array_i64 a)
         string_list_push(temp_arena(), &list, item);
     }
     String items = string_join(list, S(",\n"));
-    return sprint("Array_i64[%d] {\n%S\n}", a.count, items);
+    return sprint("Array_i64[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
 function String Array_f32_to_string(Array_f32 a)
@@ -6700,11 +6726,11 @@ function String Array_f32_to_string(Array_f32 a)
     String_List list = {0};
     for (int i = 0; i < a.count; i += 1)
     {
-        String item = sprint("    %.16f", a.data[i]);
+        String item = sprint("    %.4f", a.data[i]);
         string_list_push(temp_arena(), &list, item);
     }
     String items = string_join(list, S(",\n"));
-    return sprint("Array_f32[%d] {\n%S\n}", a.count, items);
+    return sprint("Array_f32[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
 function String Array_f64_to_string(Array_f64 a)
@@ -6712,11 +6738,11 @@ function String Array_f64_to_string(Array_f64 a)
     String_List list = {0};
     for (int i = 0; i < a.count; i += 1)
     {
-        String item = sprint("    %.32f", a.data[i]);
+        String item = sprint("    %.8f", a.data[i]);
         string_list_push(temp_arena(), &list, item);
     }
     String items = string_join(list, S(",\n"));
-    return sprint("Array_f64[%d] {\n%S\n}", a.count, items);
+    return sprint("Array_f64[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
 #if LANG_CPP
@@ -6725,6 +6751,15 @@ function String to_string(Array_i32 a) { return Array_i32_to_string(a); }
 function String to_string(Array_i64 a) { return Array_i64_to_string(a); }
 function String to_string(Array_f32 a) { return Array_f32_to_string(a); }
 function String to_string(Array_f64 a) { return Array_f64_to_string(a); }
+
+#else
+
+#undef Array__to_string
+#define Array__to_string \
+    Array_i32: Array_i32_to_string, \
+    Array_i64: Array_i64_to_string, \
+    Array_f32: Array_f32_to_string, \
+    Array_f64: Array_f64_to_string,
 
 #endif // LANG_CPP
 

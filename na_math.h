@@ -2967,7 +2967,7 @@ function String Rectangle2i_to_string(Rectangle2i a) {
     return sprint("Rectangle2i {{%d, %d}, {%d, %d}}", a.x0, a.y0, a.x1, a.y1);
 }
 
-inline String Rectangle3_to_string(Rectangle3 a) {
+function String Rectangle3_to_string(Rectangle3 a) {
   return sprint("Rectangle3 {{%f, %f, %f}, {%f, %f, %f}}", a.x0, a.y0, a.z0, a.x1, a.y1, a.z1);
 }
 
@@ -3006,6 +3006,21 @@ function String to_string(Rectangle2 a) { return Rectangle2_to_string(a); }
 function String to_string(Rectangle2i a) { return Rectangle2i_to_string(a); }
 function String to_string(Matrix3 a) { return Matrix3_to_string(a); }
 function String to_string(Matrix4 a) { return Matrix4_to_string(a); }
+
+#else
+
+#undef Math__to_string
+#define Math__to_string \
+    Vector2: Vector2_to_string, \
+    Vector2i: Vector2i_to_string, \
+    Vector3: Vector3_to_string, \
+    Vector3i: Vector3i_to_string, \
+    Vector4: Vector4_to_string, \
+    Vector4i: Vector4i_to_string, \
+    Rectangle2: Rectangle2_to_string, \
+    Rectangle2i: Rectangle2i_to_string, \
+    Matrix3: Matrix3_to_string, \
+    Matrix4: Matrix4_to_string,
 
 #endif // LANG_CPP
 
