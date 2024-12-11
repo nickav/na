@@ -396,9 +396,11 @@ static const int __arch_endian_check_num = 1;
 
 #if LANG_C
     #define Struct(Type) typedef struct Type Type; struct Type
+    #define StructLit(Type) (Type)
     // #define Enum(Type) typedef enum Type Type; enum Type
 #else
     #define Struct(Type) struct Type
+    #define StructLit(Type) Type
     // #define Enum(Type) enum Type
 #endif
     
@@ -1046,19 +1048,13 @@ function String string_from_time(f64 time_in_seconds, String_Time_Options option
 #if DEBUG
     #define Dump(...) ArgSelectHelper4((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
 
-    #if defined(STB_SPRINTF_H_INCLUDE)
-        #define Dump1(x) print("%s = %S\n", #x, to_string(x))
-        #define Dump2(x, y) print("%s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y))
-        #define Dump3(x, y, z) print("%s = %S, %s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y), #z, to_string(z))
-        #define Dump4(x, y, z, w) print("%s = %S, %s = %S, %s = %S, %s = %S\n", #x, to_string(x), #y, to_string(y), #z, to_string(z), #w, to_string(w))
-    #else
-        #define Dump1(x) print("%s = %s\n", #x, CStr(to_string(x)))
-        #define Dump2(x, y) print("%s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)))
-        #define Dump3(x, y, z) print("%s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)))
-        #define Dump4(x, y, z, w) print("%s = %s, %s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)), #w, CStr(to_string(w)))
-    #endif
+    #define Dump1(x) print("%s = %s\n", #x, CStr(to_string(x)))
+    #define Dump2(x, y) print("%s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)))
+    #define Dump3(x, y, z) print("%s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)))
+    #define Dump4(x, y, z, w) print("%s = %s, %s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)), #w, CStr(to_string(w)))
 #else
     #define Dump(...)
+
     #define Dump1(x)
     #define Dump2(x, y)
     #define Dump3(x, y, z)
@@ -6389,10 +6385,10 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 // :FactorArrayMacros
 //
 
-#define Array_Alloc(a,arr,T,s) do { \
-    (arr)->data = PushArray(a,T,s); \
+#define ArrayAlloc(arena, arr, T, count) do { \
+    (arr)->data = arena_push_zero((arena), sizeof((arr)->data[0]) * (count)); \
     (arr)->count = 0; \
-    (arr)->capacity = s; \
+    (arr)->capacity = (count); \
 } while(0)
 
 #define ArrayPush(a) ((a)->count += 1, &(a)->data[(a)->count - 1])
@@ -6425,22 +6421,40 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
     for (i64 index = 0; index < (array).count; index ++) \
         if (auto *it = &(array).data[index])
 
-#define DynamicArray(T) \
-typedef struct CONCAT(T, _Array) CONCAT(T, _Array); \
-struct CONCAT(T, _Array) { \
-    DynamicArrayStructBody(T); \
+//
+// Array Definition Macros
+//
+
+#define DeclareArray(T) \
+typedef struct CONCAT(Array_, T) CONCAT(Array_, T); \
+struct CONCAT(Array_, T) { \
+    ArrayStructBody(T); \
 };
 
-#define DynamicArrayStructBody(T) \
-    Arena *arena; \
-    ArrayStructBody(T);
+#define DeclareSlice(T) \
+typedef struct CONCAT(Slice_, T) CONCAT(Slice_, T); \
+struct CONCAT(Slice_, T) { \
+    ArrayStructBody(T); \
+};
+
+#define DeclareFixedArray(T) \
+typedef struct CONCAT(FixedArray_, T) CONCAT(FixedArray_, T); \
+struct CONCAT(FixedArray_, T) { \
+    StaticArrayStructBody(T); \
+};
 
 #define ArrayStructBody(T) \
+    Arena *arena; \
     i64   capacity; \
     i64   count; \
     T     *data;
 
-#define StaticArrayStructBody(T, capacity_) \
+#define SliceStructBody(T) \
+    i64   capacity; \
+    i64   count; \
+    T     *data;
+
+#define FixedArrayStructBody(T, capacity_) \
     i64 count; \
     static const i64 capacity = capacity_; \
     T data[capacity_];
@@ -6448,6 +6462,7 @@ struct CONCAT(T, _Array) { \
 #if LANG_CPP
     #undef ArrayStructBody
     #define ArrayStructBody(T) \
+        Arena *arena; \
         i64   count; \
         i64   capacity; \
         T     *data; \
@@ -6458,8 +6473,20 @@ struct CONCAT(T, _Array) { \
             return data[i]; \
         }
 
-    #undef StaticArrayStructBody
-    #define StaticArrayStructBody(T, capacity_) \
+    #undef SliceStructBody
+    #define SliceStructBody(T) \
+        i64   count; \
+        i64   capacity; \
+        T     *data; \
+        \
+        T &operator[](i64 i) \
+        { \
+            assert(i >= 0 && i < count); \
+            return data[i]; \
+        }
+
+    #undef FixedArrayStructBody
+    #define FixedArrayStructBody(T, capacity_) \
         i64 count; \
         static const i64 capacity = capacity_; \
         T data[capacity_]; \
@@ -6474,42 +6501,6 @@ struct CONCAT(T, _Array) { \
 //
 // Stretchy Array functions
 //
-
-typedef struct Array_i32 Array_i32;
-struct Array_i32
-{
-    Arena *arena;
-    i32 *data;
-    i64 count;
-    i64 capacity;
-};
-
-typedef struct Array_i64 Array_i64;
-struct Array_i64
-{
-    Arena *arena;
-    i64 *data;
-    i64 count;
-    i64 capacity;
-};
-
-typedef struct Array_f32 Array_f32;
-struct Array_f32
-{
-    Arena *arena;
-    f32 *data;
-    i64 count;
-    i64 capacity;
-};
-
-typedef struct Array_f64 Array_f64;
-struct Array_f64
-{
-    Arena *arena;
-    f64 *data;
-    i64 count;
-    i64 capacity;
-};
 
 #define array_init_from_arena(it, arena_, initial_capacity) \
     array__init_from_arena(array__to_ref(it), arena_, initial_capacity)
@@ -6542,35 +6533,20 @@ struct Array_f64
     (assert((it)->count < (it)->capacity), ((it)->data[(it)->count] = value), ((it)->count += 1), &(it)->data[(it)->count - 1])
 
 #define array_remove_unordered(it, index) \
-    do { \
-        assert((it)->data); \
-        assert(index >= 0 && index < (it)->count); \
-        const u64 size = sizeof((it)->data[0]); \
-        MemoryCopy((u8 *)((it)->data) + size * ((it)->count - 1), (u8 *)((it)->data) + size * index, size); \
-        (it)->count --; \
-    } while(0)
+    array__remove_unordered(array__to_slice_ref(it), index)
 
 #define array_remove_ordered(it, index) \
-    do { \
-        assert((it)->data); \
-        assert(index >= 0 && index < (it)->count); \
-        \
-        u64 i = index + 1; \
-        u64 remaining_count = (it)->count - i; \
-        const u64 size = sizeof((it)->data[0]); \
-        MemoryMove((u8 *)((it)->data) + size * index, (u8 *)((it)->data) + size * i, size * remaining_count); \
-        (it)->count --; \
-    } while(0)
+    array__remove_ordered(array__to_slice_ref(it), index, 1)
 
 #define array_begin(a) ((a)->data ? (a)->data : NULL)
 
 #define array_end(a) ((a)->data ? ((a)->data + (a)->count) : NULL)
 
-#define array_sort(a, cmp) (array__sort(array__to_basic_ref(a), cmp))
+#define array_sort(a, cmp) (array__sort(array__to_any(a), cmp))
 
-#define array_search(a, key, cmp) (array__search(array__to_basic_ref(a), key, cmp))
+#define array_search(a, key, cmp) (array__search(array__to_any(&(a)), key, cmp))
 
-#define array_find(a, key, cmp) (array__find(array__to_basic_ref(a), key, cmp))
+#define array_find(a, key, cmp) (array__find(array__to_any(&(a)), key, cmp))
 
 //
 // Hopefully the compiler is smart enough to figure out what we're doing here...
@@ -6586,8 +6562,17 @@ struct Array_Ref
     u32 item_size;
 };
 
-typedef struct Array_Basic_Ref Array_Basic_Ref;
-struct Array_Basic_Ref
+typedef struct Slice_Ref Slice_Ref;
+struct Slice_Ref
+{
+    i64 *count;
+    i64 *capacity;
+    void **data;
+    u32 item_size;
+};
+
+typedef struct Array_Any Array_Any;
+struct Array_Any
 {
     i64 count;
     i64 capacity;
@@ -6596,10 +6581,13 @@ struct Array_Basic_Ref
 };
 
 #define array__to_ref(it) \
-    {&(it)->arena, &(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
+    StructLit(Array_Ref){&(it)->arena, &(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
 
-#define array__to_basic_ref(it) \
-    {(it)->count, (it)->capacity, (void *)(it)->data, sizeof((it)->data[0])}
+#define array__to_slice_ref(it) \
+    StructLit(Slice_Ref){&(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
+
+#define array__to_any(it) \
+    StructLit(Array_Any){(it)->count, (it)->capacity, (void *)(it)->data, sizeof((it)->data[0])}
 
 function void array__init_from_arena(Array_Ref it, Arena *arena, i32 initial_capacity)
 {
@@ -6653,23 +6641,54 @@ function void array__free(Array_Ref it)
     *it.count = 0;
 }
 
-function void array__sort(Array_Basic_Ref it, Compare_Func cmp)
+function void array__remove_unordered(Slice_Ref it, i64 index)
+{
+    void *data = *it.data;
+    i64 count = *it.count;
+    const u64 size = it.item_size;
+
+    assert(data);
+    assert(index >= 0 && index < count);
+
+    MemoryCopy((u8 *)(data) + size*index, (u8 *)(data) + size*(count-1), size);
+    *it.count -= 1;
+}
+
+function void array__remove_ordered(Slice_Ref it, i64 index, i64 num_to_remove)
+{
+    void *data = *it.data;
+    i64 count = *it.count;
+    const u64 size = it.item_size;
+
+    assert(data);
+    assert(index >= 0 && index < count);
+    assert(num_to_remove > 0);
+    assert((index+num_to_remove) >= 0 && (index+num_to_remove) <= count);
+
+    u64 i = index + num_to_remove;
+    u64 remaining_count = count - i;
+    MemoryMove((u8 *)(data) + size*index, (u8 *)(data) + size*i, size*remaining_count);
+    *it.count -= num_to_remove;
+}
+
+function void array__sort(Array_Any it, Compare_Func cmp)
 {
     QuickSort(it.data, it.count, it.item_size, cmp);
 }
 
-function i64 array__search(Array_Basic_Ref it, void *key, Compare_Func cmp)
+function i64 array__search(Array_Any it, void *key, Compare_Func cmp)
 {
     void *item = BinarySearch(key, it.data, it.count, it.item_size, cmp);
     i64 result = -1;
     if (item)
     {
+        // NOTE(nick): convert item pointer to array index
         result = (i64) ((((u8 *)item) - ((u8 *)it.data)) / it.item_size);
     }
     return result;
 }
 
-function i64 array__find(Array_Basic_Ref it, void *key, Compare_Func cmp)
+function i64 array__find(Array_Any it, void *key, Compare_Func cmp)
 {
     i64 result = -1;
 
@@ -6690,6 +6709,47 @@ function i64 array__find(Array_Basic_Ref it, void *key, Compare_Func cmp)
 
     return result;
 }
+
+//
+// Built-in Array Types
+//
+
+typedef struct Array_i32 Array_i32;
+struct Array_i32
+{
+    Arena *arena;
+    i32 *data;
+    i64 count;
+    i64 capacity;
+};
+
+typedef struct Array_i64 Array_i64;
+struct Array_i64
+{
+    Arena *arena;
+    i64 *data;
+    i64 count;
+    i64 capacity;
+};
+
+typedef struct Array_f32 Array_f32;
+struct Array_f32
+{
+    Arena *arena;
+    f32 *data;
+    i64 count;
+    i64 capacity;
+};
+
+typedef struct Array_f64 Array_f64;
+struct Array_f64
+{
+    Arena *arena;
+    f64 *data;
+    i64 count;
+    i64 capacity;
+};
+
 
 //
 // String Conversions
@@ -6782,6 +6842,7 @@ function void array__test()
     print("capacity = %d\n", array.capacity);
 
     array_sort(&array, compare_i32);
+    array_remove_ordered(&array, 0);
     
     for (i32 i = 0; i < array.count; i += 1)
     {
@@ -6789,7 +6850,7 @@ function void array__test()
     }
 
     i32 key = 42;
-    i64 index = array_find(&array, &key, compare_i32);
+    i64 index = array_find(array, &key, compare_i32);
     Dump(index);
 }
 #endif
