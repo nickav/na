@@ -1,5 +1,5 @@
 /*
-    na.h - v0.07
+    na.h - v0.08
     Nick Aversano's C++ helper library
 
     This is a single header file with a bunch of useful stuff
@@ -22,6 +22,7 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.08  - bug fixes, fix arena alignment on MacOS ARM
     0.07  - bug fixes
     0.06  - added comparision helpers, improved stretchy arrays API, added Timing_f64,
             actually seed random with os time
@@ -223,11 +224,21 @@ static const int __arch_endian_check_num = 1;
 #endif
 
 #ifdef __SANITIZE_ADDRESS__
-    #define __AsanPoisonMemoryRegion(addr, size) __asan_poison_memory_region((addr), (size))
-    #define __AsanUnpoisonMemoryRegion(addr, size) __asan_unpoison_memory_region((addr), (size))
+    #if OS_MACOS
+    #include <sanitizer/asan_interface.h>
+    #endif
+
+    #ifndef ASAN_POISON_MEMORY_REGION
+        void __asan_poison_memory_region(void const volatile *addr, unsigned long size);
+        #define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
+    #endif
+    #ifndef ASAN_UNPOISION_MEMORY_REGION
+        void __asan_unpoison_memory_region(void const volatile *addr, unsigned long size);
+        #define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+    #endif
 #else
-    #define __AsanPoisonMemoryRegion(addr, size) ((void)(addr), (void)(size))
-    #define __AsanUnpoisonMemoryRegion(addr, size) ((void)(addr)
+    #define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+    #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif
 
 #endif // BASE_CTX_CRACK_H
@@ -390,8 +401,6 @@ static const int __arch_endian_check_num = 1;
     #endif
 #endif
 
-#define Swap2(a,b) do { typeof(a) t__ = a; a = b; b = t__; } while(0)
-
 #define DefineStruct(Type) typedef struct Type Type
 
 #if LANG_C
@@ -471,12 +480,12 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 // Defer
 //
 
-#define Defer(start, end) for(int __i = ((start), 0); !__i; __i += 1, (end))
-
 #ifndef CONCAT
     #define CONCAT_HELPER(x, y) x##y
     #define CONCAT(x, y) CONCAT_HELPER(x, y)
 #endif
+
+#define Defer(start, end) for (int CONCAT(__i, __LINE__) = ((start), 0); !CONCAT(__i, __LINE__); CONCAT(__i, __LINE__) += 1, (end))
 
 
 #if LANG_CPP
@@ -647,31 +656,35 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
 #define BASE_MEMORY_H
 
 #if !defined(ARENA_DEFAULT_ALIGNMENT)
-#define ARENA_DEFAULT_ALIGNMENT 8
+    #define ARENA_DEFAULT_ALIGNMENT 8
 #endif
 
 #if !defined(ARENA_COMMIT_SIZE)
-#define ARENA_COMMIT_SIZE Kilobytes(4)
+    #define ARENA_COMMIT_SIZE Kilobytes(4)
 #endif
 
 #if !defined(ARENA_INITIAL_COMMIT_SIZE)
-#define ARENA_INITIAL_COMMIT_SIZE Kilobytes(4)
+    #define ARENA_INITIAL_COMMIT_SIZE Kilobytes(4)
 #endif
 
 #if !defined(ARENA_DECOMMIT_THRESHOLD)
-#define ARENA_DECOMMIT_THRESHOLD Kilobytes(64)
+    #define ARENA_DECOMMIT_THRESHOLD Kilobytes(256)
 #endif
 
 typedef struct Arena Arena;
-struct Arena {
+struct Arena
+{
     u8 *data;
     u64 pos;
     u64 size;
     u64 commit_pos;
+
+    u64 page_size;
 };
 
 typedef struct M_Temp M_Temp;
-struct M_Temp {
+struct M_Temp
+{
     Arena *arena;
     u64 pos;
 };
@@ -695,16 +708,13 @@ function void *arena_push(Arena *arena, u64 size);
 function void *arena_push_zero(Arena *arena, u64 size);
 function bool arena_write(Arena *arena, u8 *data, u64 size);
 
-function void *arena_resize_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size);
-function void arena_free_ptr(Arena *arena, void *old_memory_pointer, u64 old_size);
-
 function M_Temp arena_begin_temp(Arena *arena);
 function void arena_end_temp(M_Temp temp);
 
-#define PushArray(a,T,c)     (T*)arena_push((a), sizeof(T)*(c))
-#define PushArrayZero(a,T,c) (T*)arena_push_zero((a), sizeof(T)*(c))
-#define PushStruct(a, T)     (T*)arena_push((a), sizeof(T))
-#define PushStructZero(a, T) (T*)arena_push_zero((a), sizeof(T))
+#define PushArray(a,T,c)     (T*)arena_push_no_zero((a), sizeof(T)*(c))
+#define PushArrayZero(a,T,c) (T*)arena_push((a), sizeof(T)*(c))
+#define PushStruct(a, T)     (T*)arena_push_no_zero((a), sizeof(T))
+#define PushStructZero(a, T) (T*)arena_push((a), sizeof(T))
 #define PopArray(a, T, c0, c1) if (c1 < c0) arena_pop((a), (c0 - c1) * sizeof(T))
 
 function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count);
@@ -724,16 +734,16 @@ function i64 memory_binary_search(void *base, u64 count, u64 size, void *key, Co
 //
 
 #if !defined(ALLOCATOR_DEFAULT_ALIGNMENT)
-#define ALLOCATOR_DEFAULT_ALIGNMENT 16
+    #define ALLOCATOR_DEFAULT_ALIGNMENT 16
 #endif
 
 
 enum Allocator_Mode
 {
-    AllocatorMode_Alloc    = 0,
-    AllocatorMode_Resize   = 1,
-    AllocatorMode_Free     = 2,
-    AllocatorMode_FreeAll  = 3,
+    AllocatorMode_Alloc    = 1,
+    AllocatorMode_Resize   = 2,
+    AllocatorMode_Free     = 3,
+    AllocatorMode_FreeAll  = 4,
 };
 typedef enum Allocator_Mode Allocator_Mode;
 
@@ -758,10 +768,6 @@ function void *allocator_realloc(Allocator allocator, void *data, u64 new_size, 
 function void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment);
 function void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment);
 
-#ifndef default_allocator
-#define default_allocator() os_allocator()
-#endif
-
 function Allocator os_allocator();
 function Allocator arena_allocator(Arena *arena);
 
@@ -781,27 +787,9 @@ function Allocator arena_allocator(Arena *arena);
     #define S(x) ((String){(u8 *)(x), sizeof(x)-1})
 #endif
 
-#if 0
-#define BufA(array) r_bytes_make((u8 *)(array), count_of(array) * sizeof((array)[0]))
-#define BufS(struct) r_bytes_make((u8 *)&struct, sizeof(struct))
-#define BufD(array, count) r_bytes_make((u8 *)(array), (count) * sizeof((array)[0]))
-#endif
-
-typedef struct Buffer Buffer;
-struct Buffer {
-    u8 *data;
-    i64 count;
-
-    #if LANG_CPP
-    u8 &operator[](i64 i) {
-        assert(i >= 0 && i < count);
-        return data[i];
-    }
-    #endif
-};
-
 typedef struct String String;
-struct String {
+struct String
+{
     u8 *data;
     i64 count;
 
@@ -814,7 +802,8 @@ struct String {
 };
 
 typedef struct String16 String16;
-struct String16 {
+struct String16
+{
     u16 *data;
     i64 count;
 
@@ -827,7 +816,8 @@ struct String16 {
 };
 
 typedef struct String32 String32;
-struct String32 {
+struct String32
+{
     u32 *data;
     i64 count;
 
@@ -840,7 +830,8 @@ struct String32 {
 };
 
 typedef struct String_Decode String_Decode;
-struct String_Decode {
+struct String_Decode
+{
     u32 codepoint;
     u8 advance; // 1 - 4
 };
@@ -913,7 +904,6 @@ function u8 char_to_forward_slash(u8 c);
 function i64 cstr_length(const char *cstr);
 
 // Constructors
-function Buffer buffer_make(u8 *data, i64 count);
 function String string_make(u8 *data, i64 count);
 function String string_range(u8 *at, u8 *end);
 function String string_from_cstr(const char *cstr);
@@ -952,14 +942,14 @@ function b32 string_contains(String str, String search);
 function b32 string_in_bounds(String str, i64 at);
 
 // Allocation
-function String string_copy(Arena *arena, String str);
+function String string_push(Arena *arena, String str);
 function String string_alloc(String str);
 function void string_free(String *str);
 
 function String string_printv(Arena *arena, const char *fmt, va_list args);
 function String string_print(Arena *arena, const char *fmt, ...);
 
-#define PushStringCopy(arena, str) string_copy(arena, str)
+#define PushStringCopy(arena, str) string_push(arena, str)
 #define PushStringFV(arena, fmt, args) string_printv(arena, fmt, args)
 #define PushStringF(arena, fmt, ...) string_print(arena, fmt, __VA_ARGS__)
 
@@ -1510,32 +1500,40 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 
 #define arena_has_virtual_backing(arena) ((arena)->commit_pos < U64_MAX)
 
-function void arena_init(Arena *arena, u8 *data, u64 size) {
-    arena->data = data;
-    arena->size = size;
-    arena->pos  = 0;
-    arena->commit_pos = U64_MAX;
-}
-
-function Arena arena_make_from_memory(u8 *data, u64 size) {
-    Arena result = {0};
-    arena_init(&result, data, size);
-    return result;
-}
-
-function Arena *arena_alloc(u64 size) {
-    size = Max(size, ARENA_INITIAL_COMMIT_SIZE);
-
+function Arena *arena_alloc_from_buffer(u8 *data, u64 size)
+{
     Arena *result = NULL;
-    u8 *data = cast(u8 *)M_Reserve(size);
-
-    if (data && M_Commit(data, ARENA_INITIAL_COMMIT_SIZE))
+    if (data)
     {
         result = cast(Arena *)data;
         result->data = data + AlignUpPow2(sizeof(Arena), 64);
         result->size = size;
         result->pos  = 0;
-        result->commit_pos = ARENA_INITIAL_COMMIT_SIZE;
+        result->commit_pos = U64_MAX;
+        result->page_size = 0;
+    }
+    assert(result != 0);
+    return result;
+}
+
+function Arena *arena_alloc(u64 size)
+{
+    u64 page_size = os_memory_page_size();
+    u64 initial_commit_size = Max(page_size, ARENA_INITIAL_COMMIT_SIZE);
+
+    size = Max(size, initial_commit_size);
+
+    Arena *result = NULL;
+    u8 *data = cast(u8 *)M_Reserve(size);
+
+    if (data && M_Commit(data, initial_commit_size))
+    {
+        result = cast(Arena *)data;
+        result->data = data + AlignUpPow2(sizeof(Arena), 64);
+        result->size = size;
+        result->pos  = 0;
+        result->commit_pos = initial_commit_size;
+        result->page_size  = Max(page_size, ARENA_COMMIT_SIZE);
     }
 
     assert(result != 0);
@@ -1547,7 +1545,8 @@ function Arena *arena_alloc_default()
     return arena_alloc(Gigabytes(1));
 }
 
-function void arena_free(Arena *arena) {
+function void arena_free(Arena *arena)
+{
     if (arena->data)
     {
         arena->data = NULL;
@@ -1559,7 +1558,8 @@ function void arena_free(Arena *arena) {
     }
 }
 
-function void *arena_push_bytes(Arena *arena, u64 size) {
+function void *arena_push_bytes(Arena *arena, u64 size)
+{
     void *result = NULL;
 
     if (arena->pos + size <= arena->size)
@@ -1573,7 +1573,7 @@ function void *arena_push_bytes(Arena *arena, u64 size) {
             u64 base_p = p + AlignUpPow2(sizeof(Arena), 64);
             if (base_p > commit_p)
             {
-                u64 p_aligned = AlignUpPow2(base_p, ARENA_COMMIT_SIZE);
+                u64 p_aligned = AlignUpPow2(base_p, arena->page_size);
                 u64 next_commit_position = ClampTop(p_aligned, arena->size);
                 u64 commit_size = next_commit_position - commit_p;
 
@@ -1595,7 +1595,8 @@ function void *arena_push_bytes(Arena *arena, u64 size) {
     return result;
 }
 
-function void arena_pop_to(Arena *arena, u64 pos) {
+function void arena_pop_to(Arena *arena, u64 pos)
+{
     if (arena->pos > pos)
     {
         arena->pos = pos;
@@ -1603,7 +1604,7 @@ function void arena_pop_to(Arena *arena, u64 pos) {
         if (arena_has_virtual_backing(arena))
         {
             u64 base_p = pos + AlignUpPow2(sizeof(Arena), 64);
-            u64 decommit_pos = AlignUpPow2(base_p, ARENA_COMMIT_SIZE);
+            u64 decommit_pos = AlignUpPow2(base_p, arena->page_size);
             u64 over_committed = arena->commit_pos - decommit_pos;
 
             if (decommit_pos < arena->commit_pos && over_committed >= ARENA_DECOMMIT_THRESHOLD)
@@ -1617,15 +1618,16 @@ function void arena_pop_to(Arena *arena, u64 pos) {
     }
 }
 
-function void arena_pop(Arena *arena, u64 size) {
+function void arena_pop(Arena *arena, u64 size)
+{
     arena_pop_to(arena, arena->pos - size);
 }
 
-function void arena_set_pos(Arena *arena, u64 pos) {
-    if (arena->pos > pos) {
-        arena_pop_to(arena, pos);
-    } else {
-        arena_push_bytes(arena, pos - arena->pos);
+function void arena_set_pos(Arena *arena, u64 pos)
+{
+    if (pos < arena->size)
+    {
+        arena->pos = pos;
     }
 }
 
@@ -1638,26 +1640,29 @@ function void arena_set_to_pointer_pos(Arena *arena, void *ptr)
     }
 }
 
-function void arena_reset(Arena *arena) {
+function void arena_reset(Arena *arena)
+{
     arena_pop_to(arena, 0);
 }
 
-function void arena_align(Arena *arena, u64 pow2_align) {
-    u64 p = arena->pos;
-    u64 p_aligned = AlignUpPow2(p, pow2_align);
-    u64 z = p_aligned - p;
-    if (z > 0) {
-        arena_push_bytes(arena, z);
+function void arena_push_aligner(Arena *arena, u64 align_pow2)
+{
+    if (align_pow2 > 1)
+    {
+        u64 p = arena->pos;
+        u64 p_aligned = AlignUpPow2(p, align_pow2);
+        u64 z = p_aligned - p;
+        if (z > 0)
+        {
+            arena_push_bytes(arena, z);
+        }
     }
 }
 
-function void *arena_push(Arena *arena, u64 size) {
-    arena_align(arena, ARENA_DEFAULT_ALIGNMENT);
-    return arena_push_bytes(arena, size);
-}
-
-function void *arena_push_zero(Arena *arena, u64 size) {
-    void *result = arena_push(arena, size);
+function void *arena_push(Arena *arena, u64 size)
+{
+    arena_push_aligner(arena, ARENA_DEFAULT_ALIGNMENT);
+    void *result = arena_push_bytes(arena, size);
     if (result != NULL)
     {
         MemoryZero(result, size);
@@ -1665,15 +1670,22 @@ function void *arena_push_zero(Arena *arena, u64 size) {
     return result;
 }
 
-function bool arena_write(Arena *arena, u8 *data, u64 size) {
-    bool result = false;
+function void *arena_push_no_zero(Arena *arena, u64 size)
+{
+    arena_push_aligner(arena, ARENA_DEFAULT_ALIGNMENT);
+    void *result = arena_push_bytes(arena, size);
+    return result;
+}
 
-    u8 *buffer = (u8 *)arena_push(arena, size);
-    if (buffer != NULL) {
+function bool arena_write(Arena *arena, u8 *data, u64 size)
+{
+    bool result = false;
+    u8 *buffer = (u8 *)arena_push_no_zero(arena, size);
+    if (buffer)
+    {
         MemoryCopy(buffer, data, size);
         result = true;
     }
-
     return result;
 }
 
@@ -1716,18 +1728,21 @@ function void arena_free_ptr(Arena *arena, void *old_memory_pointer, u64 old_siz
     }
 }
 
-function M_Temp arena_begin_temp(Arena *arena) {
+function M_Temp arena_begin_temp(Arena *arena)
+{
     M_Temp result = {arena, arena->pos};
     return result;
 }
 
-function void arena_end_temp(M_Temp temp) {
+function void arena_end_temp(M_Temp temp)
+{
     arena_pop_to(temp.arena, temp.pos);
 }
 
 thread_local Arena *m__scratch_pool[2] = {0, 0};
 
-function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count) {
+function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count)
+{
     if (m__scratch_pool[0] == NULL)
     {
         m__scratch_pool[0] = arena_alloc_default();
@@ -1756,19 +1771,13 @@ function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count) {
     return result;
 }
 
-function Arena *temp_arena() {
-    if (m__scratch_pool[0] == NULL)
-    {
-        m__scratch_pool[0] = arena_alloc_default();
-        m__scratch_pool[1] = arena_alloc_default();
-        assert(m__scratch_pool[0]);
-        assert(m__scratch_pool[1]);
-    }
-
-    return m__scratch_pool[0];
+function Arena *temp_arena()
+{
+    return arena_get_scratch(0, 0).arena;
 }
 
-function u64 m_align_offset(void *ptr, u64 alignment){
+function u64 m_align_offset(void *ptr, u64 alignment)
+{
     u64 base_address = (u64)ptr;
 
     assert(alignment >= 1);
@@ -1915,9 +1924,8 @@ function i64 memory_binary_search(void *base, u64 count, u64 size, void *key, Co
 
 function void *allocator_alloc(Allocator allocator, u64 size)
 {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
+    if (allocator.proc)
+    {
         void *result = allocator.proc(AllocatorMode_Alloc, size, 0, NULL, allocator.data, ALLOCATOR_DEFAULT_ALIGNMENT);
         return result;
     }
@@ -1927,9 +1935,8 @@ function void *allocator_alloc(Allocator allocator, u64 size)
 
 function void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignment)
 {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
+    if (allocator.proc)
+    {
         void *result = allocator.proc(AllocatorMode_Alloc, size, 0, NULL, allocator.data, alignment);
         return result;
     }
@@ -1939,10 +1946,10 @@ function void *allocator_alloc_aligned(Allocator allocator, u64 size, u32 alignm
 
 function void allocator_free(Allocator allocator, void *data, u64 old_size)
 {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
-        if (data != NULL) {
+    if (allocator.proc)
+    {
+        if (data != NULL)
+        {
             allocator.proc(AllocatorMode_Free, 0, old_size, data, allocator.data, 0);
         }
     }
@@ -1950,9 +1957,8 @@ function void allocator_free(Allocator allocator, void *data, u64 old_size)
 
 function void *allocator_realloc(Allocator allocator, void *data, u64 new_size, u64 old_size)
 {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
+    if (allocator.proc)
+    {
         return allocator.proc(AllocatorMode_Resize, new_size, old_size, data, allocator.data, ALLOCATOR_DEFAULT_ALIGNMENT);
     }
 
@@ -1961,9 +1967,8 @@ function void *allocator_realloc(Allocator allocator, void *data, u64 new_size, 
 
 function void *allocator_realloc_aligned(Allocator allocator, void *data, u64 new_size, u64 old_size, u32 alignment)
 {
-    if (!allocator.proc) allocator = default_allocator();
-
-    if (allocator.proc) {
+    if (allocator.proc)
+    {
         return allocator.proc(AllocatorMode_Resize, new_size, old_size, data, allocator.data, alignment);
     }
 
@@ -1973,13 +1978,15 @@ function void *allocator_realloc_aligned(Allocator allocator, void *data, u64 ne
 function ALLOCATOR_PROC(os_allocator_proc)
 {
     switch (mode) {
-        case AllocatorMode_Alloc: {
+        case AllocatorMode_Alloc:
+        {
             u64 actual_size = requested_size + m_align_offset(0, alignment);
             void *result = os_alloc(actual_size);
             return result;
-        }
+        } break;
 
-        case AllocatorMode_Resize: {
+        case AllocatorMode_Resize:
+        {
             u64 actual_size = requested_size + m_align_offset(0, alignment);
 
             void *result = os_alloc(actual_size);
@@ -1991,25 +1998,29 @@ function ALLOCATOR_PROC(os_allocator_proc)
             }
 
             return result;
-        }
+        } break;
         
-        case AllocatorMode_Free: {
+        case AllocatorMode_Free:
+        {
             os_free(old_memory_pointer);
             return NULL;
-        }
+        } break;
 
-        case AllocatorMode_FreeAll: {
+        case AllocatorMode_FreeAll:
+        {
             // @Incomplete
             return NULL;
-        }
+        } break;
 
-        default: {
+        default:
+        {
             return NULL;
-        }
+        } break;
     }
 }
 
-function Allocator os_allocator() {
+function Allocator os_allocator()
+{
     Allocator result = {os_allocator_proc, 0};
     return result;
 }
@@ -2021,7 +2032,7 @@ function ALLOCATOR_PROC(arena_allocator_proc)
     switch (mode) {
         case AllocatorMode_Alloc:
         {
-            arena_align(arena, alignment);
+            arena_push_aligner(arena, alignment);
             void *result = arena_push_bytes(arena, requested_size);
             MemoryZero(result, requested_size);
             return result;
@@ -2029,7 +2040,7 @@ function ALLOCATOR_PROC(arena_allocator_proc)
 
         case AllocatorMode_Resize:
         {
-            arena_align(arena, alignment);
+            arena_push_aligner(arena, alignment);
             void *result = arena_resize_ptr(arena, requested_size, old_memory_pointer, old_size);
             return result;
         } break;
@@ -2046,13 +2057,15 @@ function ALLOCATOR_PROC(arena_allocator_proc)
             return NULL;
         } break;
 
-        default: {
+        default:
+        {
             return NULL;
         } break;
     }
 }
 
-Allocator arena_allocator(Arena *arena) {
+function Allocator arena_allocator(Arena *arena)
+{
     assert(arena);
     Allocator result = {arena_allocator_proc, arena};
     return result;
@@ -2453,14 +2466,16 @@ function String string_split_iter(String text, String search, i64 *index)
 // Allocation
 //
 
-function String string_copy(Arena *arena, String str)
+function String string_push(Arena *arena, String str)
 {
     String copy = {0};
-    u8 *data = PushArray(arena, u8, str.count);
+    u8 *data = PushArray(arena, u8, str.count+1);
 
-    if (data) {
+    if (data)
+    {
         copy = string_make(data, str.count);
         MemoryCopy(copy.data, str.data, str.count);
+        data[str.count] = '\0';
     }
 
     return copy;
@@ -2620,13 +2635,15 @@ function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
 
     if (capacity >= count) {
         switch (count) {
-            case 1: {
+            case 1:
+            {
                 // NOTE(nick): don't need the extra check because of the utf8_class check
                 result.advance = 1;
                 result.codepoint = str[0] & 0x7F;
             } break;
 
-            case 2: {
+            case 2:
+            {
                 if (utf8_class[str[1] >> 3] == 0)
                 {
                     u32 codepoint = ((str[0] & 0x1F) << 6) | (str[1] & 0x3F);
@@ -2638,9 +2655,9 @@ function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
                 }
             } break;
 
-            case 3: {
-                if (utf8_class[str[1] >> 3] == 0 &&
-                    utf8_class[str[2] >> 3] == 0)
+            case 3:
+            {
+                if (utf8_class[str[1] >> 3] == 0 && utf8_class[str[2] >> 3] == 0)
                 {
                     u32 codepoint = (
                         ((str[0] & 0x0F) << 12) |
@@ -2655,10 +2672,9 @@ function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
                 }
             } break;
 
-            case 4: {
-                if (utf8_class[str[1] >> 3] == 0 &&
-                    utf8_class[str[2] >> 3] == 0 &&
-                    utf8_class[str[3] >> 3] == 0)
+            case 4:
+            {
+                if (utf8_class[str[1] >> 3] == 0 && utf8_class[str[2] >> 3] == 0 && utf8_class[str[3] >> 3] == 0)
                 {
                     u32 codepoint = (
                         ((str[0] & 0x07) << 18) |
@@ -2682,16 +2698,19 @@ function String_Decode string_decode_utf8(u8 *str, u64 capacity) {
 function u32 string_encode_utf8(u8 *dest, u32 codepoint) {
     u32 advance = 0;
 
-    if (codepoint <= 0x7F) {
+    if (codepoint <= 0x7F)
+    {
         advance = 1;
         dest[0] = (u8)codepoint;
     }
-    else if (codepoint <= 0x7FF) {
+    else if (codepoint <= 0x7FF)
+    {
         advance = 2;
         dest[0] = 0xC0 | (u8)((codepoint >> 6) & 0x1F);
         dest[1] = 0x80 | (u8)(codepoint & 0x3F);
     }
-    else if (codepoint <= 0xFFFF) {
+    else if (codepoint <= 0xFFFF)
+    {
         if (InRange(codepoint, 0xD800, 0xDFFF))
         {
             codepoint = S_UTF8_INVALID;
@@ -2702,7 +2721,8 @@ function u32 string_encode_utf8(u8 *dest, u32 codepoint) {
         dest[1] = 0x80 | (u8)((codepoint >> 6) & 0x3F);
         dest[2] = 0x80 | (u8)(codepoint & 0x3F);
     }
-    else if (codepoint <= 0x10FFFF) {
+    else if (codepoint <= 0x10FFFF)
+    {
         advance = 4;
         dest[0] = 0xF0 | (u8)((codepoint >> 18) & 0x07);
         dest[1] = 0x80 | (u8)((codepoint >> 12) & 0x3F);
@@ -3043,31 +3063,39 @@ function i64 string_to_i64(String str, u32 base) {
     
     // consume sign
     i64 sign = +1;
-    if (p < (u64)str.count) {
+    if (p < (u64)str.count)
+    {
         u8 c = str.data[p];
-        if (c == '-'){
+        if (c == '-')
+        {
             sign = -1;
             p += 1;
         }
-        else if (c == '+'){
+        else if (c == '+')
+        {
             p += 1;
         }
     }
     
     // radix from prefix
     u32 radix = 10;
-    if (p < (u64)str.count) {
+    if (p < (u64)str.count)
+    {
         u8 c0 = str.data[p];
-        if (c0 == '0') {
+        if (c0 == '0')
+        {
             p += 1;
             radix = 8;
-            if (p < (u64)str.count) {
+            if (p < (u64)str.count)
+            {
                 u8 c1 = str.data[p];
-                if (c1 == 'x') {
+                if (c1 == 'x')
+                {
                     p += 1;
                     radix = 16;
                 }
-                else if (c1 == 'b') {
+                else if (c1 == 'b')
+                {
                     p += 1;
                     radix = 2;
                 }
@@ -3149,22 +3177,22 @@ function String_List string_splits(Arena *arena, String string, int split_count,
     for (i64 i = 0; i < string.count; i += 1)
     {
         b32 was_split = 0;
-        for(int split_idx = 0; split_idx < split_count; split_idx += 1)
+        for (int split_idx = 0; split_idx < split_count; split_idx += 1)
         {
             b32 match = 0;
-            if(i + splits[split_idx].count <= string.count)
+            if (i + splits[split_idx].count <= string.count)
             {
                 match = 1;
-                for(i64 split_i = 0; split_i < splits[split_idx].count && i + split_i < string.count; split_i += 1)
+                for (i64 split_i = 0; split_i < splits[split_idx].count && i + split_i < string.count; split_i += 1)
                 {
-                    if(splits[split_idx].data[split_i] != string.data[i + split_i])
+                    if (splits[split_idx].data[split_i] != string.data[i + split_i])
                     {
                         match = 0;
                         break;
                     }
                 }
             }
-            if(match)
+            if (match)
             {
                 String split_string = Str8(string.data + split_start, i - split_start);
                 string_list_push(arena, &list, split_string);
@@ -3175,7 +3203,7 @@ function String_List string_splits(Arena *arena, String string, int split_count,
             }
         }
         
-        if(was_split == 0 && i == string.count - 1)
+        if (was_split == 0 && i == string.count - 1)
         {
             String split_string = Str8(string.data + split_start, i+1 - split_start);
             string_list_push(arena, &list, split_string);
@@ -3249,7 +3277,7 @@ function String_Array string_array_from_list(Arena *arena, String_List list)
     i64 index = 0;
     for (String_Node *it = list.first; it != NULL; it = it->next)
     {
-        String str = string_copy(arena, it->string);
+        String str = string_push(arena, it->string);
         result.data[index] = str;
         index += 1;
     }
@@ -3455,14 +3483,14 @@ function void string_to_upper(String *str)
 
 function String string_lower(Arena *arena, String str)
 {
-    String result = string_copy(arena, str);
+    String result = string_push(arena, str);
     string_to_lower(&result);
     return result;
 }
 
 function String string_upper(Arena *arena, String str)
 {
-    String result = string_copy(arena, str);
+    String result = string_push(arena, str);
     string_to_upper(&result);
     return result;
 }
@@ -5434,7 +5462,7 @@ function String os_get_clipboard_text()
     // char *text = [string UTF8String];
     char *text = objc_method(char*, id, SEL)(string, sel_registerName("UTF8String"));
 
-    String result = string_copy(temp_arena(), string_from_cstr(text));
+    String result = string_push(temp_arena(), string_from_cstr(text));
     return result;
 }
 
@@ -5655,30 +5683,35 @@ function void os_set_high_process_priority(bool enable) {
 // Memory
 //
 
-function u64 os_memory_page_size() {
+function u64 os_memory_page_size()
+{
     i64 result = sysconf(_SC_PAGE_SIZE);
     return (u64)result;
 }
 
-function void *os_memory_reserve(u64 size) {
-    void *result = 0;
+function void *os_memory_reserve(u64 size)
+{
+    void *result = NULL;
 
     result = mmap(NULL, size, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (result  == (void*)-1)
+    if (result == (void*)-1)
     {
-        result = 0;
+        result = NULL;
     }
 
+    ASAN_POISON_MEMORY_REGION(result, size);
     return result;
 }
 
-function bool os_memory_commit(void *ptr, u64 size) {
+function bool os_memory_commit(void *ptr, u64 size)
+{
     u64 page_size = os_memory_page_size();
 
     i64 p = (i64)ptr;
     i64 p_aligned = AlignDownPow2(p, page_size);
 
-    if (p != p_aligned) {
+    if (p != p_aligned)
+    {
         i64 delta = p - p_aligned;
         ptr = (void *)((u8 *)ptr - delta);
         size += delta;
@@ -5691,16 +5724,19 @@ function bool os_memory_commit(void *ptr, u64 size) {
     // NOTE(nick): ptr must be aligned to a page boundary.
     int result = mprotect(ptr, size, PROT_READ | PROT_WRITE);
     madvise(ptr, size, MADV_WILLNEED);
+    ASAN_UNPOISON_MEMORY_REGION(ptr, size);
     return result == 0;
 }
 
-function bool os_memory_decommit(void *ptr, u64 size) {
+function bool os_memory_decommit(void *ptr, u64 size)
+{
     u64 page_size = os_memory_page_size();
 
     i64 p = (i64)ptr;
     i64 p_aligned = AlignDownPow2(p, page_size);
 
-    if (p != p_aligned) {
+    if (p != p_aligned)
+    {
         i64 delta = p - p_aligned;
         ptr = (void *)((u8 *)ptr - delta);
         size += delta;
@@ -5711,13 +5747,15 @@ function bool os_memory_decommit(void *ptr, u64 size) {
     // printf("[decommit] %p (%lld)\n", ptr, size);
 
     // NOTE(nick): ptr must be aligned to a page boundary.
-    // int result = mprotect(ptr, size, PROT_NONE);
+    int result = mprotect(ptr, size, PROT_NONE);
     madvise(ptr, size, MADV_DONTNEED);
-    // return result == 0;
-    return true;
+    ASAN_POISON_MEMORY_REGION(ptr, size);
+    return result == 0;
 }
 
-function bool os_memory_release(void *ptr, u64 size) {
+function bool os_memory_release(void *ptr, u64 size)
+{
+    ASAN_POISON_MEMORY_REGION(ptr, size);
     return munmap(ptr, size) == 0;
 }
 
@@ -6348,7 +6386,8 @@ function void work_queue_init(Work_Queue *queue, u64 thread_count)
 
     queue->semaphore = os_semaphore_create(thread_count);
 
-    for (u32 i = 0; i < thread_count; i++) {
+    for (u32 i = 0; i < thread_count; i++)
+    {
         Worker_Params params = {0};
         params.queue = queue;
 
