@@ -344,7 +344,7 @@ static const int __arch_endian_check_num = 1;
 #define OffsetOf(S,m) IntFromPtr(&Member(S,m))
 #define CastFromMember(S,m,p) (S*)(((u8*)p) - OffsetOf(S,m))
 #define MemberFromOffset(ptr, off, type) *(type *)((u8 *)(ptr) + off)
-#define UnusedVariable(name) (void)name
+#define Unused(name) ((void)(name))
 
 #define Bytes(n)      (n)
 #define Kilobytes(n)  ((n) << 10)
@@ -1118,24 +1118,24 @@ function Random_LCG random_make_lcg();
 function void random_lcg_set_seed(Random_LCG *series, u32 state);
 function u32 random_lcg_u32(Random_LCG *series);
 function f32 random_lcg_f32(Random_LCG *series);
-function f32 random_lcg_f32_between(Random_LCG *series, f32 min, f32 max);
-function i32 random_lcg_i32_between(Random_LCG *series, i32 min, i32 max);
+function f32 random_lcg_between_f32(Random_LCG *series, f32 min, f32 max);
+function i32 random_lcg_between_i32(Random_LCG *series, i32 min, i32 max);
 function void random_lcg_shuffle(Random_LCG *it, void *base, u64 count, u64 size);
 
 function Random_PCG random_make_pcg();
 function void random_pcg_set_seed(Random_PCG *series, u64 state, u64 selector);
 function u32 random_pcg_u32(Random_PCG *series);
 function f32 random_pcg_f32(Random_PCG *series);
-function f32 random_pcg_f32_between(Random_PCG *series, f32 min, f32 max);
-function i32 random_pcg_i32_between(Random_PCG *series, i32 min, i32 max);
+function f32 random_pcg_between_f32(Random_PCG *series, f32 min, f32 max);
+function i32 random_pcg_between_i32(Random_PCG *series, i32 min, i32 max);
 function void random_pcg_shuffle(Random_PCG *it, void *base, u64 count, u64 size);
 
 function void random_init();
 function void random_set_seed(u64 seed);
 function u32 random_next_u32();
 function f32 random_next_f32();
-function f32 random_f32_between(f32 min, f32 max);
-function i32 random_i32_between(i32 min, i32 max);
+function f32 random_between_f32(f32 min, f32 max);
+function i32 random_between_i32(i32 min, i32 max);
 function f32 random_zero_to_one();
 function void random_shuffle(void *base, u64 count, u64 size);
 
@@ -1474,11 +1474,15 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 
 #endif // OS_H
 
+#endif // NA_H
+
 //
 // impl:
 //
 
 #ifdef impl
+#ifndef NA_H_IMPL
+#define NA_H_IMPL
 
 
 //
@@ -3839,8 +3843,8 @@ function u32 murmur32_seed(void const *data, i64 len, u32 seed) {
 }
 
 function u64 murmur64_seed(void const *data_, i64 len, u64 seed) {
-    u64 const m = 0xc6a4a7935bd1e995ULL;
-    i32 const r = 47;
+    const u64 m = 0xc6a4a7935bd1e995ULL;
+    const int r = 47;
 
     u64 h = seed ^ (len * m);
 
@@ -3972,11 +3976,11 @@ function f32 random_lcg_f32(Random_LCG *it)
     return divisor * (f32)random_lcg_u32(it);
 }
 
-function f32 random_lcg_f32_between(Random_LCG *it, f32 min, f32 max) {
+function f32 random_lcg_between_f32(Random_LCG *it, f32 min, f32 max) {
     return min + (max - min) * random_lcg_f32(it);
 }
 
-function i32 random_lcg_i32_between(Random_LCG *it, i32 min, i32 max) {
+function i32 random_lcg_between_i32(Random_LCG *it, i32 min, i32 max) {
     assert(max >= min);
     return min + (i32)(random_lcg_u32(it) % (max - min + 1));
 }
@@ -4026,11 +4030,11 @@ function f32 random_pcg_f32(Random_PCG *it)
     return divisor * (f32)random_pcg_u32(it);
 }
 
-function f32 random_pcg_f32_between(Random_PCG *it, f32 min, f32 max) {
+function f32 random_pcg_between_f32(Random_PCG *it, f32 min, f32 max) {
     return min + (max - min) * random_pcg_f32(it);
 }
 
-function i32 random_pcg_i32_between(Random_PCG *it, i32 min, i32 max) {
+function i32 random_pcg_between_i32(Random_PCG *it, i32 min, i32 max) {
     assert(max >= min);
     return min + (i32)(random_pcg_u32(it) % (max - min + 1));
 }
@@ -4069,19 +4073,19 @@ function f32 random_next_f32()
     return random_pcg_f32(&g_random);
 }
 
-function f32 random_f32_between(f32 min, f32 max)
+function f32 random_between_f32(f32 min, f32 max)
 {
-    return random_pcg_f32_between(&g_random, min, max);
+    return random_pcg_between_f32(&g_random, min, max);
 }
 
-function i32 random_i32_between(i32 min, i32 max)
+function i32 random_between_i32(i32 min, i32 max)
 {
-    return random_pcg_i32_between(&g_random, min, max);
+    return random_pcg_between_i32(&g_random, min, max);
 }
 
 function f32 random_zero_to_one()
 {
-    return random_pcg_f32_between(&g_random, 0, 1);
+    return random_pcg_between_f32(&g_random, 0, 1);
 }
 
 function void random_shuffle(void *base, u64 count, u64 size)
@@ -5310,7 +5314,6 @@ function String os_get_system_path(Arena *arena, SystemPath path)
             u32 length = 0;
             _NSGetExecutablePath(0, &length);
 
-            Arena *arena = temp_arena();
             char *buffer = (char *)arena_push(arena, length);
 
             if (_NSGetExecutablePath(buffer, &length) >= 0)
@@ -5847,6 +5850,7 @@ function File_Info os_get_file_info(String path) {
         info.access           = unix_access_from_mode(stat_info.st_mode);
     }
 
+    ReleaseScratch(scratch);
     return info;
 }
 
@@ -7247,6 +7251,5 @@ function b32 table_delete(Table_KV *it, i64 index)
     return result;
 }
 
+#endif // NA_H_IMPL
 #endif // impl
-
-#endif // NA_H
