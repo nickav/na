@@ -5,7 +5,7 @@ set -e # exit on error
 script_path="$(cd "$(dirname "$0")" && pwd -P)"
 project_root=$script_path
 exe_name="na"
-flags="-Wno-deprecated-declarations -Wno-int-to-void-pointer-cast -Wno-writable-strings -Wno-dangling-else -Wno-switch -Wno-undefined-internal"
+flags="-Wall -Wno-unused-function -Wno-missing-braces"
 macos_libs="-framework Cocoa"
 linux_libs=""
 

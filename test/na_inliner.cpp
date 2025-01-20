@@ -13,7 +13,6 @@
 #include <stdio.h>
 
 static Arena *g_arena = {};
-static b32 ignore_comment = false;
 
 bool na_inliner__file(String in_file, FILE *output)
 {

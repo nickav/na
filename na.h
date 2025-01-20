@@ -2172,8 +2172,6 @@ function Allocator arena_allocator(Arena *arena)
 #define print na__print
 
 void na__print(const char *format, ...) {
-    char buffer[1024];
-
     va_list args;
     va_start(args, format);
     vprintf(format, args);
@@ -5701,7 +5699,7 @@ function void os_semaphore_signal(Semaphore *sem) {
 }
 
 function void os_semaphore_wait_for(Semaphore *sem, bool infinite) {
-    kern_return_t ret;
+    kern_return_t ret = 0;
     semaphore_t *handle = cast(semaphore_t *)sem->handle;
 
     if (infinite) {
@@ -6188,7 +6186,7 @@ function File_Info os_get_file_info(String path) {
     return info;
 }
 
-void unix_file_error(File *file, char *message, String file_name) {
+void unix_file_error(File *file, const char *message, String file_name) {
 #if DEBUG
     if (file_name.data) {
         print("[file] %s: %.*s\n", message, LIT(file_name));
