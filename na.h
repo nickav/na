@@ -2303,7 +2303,7 @@ function i64 cstr_length(const char *cstr) {
 
 function String string_from_cstr(const char *cstr) {
     return string_make((u8 *)cstr, cstr_length(cstr));
-};
+}
 
 function char *string_to_cstr(Arena *arena, String str) {
     if (!str.count || !str.data) {
@@ -7251,40 +7251,6 @@ function String to_string(Array_f64 a) { return Array_f64_to_string(a); }
 
 #endif // BASE_STRINGS_H
 
-TestFunction(array__test)
-{
-    Array_i32 array = {0};
-    array_push(&array, 42);
-    array_push(&array, 23);
-    array_push(&array, 0);
-    array_push(&array, 1);
-    array_push(&array, 122);
-
-    for (i32 i = 0; i < array.count; i += 1)
-    {
-        print("array[%d] = %d\n", i, array.data[i]);
-    }
-    print("capacity = %d\n", array.capacity);
-
-    array_sort(&array, compare_i32);
-    array_remove_ordered(&array, 0);
-    
-    for (i32 i = 0; i < array.count; i += 1)
-    {
-        print("array[%d] = %d\n", i, array.data[i]);
-    }
-
-    i32 key = 42;
-    i64 index = array_find(array, &key, compare_i32);
-    // Dump(index);
-
-    For(array)
-    {
-        // Dump(it);
-    }
-
-    return true;
-}
 
 //
 // Table
