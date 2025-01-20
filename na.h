@@ -5715,11 +5715,14 @@ function void os_semaphore_wait_for(Semaphore *sem, bool infinite) {
 }
 
 function void os_semaphore_destroy(Semaphore *sem) {
-    mach_port_t self = mach_task_self();
-    semaphore_t *handle = cast(semaphore_t *)sem->handle;
-    semaphore_destroy(self, *handle);
-    os_free(handle); // @Memory @Cleanup
-    handle = 0;
+    if (sem->handle)
+    {
+        mach_port_t self = mach_task_self();
+        semaphore_t *handle = cast(semaphore_t *)sem->handle;
+        semaphore_destroy(self, *handle);
+        os_free(handle); // @Memory @Cleanup
+        handle = 0;
+    }
 }
 
 function Mutex os_mutex_create(u32 spin_count) {
@@ -5897,12 +5900,10 @@ function bool os_shell_open(String path)
 #include <stdlib.h>
 #include <assert.h>
 
-StaticAssert(sizeof(sem_t) <= sizeof(void *), "check_semaphore_size");
-
 function Semaphore os_semaphore_create(u32 max_count)
 {
     Semaphore result = {0};
-    sem_t *handle = malloc(sizeof(sem_t));
+    sem_t *handle = (sem_t *)malloc(sizeof(sem_t));
     result.handle = handle;
     sem_init(handle, 0, max_count);
     return result;
@@ -5910,13 +5911,15 @@ function Semaphore os_semaphore_create(u32 max_count)
 
 function void os_semaphore_signal(Semaphore *sem)
 {
-    sem_post(sem->handle);
+    sem_t *handle = (sem_t *)sem->handle;
+    sem_post(handle);
 }
 
 function void os_semaphore_wait_for(Semaphore *sem, bool infinite)
 {
+    sem_t *handle = (sem_t *)sem->handle;
     if (infinite) {
-        sem_wait(sem->handle);
+        sem_wait(handle);
     } else {
         assert(!"Invalid code path");
     }
@@ -5924,34 +5927,38 @@ function void os_semaphore_wait_for(Semaphore *sem, bool infinite)
 
 function void os_semaphore_destroy(Semaphore *sem)
 {
-    sem_destroy(sem->handle);
-    free(sem->handle);
-    sem->handle = 0;
+    if (sem->handle)
+    {
+        sem_t *handle = (sem_t *)sem->handle;
+        sem_destroy(handle);
+        free(sem->handle);
+        sem->handle = 0;
+    }
 }
 
 function Mutex os_mutex_create(u32 spin_count)
 {
     Mutex result = {0};
-    result.handle = malloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(result.handle, NULL);
+    result.handle = (void *)malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init((pthread_mutex_t *)result.handle, NULL);
     return result;
 }
 
 function void os_mutex_aquire_lock(Mutex *mutex) {
-    pthread_mutex_lock(mutex->handle);
+    pthread_mutex_lock((pthread_mutex_t *)mutex->handle);
 }
 
 function bool os_mutex_try_aquire_lock(Mutex *mutex) {
-    return pthread_mutex_trylock(mutex->handle) != 0;
+    return pthread_mutex_trylock((pthread_mutex_t *)mutex->handle) != 0;
 }
 
 function void os_mutex_release_lock(Mutex *mutex) {
-    pthread_mutex_unlock(mutex->handle);
+    pthread_mutex_unlock((pthread_mutex_t *)mutex->handle);
 }
 
 function void os_mutex_destroy(Mutex *mutex) {
     if (mutex->handle) {
-        pthread_mutex_destroy(mutex->handle);
+        pthread_mutex_destroy((pthread_mutex_t *)mutex->handle);
         free(mutex->handle);
         mutex->handle = 0;
     }
