@@ -1,9 +1,9 @@
 /*
     na.h - v0.08
-    Nick Aversano's C++ helper library
+    Nick Aversano's C/C++ helper library
 
     This is a single header file with a bunch of useful stuff
-    to replace the C++ standard library.
+    to replace the C/C++ standard library.
 ===========================================================================
 
 USAGE
@@ -22,6 +22,7 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.09  - linux support
     0.08  - bug fixes, fix arena alignment on MacOS ARM
     0.07  - bug fixes
     0.06  - added comparision helpers, improved stretchy arrays API, added Timing_f64,
@@ -5745,10 +5746,11 @@ function void os_mutex_release_lock(Mutex *mutex) {
 }
 
 function void os_mutex_destroy(Mutex *mutex) {
-    // @Robustness: track if it's been released before deleting?
-    pthread_mutex_destroy(cast(pthread_mutex_t *)mutex->handle);
-    os_free(mutex->handle);
-    mutex->handle = 0;
+    if (mutex->handle) {
+        pthread_mutex_destroy(cast(pthread_mutex_t *)mutex->handle);
+        os_free(mutex->handle);
+        mutex->handle = 0;
+    }
 }
 #elif OS_LINUX
     #include <time.h>
@@ -5772,74 +5774,73 @@ function void os_exit(i32 code)
 
 function String os_get_system_path(Arena *arena, SystemPath path)
 {
-   String result = {0};
+    String result = {0};
    
-   switch (path)
-   {
-       case SystemPath_Current:
-       {
-           char *buffer = (char *)arena_push(arena, PATH_MAX);
-           getcwd(buffer, PATH_MAX);
-           
-           result = string_from_cstr(buffer);
-           i64 unused_size = PATH_MAX - result.count; 
-           arena_pop(arena, unused_size);
-       } break;
-       
-       case SystemPath_Binary:
-       {
-           char *buffer = (char *)arena_push(arena, PATH_MAX);
-           size_t length = readlink("/proc/self/exe", buffer, PATH_MAX);
-           
-           if (length > 0)
-           {
-               char *normalized = (char *)arena_push(arena, PATH_MAX);
-               if (realpath(buffer, normalized) != NULL)
-               {
-                   result = Str8(normalized, length);
-                   i64 unused_size = PATH_MAX - result.count;
-                   arena_pop(arena, unused_size);
-               }
-               else 
-               {
-                   result = Str8(buffer, length);
-               }
-               
-               result = string_chop_last_slash(result);
-           }
-       } break;
-       
-       case SystemPath_AppData:
-       {
-           char *home_str = getenv("HOME");
-           String home = string_from_cstr(home_str);
-           result = string_concat2(arena, home, S("/.config/"));
-       } break;
-   }
+    switch (path)
+    {
+        case SystemPath_Current:
+        {
+            char *buffer = (char *)arena_push(arena, PATH_MAX);
+            getcwd(buffer, PATH_MAX);
+
+            result = string_from_cstr(buffer);
+            i64 unused_size = PATH_MAX - result.count; 
+            arena_pop(arena, unused_size);
+        } break;
+
+        case SystemPath_Binary:
+        {
+            char *buffer = (char *)arena_push(arena, PATH_MAX);
+            size_t length = readlink("/proc/self/exe", buffer, PATH_MAX);
+            if (length > 0)
+            {
+                char *normalized = (char *)arena_push(arena, PATH_MAX);
+                if (realpath(buffer, normalized) != NULL)
+                {
+                    result = Str8(normalized, length);
+                    i64 unused_size = PATH_MAX - result.count;
+                    arena_pop(arena, unused_size);
+                }
+                else 
+                {
+                    result = Str8(buffer, length);
+                }
+
+                result = string_chop_last_slash(result);
+            }
+        } break;
+
+        case SystemPath_AppData:
+        {
+            char *home_str = getenv("HOME");
+            String home = string_from_cstr(home_str);
+            result = string_concat2(arena, home, S("/.config/"));
+        } break;
+    }
    
-   return result;
+    return result;
 }
 
 function f64 os_time()
 {
-   static struct timespec initial = {0};
-   if (initial.tv_sec == 0)
-   {
-       clock_gettime(CLOCK_MONOTONIC_RAW, &initial);
-   }
-   
-   struct timespec now;
-   clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-   
-   return (f64)(now.tv_sec - initial.tv_sec) + 
-          ((f64)(now.tv_nsec - initial.tv_nsec) / 1e9);
+    static struct timespec initial = {0};
+    if (initial.tv_sec == 0)
+    {
+        clock_gettime(CLOCK_MONOTONIC_RAW, &initial);
+    }
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+
+    f64 result = (now.tv_sec - initial.tv_sec) + ((f64)(now.tv_nsec - initial.tv_nsec) / 1e9);
+    return result;
 }
 
 function f64 os_clock()
 {
-   struct timespec t;
-   clock_gettime(CLOCK_MONOTONIC_RAW, &t);
-   return (f64)t.tv_sec + ((f64)t.tv_nsec / 1e9);
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t);
+    return (f64)t.tv_sec + ((f64)t.tv_nsec / 1e9);
 }
 
 function void os_sleep(f64 seconds)
@@ -5891,6 +5892,70 @@ function bool os_shell_open(String path)
 // Threading Primitives
 //
 
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdlib.h>
+#include <assert.h>
+
+StaticAssert(sizeof(sem_t) <= sizeof(void *), "check_semaphore_size");
+
+function Semaphore os_semaphore_create(u32 max_count)
+{
+    Semaphore result = {0};
+    sem_t *handle = malloc(sizeof(sem_t));
+    result.handle = handle;
+    sem_init(handle, 0, max_count);
+    return result;
+}
+
+function void os_semaphore_signal(Semaphore *sem)
+{
+    sem_post(sem->handle);
+}
+
+function void os_semaphore_wait_for(Semaphore *sem, bool infinite)
+{
+    if (infinite) {
+        sem_wait(sem->handle);
+    } else {
+        assert(!"Invalid code path");
+    }
+}
+
+function void os_semaphore_destroy(Semaphore *sem)
+{
+    sem_destroy(sem->handle);
+    free(sem->handle);
+    sem->handle = 0;
+}
+
+function Mutex os_mutex_create(u32 spin_count)
+{
+    Mutex result = {0};
+    result.handle = malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(result.handle, NULL);
+    return result;
+}
+
+function void os_mutex_aquire_lock(Mutex *mutex) {
+    pthread_mutex_lock(mutex->handle);
+}
+
+function bool os_mutex_try_aquire_lock(Mutex *mutex) {
+    return pthread_mutex_trylock(mutex->handle) != 0;
+}
+
+function void os_mutex_release_lock(Mutex *mutex) {
+    pthread_mutex_unlock(mutex->handle);
+}
+
+function void os_mutex_destroy(Mutex *mutex) {
+    if (mutex->handle) {
+        pthread_mutex_destroy(mutex->handle);
+        free(mutex->handle);
+        mutex->handle = 0;
+    }
+}
 #endif
 
 #if OS_LINUX || OS_MACOS
@@ -7204,11 +7269,11 @@ TestFunction(array__test)
 
     i32 key = 42;
     i64 index = array_find(array, &key, compare_i32);
-    Dump(index);
+    // Dump(index);
 
     For(array)
     {
-        Dump(it);
+        // Dump(it);
     }
 
     return true;

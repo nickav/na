@@ -7,6 +7,7 @@
 // inliner <input> (output)
 //
 
+#define impl
 #include "../na.h"
 
 #include <stdio.h>
