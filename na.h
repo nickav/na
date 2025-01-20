@@ -6527,7 +6527,7 @@ function f64 os_time_in_miliseconds()
 
 force_inline function u64 os_clock_cycles(void)
 {
-    #if defined(COMPILER_MSVC) && !defined(__clang__)
+    #if COMPILER_MSVC && !defined(__clang__)
         return __rdtsc();
     #elif defined(__i386__)
         u64 x;
@@ -6541,6 +6541,9 @@ force_inline function u64 os_clock_cycles(void)
         u64 x;
         __asm__ volatile("mrs \t%0, cntvct_el0" : "=r"(x));
         return x;
+    #else
+        #error "[os_clock_cycles] is not implemented for your CPU/Arch"
+        return 0;
     #endif
 }
 
@@ -6741,6 +6744,8 @@ function u32 os__worker_thread_proc(void *data)
             os_semaphore_wait_for(&queue->semaphore, true);
         }
     }
+
+    return 0;
 }
 
 function void work_queue_init(Work_Queue *queue, u64 thread_count)
