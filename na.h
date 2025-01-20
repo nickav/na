@@ -1492,6 +1492,7 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #pragma pop_macro("function")
 #pragma pop_macro("Free")
 #elif OS_MACOS
+#elif OS_LINUX
 #else
     #error OS layer not implemented.
 #endif
@@ -5752,9 +5753,9 @@ function void os_mutex_destroy(Mutex *mutex) {
 #elif OS_LINUX
     #include <time.h>
 #include <unistd.h>
-
 #include <pthread.h>
 #include <stdlib.h>
+#include <linux/limits.h>
 
 function bool os_init()
 {
