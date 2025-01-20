@@ -368,7 +368,7 @@ static const int __arch_endian_check_num = 1;
 #define ToggleFlag(fl,fi) ((fl)^=(fi))
 #define SetFlagState(fl,fi,set) do { if (set) SetFlag(fl,fi); else RemFlag(fl,fi); } while (0)
 
-#define Swap(T,a,b) do { T t__ = a; a = b; b = t__; } while(0)
+#define Swap(T,a,b) do { T t__ = (a); (a) = (b); (b) = t__; } while(0)
 
 #define FourCC(a, b, c, d) \
     (((u32)(a) << 0) | ((u32)(b) << 8) | ((u32)(c) << 16) | ((u32)(d) << 24))
@@ -376,6 +376,8 @@ static const int __arch_endian_check_num = 1;
 #define FourCCStr(s) FourCC(s[0], s[1], s[2], s[3])
 
 #define InRange(x,lo,hi) (((x) >= (lo)) && ((x) <= (hi)))
+
+#define GetBit(x,bit) (((x) >> (bit)) & 0x1)
 
 #define count_of ArrayCount
 #define offset_of OffsetOf
@@ -579,9 +581,9 @@ struct MemberOffset
 //
 
 #if COMPILER_MSVC
-    #define Trap() __debugbreak()
+    #define Breakpoint() __debugbreak()
 #elif COMPILER_CLANG || COMPILER_GCC
-    #define Trap() __builtin_trap()
+    #define Breakpoint() __builtin_trap()
 #endif
 
 int na__assert(bool cond, const char *expr, const char *file, long int line, char *msg) {
@@ -597,7 +599,7 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
         fflush(stdout);
 
         #if DEBUG
-        Trap();
+        Breakpoint();
         #endif
 
         *(volatile int *)0 = 0;
@@ -650,6 +652,13 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
 // TODO(nick): implement these
 #define Likely(x) (x)
 #define Unlikely(x) (x)
+
+
+#if DEBUG
+    #define TestFunction(Name) bool Name(); bool Name()
+#else
+    #define TestFunction(x)
+#endif
 
 #endif // BASE_TYPES_H
 #ifndef BASE_MEMORY_H
@@ -885,6 +894,14 @@ struct String_Time_Options
     b32 show_sign;
 };
 
+typedef struct CLI_Argument CLI_Argument;
+struct CLI_Argument
+{
+    String name;
+    String value;
+    b32 consumes_next_index;
+};
+
 // Char Functions
 function b32 char_is_alpha(u8 c);
 function b32 char_is_lower(u8 c);
@@ -1034,6 +1051,10 @@ function b32 path_is_absolute(String path);
 // Timing
 function String string_from_time(f64 time_in_seconds, String_Time_Options options);
 
+// CLI
+function String_Array string_array_from_c_array(Arena *arena, char **data, int count);
+function CLI_Argument string_parse_argument(String_Array array, i64 index);
+
 // Dump
 #if DEBUG
     #define Dump(...) ArgSelectHelper4((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
@@ -1094,6 +1115,9 @@ function u64 u64_previous_power_of_two(u64 x);
 function u16 endian_swap_u16(u16 i);
 function u32 endian_swap_u32(u32 i);
 function u64 endian_swap_u64(u64 i);
+function u16 u16_from_big_endian(u16 i);
+function u32 u32_from_big_endian(u32 i);
+function u64 u64_from_big_endian(u64 i);
 
 function u32 rotate_left_u32(u32 value, i32 amount);
 function u32 rotate_right_u32(u32 value, i32 amount);
@@ -2851,7 +2875,7 @@ function i64 string_move_word(String text, i64 cursor, i32 direction)
 
 function void string_select_word(String text, i64 cursor, i64 *left, i64 *right)
 {
-    i64 i = cursor;
+    i64 i = 0;
     if (char_is_separator(text.data[i]))
     {
         i = cursor;
@@ -2876,7 +2900,7 @@ function void string_select_word(String text, i64 cursor, i64 *left, i64 *right)
     }
     else
     {
-        i64 i = cursor;
+        i = cursor;
         while (i > 0)
         {
             if (char_is_separator(text.data[i])) break;
@@ -3561,6 +3585,10 @@ function String path_strip_extension(String path)
         {
             result = string_slice(path, 0, dot_pos);
         }
+        else
+        {
+            result = path;
+        }
     }
     return result;
 }
@@ -3646,6 +3674,87 @@ function String string_from_time(f64 time_in_seconds, String_Time_Options option
     }
 
     return sprint("%s%02d:%02d", sign,m,s);
+}
+
+//
+// CLI
+//
+
+function String_Array string_array_from_c_array(Arena *arena, char **data, int count)
+{
+    String_Array result = {0};
+    result.data = PushArrayZero(arena, String, count);
+
+    for (int i = 0; i < count; i += 1)
+    {
+        assert(result.count < count);
+        result.data[result.count] = string_push(arena, string_from_cstr(data[i]));
+        result.count += 1;
+    }
+
+    return result;
+}
+
+function CLI_Argument string_parse_argument(String_Array array, i64 index)
+{
+    CLI_Argument result = {0};
+
+    String key = array.data[index];
+    String val = S("");
+
+    bool consumes_next_index = false;
+    i64 equals = string_index(key, S("="), 0);
+    if (equals >= 0)
+    {
+        String str = key;
+        key = string_slice(str, 0, equals);
+        val = string_slice(str, equals+1, str.count);
+    }
+    else if (string_starts_with(key, S("-")))
+    {
+        if (index < array.count-1)
+        {
+            String maybe_val = array.data[index+1];
+            if (!string_starts_with(maybe_val, S("-")))
+            {
+                consumes_next_index = true;
+                val = maybe_val;
+            }
+        }
+    }
+
+    // NOTE(nick): normalize all options to start with a single -
+    if (string_starts_with(key, S("--")))
+    {
+        key = string_skip(key, 1);
+    }
+
+    result.name = key;
+    result.value = val;
+    result.consumes_next_index = consumes_next_index;
+    return result;
+}
+
+bool string_is_option(CLI_Argument arg)
+{
+    return string_starts_with(arg.name, S("-"));
+}
+
+bool string_option_match(String arg_name, String name, String alias)
+{
+    if (!string_starts_with(name, S("-"))) name = string_concat2(temp_arena(), S("-"), name);
+    if (alias.count > 0 && !string_starts_with(alias, S("-"))) alias = string_concat2(temp_arena(), S("-"), alias);
+
+    return string_equals(arg_name, name) || (alias.count > 0 && string_equals(arg_name, alias));
+}
+
+void cli_option_parse_bool(CLI_Argument arg, String name, String alias, b32 *value)
+{
+    if (string_option_match(arg.name, name, alias))
+    {
+        if (arg.value.count) *value = string_to_b32(arg.value);
+        else *value = true;
+    }
 }
 
 //
@@ -3745,6 +3854,21 @@ function u64 endian_swap_u64(u64 i) {
            ((i&0x00ff000000000000ull)>>40) | ((i&0x000000000000ff00ull)<<40) |
            ((i&0x0000ff0000000000ull)>>24) | ((i&0x0000000000ff0000ull)<<24) |
            ((i&0x000000ff00000000ull)>>8)  | ((i&0x00000000ff000000ull)<<8);
+}
+
+function u16 u16_from_big_endian(u16 i)
+{
+    return ARCH_BIG_ENDIAN ? i : endian_swap_u16(i);
+}
+
+function u32 u32_from_big_endian(u32 i)
+{
+    return ARCH_BIG_ENDIAN ? i : endian_swap_u32(i);
+}
+
+function u64 u64_from_big_endian(u64 i)
+{
+    return ARCH_BIG_ENDIAN ? i : endian_swap_u64(i);
 }
 
 function u32 rotate_left_u32(u32 value, i32 amount) {
@@ -3941,6 +4065,32 @@ function u64 murmur64_from_string(String str)
 function u64 fnv64a_from_string(String str)
 {
     return fnv64a(str.data, str.count);
+}
+
+
+function u32 hash_number_u32(const uint32_t offset, const uint32_t seed)
+{
+    u32 hash = seed;
+    hash += (offset + 48);
+    hash += (hash << 10);
+    hash ^= (hash >> 6);
+
+    hash += (hash << 3);
+    hash ^= (hash >> 11);
+    hash += (hash << 15);
+    return hash;
+}
+
+function u32 hash_mix_u32(u32 id, u32 number)
+{
+    id += number;
+    id += (id << 10);
+    id ^= (id >> 6);
+
+    id += (id << 3);
+    id ^= (id >> 11);
+    id += (id << 15);
+    return id;
 }
 
 //
@@ -5272,19 +5422,15 @@ function void os_mutex_destroy(Mutex *mutex) {
 #define PATH_MAX 2048
 #endif
 
-static pthread_key_t macos_thread_local_key;
-
 //
 // System
 //
 
-function bool os_init() {
+function bool os_init()
+{
     // NOTE(nick): calling these functions initializes their state
     GetScratch(0, 0);
     os_time();
-
-    pthread_key_create(&macos_thread_local_key, NULL);
-
     return true;
 }
 
@@ -5488,34 +5634,6 @@ function bool os_set_clipboard_text(String text)
 }
 
 //
-// Library
-//
-
-#include <dlfcn.h>
-
-function OS_Library os_library_load(String path) {
-    M_Temp scratch = GetScratch(0, 0);
-
-    OS_Library result = {0};
-    // TODO(bill): Should this be RTLD_LOCAL?
-    result.handle = dlopen(string_to_cstr(scratch.arena, path), RTLD_LAZY | RTLD_GLOBAL);
-
-    ReleaseScratch(scratch);
-    return result;
-}
-
-function void os_library_unload(OS_Library lib) {
-    if (lib.handle) {
-        dlclose(lib.handle);
-        lib.handle = 0;
-    }
-}
-
-function void *os_library_get_proc(OS_Library lib, char *proc_name) {
-    return (void *)dlsym(lib.handle, proc_name);
-}
-
-//
 // Shell
 //
 
@@ -5632,7 +5750,146 @@ function void os_mutex_destroy(Mutex *mutex) {
     mutex->handle = 0;
 }
 #elif OS_LINUX
-    #error Not implemented
+    #include <time.h>
+#include <unistd.h>
+
+#include <pthread.h>
+#include <stdlib.h>
+
+function bool os_init()
+{
+    // NOTE(nick): calling these functions initializes their state
+    GetScratch(0, 0);
+    os_time();
+    return true;
+}
+
+function void os_exit(i32 code)
+{
+    exit(code);
+}
+
+function String os_get_system_path(Arena *arena, SystemPath path)
+{
+   String result = {0};
+   
+   switch (path)
+   {
+       case SystemPath_Current:
+       {
+           char *buffer = (char *)arena_push(arena, PATH_MAX);
+           getcwd(buffer, PATH_MAX);
+           
+           result = string_from_cstr(buffer);
+           i64 unused_size = PATH_MAX - result.count; 
+           arena_pop(arena, unused_size);
+       } break;
+       
+       case SystemPath_Binary:
+       {
+           char *buffer = (char *)arena_push(arena, PATH_MAX);
+           size_t length = readlink("/proc/self/exe", buffer, PATH_MAX);
+           
+           if (length > 0)
+           {
+               char *normalized = (char *)arena_push(arena, PATH_MAX);
+               if (realpath(buffer, normalized) != NULL)
+               {
+                   result = Str8(normalized, length);
+                   i64 unused_size = PATH_MAX - result.count;
+                   arena_pop(arena, unused_size);
+               }
+               else 
+               {
+                   result = Str8(buffer, length);
+               }
+               
+               result = string_chop_last_slash(result);
+           }
+       } break;
+       
+       case SystemPath_AppData:
+       {
+           char *home_str = getenv("HOME");
+           String home = string_from_cstr(home_str);
+           result = string_concat2(arena, home, S("/.config/"));
+       } break;
+   }
+   
+   return result;
+}
+
+function f64 os_time()
+{
+   static struct timespec initial = {0};
+   if (initial.tv_sec == 0)
+   {
+       clock_gettime(CLOCK_MONOTONIC_RAW, &initial);
+   }
+   
+   struct timespec now;
+   clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+   
+   return (f64)(now.tv_sec - initial.tv_sec) + 
+          ((f64)(now.tv_nsec - initial.tv_nsec) / 1e9);
+}
+
+function f64 os_clock()
+{
+   struct timespec t;
+   clock_gettime(CLOCK_MONOTONIC_RAW, &t);
+   return (f64)t.tv_sec + ((f64)t.tv_nsec / 1e9);
+}
+
+function void os_sleep(f64 seconds)
+{
+    u64 nanoseconds = (u64)((seconds) * (1e9));
+
+    struct timespec rqtp;
+    rqtp.tv_sec = nanoseconds / 1000000000;
+    rqtp.tv_nsec = nanoseconds - rqtp.tv_sec * 1000000000;
+    nanosleep(&rqtp, 0);
+}
+
+function f64 os_caret_blink_time()
+{
+    f32 seconds = 500.0 / 1000.0;
+    return seconds;
+}
+
+function f64 os_double_click_time()
+{
+    f32 seconds = 500.0 / 1000.0;
+    return seconds;
+}
+
+//
+// Clipboard
+//
+
+function String os_get_clipboard_text()
+{
+    return S("");
+}
+
+function bool os_set_clipboard_text(String text)
+{
+    return false;
+}
+
+//
+// Shell
+//
+
+function bool os_shell_open(String path)
+{
+    return false;
+}
+
+//
+// Threading Primitives
+//
+
 #endif
 
 #if OS_LINUX || OS_MACOS
@@ -5673,6 +5930,10 @@ function u64 atomic_add_u64(volatile u64 *value, u64 addend) {
 //
 // Timing
 //
+
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <unistd.h>
 
 function void os_set_high_process_priority(bool enable) {
     if (enable) {
@@ -5991,15 +6252,18 @@ function String os_read_entire_file(Arena *arena, String path)
     }
 
     String result = {0};
-    result.data = cast(u8 *)arena_push(arena, size);
+    result.data = NULL;
     result.count = size;
 
     if (f)
     {
+        result.data = cast(u8 *)arena_push(arena, size);
+
         size_t bytes_read = fread(result.data, sizeof(char), size, f);
         if (bytes_read != size)
         {
             print("[file] Failed to read entire file: %.*s\n", LIT(path));
+            result.data = NULL;
         }
     }
 
@@ -6125,9 +6389,9 @@ function Thread os_thread_create(Thread_Proc *proc, void *data, u64 copy_size)
     Unix_Thread_Params *params = (Unix_Thread_Params *)os_alloc(AlignUpPow2(sizeof(Unix_Thread_Params), 64) + copy_size);
     params->proc = proc;
     params->data = data;
-    if (copy_size)
+    if (copy_size && data)
     {
-        params->data = params + AlignUpPow2(sizeof(Unix_Thread_Params), 64);
+        params->data = (u8*)(params) + AlignUpPow2(sizeof(Unix_Thread_Params), 64);
         MemoryCopy(params->data, data, copy_size);
     }
 
@@ -6149,6 +6413,34 @@ function u32 os_thread_await(Thread thread) {
     void *result = 0;
     pthread_join(tid, &result);
     return *(u32 *)result;
+}
+
+//
+// Library
+//
+
+#include <dlfcn.h>
+
+function OS_Library os_library_load(String path) {
+    M_Temp scratch = GetScratch(0, 0);
+
+    OS_Library result = {0};
+    // TODO(bill): Should this be RTLD_LOCAL?
+    result.handle = dlopen(string_to_cstr(scratch.arena, path), RTLD_LAZY | RTLD_GLOBAL);
+
+    ReleaseScratch(scratch);
+    return result;
+}
+
+function void os_library_unload(OS_Library lib) {
+    if (lib.handle) {
+        dlclose(lib.handle);
+        lib.handle = 0;
+    }
+}
+
+function void *os_library_get_proc(OS_Library lib, char *proc_name) {
+    return (void *)dlsym(lib.handle, proc_name);
 }
 
 #endif
@@ -6452,17 +6744,35 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 // :FactorArrayMacros
 
 
-#define ArrayEach(T, it, array) T *it = array_begin(array); it && it < array_begin(array); it ++
+#define ArrayEach(T, it, array) T *it = array_begin(array); it && it < array_end(array); it ++
 
-#define For(array) \
-    for (auto *it = array_begin(&array); it && it < array_end(&array); it ++)
+#define ArrayIndex(index, array) i64 index = 0; index < (array).count; index += 1
 
 #define For_Index(array) \
-    for (i64 index = 0; index < (array).count; index ++)
+    for (i64 index = 0; index < (array).count; index += 1)
 
-#define For_It_Index(array) \
-    for (i64 index = 0; index < (array).count; index ++) \
-        if (auto *it = &(array).data[index])
+#define For_Each(Type, it, index, array) \
+    Type it = (array).data[0]; \
+    for (i64 index = 0; index < (array).count; index += 1, (it = array.data[index]))
+
+#define For_It(it, index, array) \
+    for (i64 index = 0, (it = (array).data[0]); index < (array).count; index += 1, (it = (array).data[index]))
+
+#if LANG_C
+
+#define For(array) For_Each(typeof((array).data[0]), it, index, array)
+
+#define Forp(array) \
+    for (typeof((array).data[0]) *it = array_begin(array); it && it < array_end(array); it ++)
+
+#else
+
+#define For(array) For_Each(auto, it, index, array)
+
+#define Forp(array) \
+    for (auto *it = array_begin(array); it && it < array_end(array); it ++)
+
+#endif
 
 //
 // Array Definition Macros
@@ -6581,9 +6891,9 @@ struct CONCAT(FixedArray_, T) { \
 #define array_remove_ordered(it, index) \
     array__remove_ordered(array__to_slice_ref(it), index, 1)
 
-#define array_begin(a) ((a)->data ? (a)->data : NULL)
+#define array_begin(a) ((a).data ? (a).data : NULL)
 
-#define array_end(a) ((a)->data ? ((a)->data + (a)->count) : NULL)
+#define array_end(a) ((a).data ? ((a).data + (a).count) : NULL)
 
 #define array_sort(a, cmp) (array__sort(array__to_any(a), cmp))
 
@@ -6868,8 +7178,7 @@ function String to_string(Array_f64 a) { return Array_f64_to_string(a); }
 
 #endif // BASE_STRINGS_H
 
-#if 0
-function void array__test()
+TestFunction(array__test)
 {
     Array_i32 array = {0};
     array_push(&array, 42);
@@ -6895,8 +7204,15 @@ function void array__test()
     i32 key = 42;
     i64 index = array_find(array, &key, compare_i32);
     Dump(index);
+
+    For(array)
+    {
+        Dump(it);
+    }
+
+    return true;
 }
-#endif
+
 //
 // Table
 //

@@ -6,7 +6,17 @@ script_path="$(cd "$(dirname "$0")" && pwd -P)"
 project_root=$script_path
 exe_name="na"
 flags="-Wno-deprecated-declarations -Wno-int-to-void-pointer-cast -Wno-writable-strings -Wno-dangling-else -Wno-switch -Wno-undefined-internal"
-libs="-framework Cocoa"
+macos_libs="-framework Cocoa"
+linux_libs=""
+
+os=$(uname)
+
+libs=""
+if [[ "$os" == "Darwin"* ]]; then
+    libs=$macos_libs
+else
+    libs=$linux_libs
+fi
 
 pushd $project_root
 
