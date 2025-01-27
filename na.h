@@ -229,17 +229,17 @@ static const int __arch_endian_check_num = 1;
     #include <sanitizer/asan_interface.h>
     #endif
 
-    #ifndef ASAN_POISON_MEMORY_REGION
+    #ifndef AsanPoisonMemoryRegion
         void __asan_poison_memory_region(void const volatile *addr, unsigned long size);
-        #define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
+        #define AsanPoisonMemoryRegion(addr, size) __asan_poison_memory_region((addr), (size))
     #endif
-    #ifndef ASAN_UNPOISION_MEMORY_REGION
+    #ifndef AsanUnpoisonMemoryRegion
         void __asan_unpoison_memory_region(void const volatile *addr, unsigned long size);
-        #define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+        #define AsanUnpoisonMemoryRegion(addr, size) __asan_unpoison_memory_region((addr), (size))
     #endif
 #else
-    #define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
-    #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+    #define AsanPoisonMemoryRegion(addr, size) ((void)(addr), (void)(size))
+    #define AsanUnpoisonMemoryRegion(addr, size) ((void)(addr), (void)(size))
 #endif
 
 #endif // BASE_CTX_CRACK_H
@@ -665,25 +665,20 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
 #ifndef BASE_MEMORY_H
 #define BASE_MEMORY_H
 
-#if !defined(ARENA_DEFAULT_ALIGNMENT)
-    #define ARENA_DEFAULT_ALIGNMENT 8
-#endif
-
-#if !defined(ARENA_COMMIT_SIZE)
-    #define ARENA_COMMIT_SIZE Kilobytes(4)
-#endif
-
-#if !defined(ARENA_INITIAL_COMMIT_SIZE)
-    #define ARENA_INITIAL_COMMIT_SIZE Kilobytes(4)
-#endif
-
-#if !defined(ARENA_DECOMMIT_THRESHOLD)
-    #define ARENA_DECOMMIT_THRESHOLD Kilobytes(256)
-#endif
+typedef u64 Arena_Flags;
+enum
+{
+    ArenaFlag_NoChain = (1 << 0),
+};
 
 typedef struct Arena Arena;
 struct Arena
 {
+    Arena_Flags flags;
+
+    Arena *current;
+    Arena *prev;
+
     u8 *data;
     u64 pos;
     u64 size;
@@ -706,7 +701,6 @@ struct M_Temp
 function Arena arena_make(u8 *data, u64 size);
 function void arena_init(Arena *arena, u8 *data, u64 size);
 function Arena *arena_alloc(u64 size);
-function Arena *arena_alloc_default();
 function void arena_free(Arena *arena);
 function void *arena_push_bytes(Arena *arena, u64 size);
 function void arena_pop_to(Arena *arena, u64 pos);
@@ -874,14 +868,14 @@ typedef struct String_Array String_Array;
 struct String_Array
 {
     i64 count;
+    i64 capacity;
     String *data;
 };
 
 typedef u32 Match_Flags;
 enum
 {
-    MatchFlag_None             = 0,
-    MatchFlag_IgnoreCase  = 1 << 0,
+    MatchFlag_IgnoreCase       = 1 << 0,
     MatchFlag_RightSideSloppy  = 1 << 1,
     MatchFlag_SlashInsensitive = 1 << 2,
     MatchFlag_FindLast         = 1 << 3,
@@ -1007,8 +1001,10 @@ function String_List string_split(Arena *arena, String string, String split);
 function String string_list_join(Arena *arena, String_List list, String_Join_Params join);
 function String string_list_print(Arena *arena, String_List *list, char *fmt, ...);
 function String string_list_to_string(Arena *arena, String_List *list);
-function String_Array string_array_from_list(Arena *arena, String_List list);
 function String string_join(String_List list, String join);
+
+// String Arrays
+function String_Array string_array_from_list(Arena *arena, String_List list);
 
 // Misc Helpers
 function String string_concat2(Arena *arena, String a, String b);
@@ -1378,12 +1374,6 @@ function f64 os_double_click_time();
 function void os_open_file_in_debugger(String path, int line);
 function void os_attach_to_debugger(b32 pause);
 
-
-#define M_Reserve os_memory_reserve
-#define M_Release os_memory_release
-#define M_Commit os_memory_commit
-#define M_Decommit os_memory_decommit
-
 //
 // Threads
 //
@@ -1512,20 +1502,19 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 
 
 //
-// Memory
+// Arena
 //
 
-#if !defined(M_Reserve)
-    #error M_Reserve must be defined to use base memory.
+#if !defined(ARENA_DEFAULT_ALIGNMENT)
+    #define ARENA_DEFAULT_ALIGNMENT 8
 #endif
-#if !defined(M_Release)
-    #error M_Release must be defined to use base memory.
+
+#if !defined(ARENA_COMMIT_SIZE)
+    #define ARENA_COMMIT_SIZE Kilobytes(4)
 #endif
-#if !defined(M_Commit)
-    #error M_Commit must be defined to use base memory.
-#endif
-#if !defined(M_Decommit)
-    #error M_Decommit must be defined to use base memory.
+
+#if !defined(ARENA_DECOMMIT_THRESHOLD)
+    #define ARENA_DECOMMIT_THRESHOLD Kilobytes(256)
 #endif
 
 #define arena_has_virtual_backing(arena) ((arena)->commit_pos < U64_MAX)
@@ -1549,14 +1538,14 @@ function Arena *arena_alloc_from_buffer(u8 *data, u64 size)
 function Arena *arena_alloc(u64 size)
 {
     u64 page_size = os_memory_page_size();
-    u64 initial_commit_size = Max(page_size, ARENA_INITIAL_COMMIT_SIZE);
+    u64 initial_commit_size = Max(page_size, ARENA_COMMIT_SIZE);
 
     size = Max(size, initial_commit_size);
 
     Arena *result = NULL;
-    u8 *data = cast(u8 *)M_Reserve(size);
+    u8 *data = cast(u8 *)os_memory_reserve(size);
 
-    if (data && M_Commit(data, initial_commit_size))
+    if (data && os_memory_commit(data, initial_commit_size))
     {
         result = cast(Arena *)data;
         result->data = data + AlignUpPow2(sizeof(Arena), 64);
@@ -1570,11 +1559,6 @@ function Arena *arena_alloc(u64 size)
     return result;
 }
 
-function Arena *arena_alloc_default()
-{
-    return arena_alloc(Gigabytes(1));
-}
-
 function void arena_free(Arena *arena)
 {
     if (arena->data)
@@ -1583,7 +1567,7 @@ function void arena_free(Arena *arena)
 
         if (arena_has_virtual_backing(arena))
         {
-            M_Release(arena, arena->size);
+            os_memory_release(arena, arena->size);
         }
     }
 }
@@ -1607,7 +1591,7 @@ function void *arena_push_bytes(Arena *arena, u64 size)
                 u64 next_commit_position = ClampTop(p_aligned, arena->size);
                 u64 commit_size = next_commit_position - commit_p;
 
-                if (M_Commit((u8 *)arena + arena->commit_pos, commit_size))
+                if (os_memory_commit((u8 *)arena + arena->commit_pos, commit_size))
                 {
                     commit_p = next_commit_position;
                     arena->commit_pos = next_commit_position;
@@ -1639,7 +1623,7 @@ function void arena_pop_to(Arena *arena, u64 pos)
 
             if (decommit_pos < arena->commit_pos && over_committed >= ARENA_DECOMMIT_THRESHOLD)
             {
-                if (M_Decommit((u8 *)arena + decommit_pos, over_committed))
+                if (os_memory_decommit((u8 *)arena + decommit_pos, over_committed))
                 {
                     arena->commit_pos -= over_committed;
                 }
@@ -1719,6 +1703,54 @@ function bool arena_write(Arena *arena, u8 *data, u64 size)
     return result;
 }
 
+function M_Temp arena_begin_temp(Arena *arena)
+{
+    M_Temp result = {arena, arena->pos};
+    return result;
+}
+
+function void arena_end_temp(M_Temp temp)
+{
+    arena_pop_to(temp.arena, temp.pos);
+}
+
+thread_local Arena *m__scratch_pool[2] = {0, 0};
+
+function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count)
+{
+    if (m__scratch_pool[0] == NULL)
+    {
+        m__scratch_pool[0] = arena_alloc(Gigabytes(1));
+        m__scratch_pool[1] = arena_alloc(Gigabytes(1));
+        assert(m__scratch_pool[0]);
+        assert(m__scratch_pool[1]);
+    }
+
+    M_Temp result = {0};
+    for (u64 i = 0; i < count_of(m__scratch_pool); i += 1)
+    {
+        b32 is_conflict = false;
+        for (Arena **conflict = conflicts; conflict < conflicts+conflict_count; conflict += 1)
+        {
+            if (*conflict == m__scratch_pool[i]) {
+                is_conflict = true;
+                break;
+            }
+        }
+
+        if (!is_conflict) {
+            result = arena_begin_temp(m__scratch_pool[i]);
+            break;
+        }
+    }
+    return result;
+}
+
+function Arena *temp_arena()
+{
+    return arena_get_scratch(0, 0).arena;
+}
+
 function void *arena_resize_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size)
 {
     void *result = NULL;
@@ -1758,53 +1790,9 @@ function void arena_free_ptr(Arena *arena, void *old_memory_pointer, u64 old_siz
     }
 }
 
-function M_Temp arena_begin_temp(Arena *arena)
-{
-    M_Temp result = {arena, arena->pos};
-    return result;
-}
-
-function void arena_end_temp(M_Temp temp)
-{
-    arena_pop_to(temp.arena, temp.pos);
-}
-
-thread_local Arena *m__scratch_pool[2] = {0, 0};
-
-function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count)
-{
-    if (m__scratch_pool[0] == NULL)
-    {
-        m__scratch_pool[0] = arena_alloc_default();
-        m__scratch_pool[1] = arena_alloc_default();
-        assert(m__scratch_pool[0]);
-        assert(m__scratch_pool[1]);
-    }
-
-    M_Temp result = {0};
-    for (u64 i = 0; i < count_of(m__scratch_pool); i += 1)
-    {
-        b32 is_conflict = false;
-        for (Arena **conflict = conflicts; conflict < conflicts+conflict_count; conflict += 1)
-        {
-            if (*conflict == m__scratch_pool[i]) {
-                is_conflict = true;
-                break;
-            }
-        }
-
-        if (!is_conflict) {
-            result = arena_begin_temp(m__scratch_pool[i]);
-            break;
-        }
-    }
-    return result;
-}
-
-function Arena *temp_arena()
-{
-    return arena_get_scratch(0, 0).arena;
-}
+//
+// Memory
+//
 
 function u64 m_align_offset(void *ptr, u64 alignment)
 {
@@ -3296,11 +3284,23 @@ function String string_list_to_string(Arena *arena, String_List *list)
     return string_list_join(arena, *list, params);
 }
 
+function String string_join(String_List list, String join)
+{
+    String_Join_Params params = {0};
+    params.sep = join;
+    return string_list_join(temp_arena(), list, params);
+}
+
+//
+// String Arrays
+//
+
 function String_Array string_array_from_list(Arena *arena, String_List list)
 {
     String_Array result = {0};
     result.data = PushArrayZero(arena, String, list.node_count);
     result.count = list.node_count;
+    result.capacity = list.node_count;
 
     i64 index = 0;
     for (String_Node *it = list.first; it != NULL; it = it->next)
@@ -3311,13 +3311,6 @@ function String_Array string_array_from_list(Arena *arena, String_List list)
     }
 
     return result;
-}
-
-function String string_join(String_List list, String join)
-{
-    String_Join_Params params = {0};
-    params.sep = join;
-    return string_list_join(temp_arena(), list, params);
 }
 
 //
@@ -3735,12 +3728,12 @@ function CLI_Argument string_parse_argument(String_Array array, i64 index)
     return result;
 }
 
-bool string_is_option(CLI_Argument arg)
+function bool string_is_option(CLI_Argument arg)
 {
     return string_starts_with(arg.name, S("-"));
 }
 
-bool string_option_match(String arg_name, String name, String alias)
+function bool string_option_match(String arg_name, String name, String alias)
 {
     if (!string_starts_with(name, S("-"))) name = string_concat2(temp_arena(), S("-"), name);
     if (alias.count > 0 && !string_starts_with(alias, S("-"))) alias = string_concat2(temp_arena(), S("-"), alias);
@@ -3748,7 +3741,7 @@ bool string_option_match(String arg_name, String name, String alias)
     return string_equals(arg_name, name) || (alias.count > 0 && string_equals(arg_name, alias));
 }
 
-void cli_option_parse_bool(CLI_Argument arg, String name, String alias, b32 *value)
+function void cli_option_parse_bool(CLI_Argument arg, String name, String alias, b32 *value)
 {
     if (string_option_match(arg.name, name, alias))
     {
@@ -6034,63 +6027,31 @@ function void *os_memory_reserve(u64 size)
         result = NULL;
     }
 
-    ASAN_POISON_MEMORY_REGION(result, size);
+    AsanPoisonMemoryRegion(result, size);
     return result;
 }
 
 function bool os_memory_commit(void *ptr, u64 size)
 {
-    u64 page_size = os_memory_page_size();
-
-    i64 p = (i64)ptr;
-    i64 p_aligned = AlignDownPow2(p, page_size);
-
-    if (p != p_aligned)
-    {
-        i64 delta = p - p_aligned;
-        ptr = (void *)((u8 *)ptr - delta);
-        size += delta;
-    }
-
-    size = AlignUpPow2(size, page_size);
-
-    // printf("[commit] %p (%lld)\n", ptr, size);
-
     // NOTE(nick): ptr must be aligned to a page boundary.
     int result = mprotect(ptr, size, PROT_READ | PROT_WRITE);
     madvise(ptr, size, MADV_WILLNEED);
-    ASAN_UNPOISON_MEMORY_REGION(ptr, size);
+    AsanUnpoisonMemoryRegion(ptr, size);
     return result == 0;
 }
 
 function bool os_memory_decommit(void *ptr, u64 size)
 {
-    u64 page_size = os_memory_page_size();
-
-    i64 p = (i64)ptr;
-    i64 p_aligned = AlignDownPow2(p, page_size);
-
-    if (p != p_aligned)
-    {
-        i64 delta = p - p_aligned;
-        ptr = (void *)((u8 *)ptr - delta);
-        size += delta;
-    }
-
-    size = AlignUpPow2(size, page_size);
-
-    // printf("[decommit] %p (%lld)\n", ptr, size);
-
     // NOTE(nick): ptr must be aligned to a page boundary.
     int result = mprotect(ptr, size, PROT_NONE);
     madvise(ptr, size, MADV_DONTNEED);
-    ASAN_POISON_MEMORY_REGION(ptr, size);
+    AsanPoisonMemoryRegion(ptr, size);
     return result == 0;
 }
 
 function bool os_memory_release(void *ptr, u64 size)
 {
-    ASAN_POISON_MEMORY_REGION(ptr, size);
+    AsanPoisonMemoryRegion(ptr, size);
     return munmap(ptr, size) == 0;
 }
 
@@ -6527,7 +6488,7 @@ function f64 os_time_in_miliseconds()
 
 force_inline function u64 os_clock_cycles(void)
 {
-    #if COMPILER_MSVC && !defined(__clang__)
+    #if COMPILER_MSVC
         return __rdtsc();
     #elif defined(__i386__)
         u64 x;
@@ -6796,11 +6757,22 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 // :FactorArrayMacros
 //
 
-#define ArrayAlloc(arena, arr, T, count) do { \
-    (arr)->data = arena_push_zero((arena), sizeof((arr)->data[0]) * (count)); \
+#define ArrayAlloc(arena, arr, T, capacity) do { \
+    (arr)->data = (T *)PushArrayZero((arena), sizeof((arr)->data[0]) * (capacity)); \
     (arr)->count = 0; \
     (arr)->capacity = (count); \
 } while(0)
+
+#define ArrayResize(arena, arr, T, capacity) do { \
+    if ((arr)->capacity < (capacity)) { \
+        T *data = (arr)->data; \
+        (arr)->data = (T *)PushArrayZero((arena), sizeof((arr)->data[0]) * (capacity)); \
+        (arr)->capacity = (capacity); \
+        MemoryCopy((arr)->data, data, sizeof((arr)->data[0]) * (arr)->count); \
+    } \
+} while(0)
+
+#define ArrayInit(area, arr, T, capacity) ArrayResize(arena, arr, T, capacity)
 
 #define ArrayPush(a) ((a)->count += 1, &(a)->data[(a)->count - 1])
 
@@ -6808,7 +6780,7 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 
 #define ArrayPeek(a) ((a)->count > 0 ? &(a)->data[(a)->count - 1] : NULL)
 
-#define ArrayCopy(d,s) do { \
+#define ArrayCopy(d, s) do { \
     assert(sizeof((d)->data[0]) == sizeof((s).data[0])); \
     assert((d)->capacity != 0); \
     (d)->count = Min((s).count, (d)->capacity); \
