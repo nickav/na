@@ -654,12 +654,19 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
 #define Likely(x) (x)
 #define Unlikely(x) (x)
 
+#define TestFunction(Name) bool Name()
+#define TestAssert(Cond) do { if (!(Cond)) return false; } while(0)
+#define TestAssertM(Cond, Message) do { if (!(Cond)) { print(Message); print("\n"); return false; } } while(0)
+#define TestAssertF(Cond, Message, ...) do { if (!(Cond)) { print(Message, __VA_ARGS__); print("\n"); return false; } } while(0)
+#define TestEntry(Proc) StructLit(TestFunction_Entry){Proc, #Proc}
 
-#if DEBUG
-    #define TestFunction(Name) bool Name(); bool Name()
-#else
-    #define TestFunction(x)
-#endif
+typedef struct TestFunction_Entry TestFunction_Entry;
+struct TestFunction_Entry
+{
+    bool (*fn)();
+    const char *name;
+};
+
 
 #endif // BASE_TYPES_H
 #ifndef BASE_MEMORY_H
