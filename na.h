@@ -705,8 +705,7 @@ struct M_Temp
 // API
 //
 
-function Arena arena_make(u8 *data, u64 size);
-function void arena_init(Arena *arena, u8 *data, u64 size);
+function Arena *arena_make_from_buffer(u8 *data, u64 size);
 function Arena *arena_alloc(u64 size);
 function void arena_free(Arena *arena);
 function void *arena_push_bytes(Arena *arena, u64 size);
@@ -1526,7 +1525,7 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 
 #define arena_has_virtual_backing(arena) ((arena)->commit_pos < U64_MAX)
 
-function Arena *arena_alloc_from_buffer(u8 *data, u64 size)
+function Arena *arena_make_from_buffer(u8 *data, u64 size)
 {
     Arena *result = NULL;
     if (data)
