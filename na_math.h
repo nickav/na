@@ -2903,17 +2903,17 @@ function u32 u32_rgb_from_u8(u8 r, u8 g, u8 b)
     return result;
 }
 
-function Vector4 linear_rgb_to_srgb(Vector4 linear_rgb)
+function Vector4 v4_linear_to_srgb(Vector4 linear_rgb)
 {
     Vector4 result = {0};
-    result.r = Pow(linear_rgb.r, 1.0 / 2.2);
-    result.g = Pow(linear_rgb.g, 1.0 / 2.2);
-    result.b = Pow(linear_rgb.b, 1.0 / 2.2);
+    result.r = Pow(linear_rgb.r, 1.0/2.2);
+    result.g = Pow(linear_rgb.g, 1.0/2.2);
+    result.b = Pow(linear_rgb.b, 1.0/2.2);
     result.a = linear_rgb.a;
     return result;
 }
 
-function Vector4 srgb_to_linear_rgb(Vector4 srgb)
+function Vector4 v4_srgb_to_linear(Vector4 srgb)
 {
     Vector4 result = {0};
     result.r = Pow(srgb.r, 2.2);

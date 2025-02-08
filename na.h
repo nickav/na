@@ -315,6 +315,10 @@ static const int __arch_endian_check_num = 1;
     #endif
 #endif
 
+#ifndef DEBUG
+#define DEBUG 0
+#endif
+
 //
 // Helper Macros
 //
@@ -4563,7 +4567,6 @@ function f64 os_time()
 function f64 os_clock()
 {
     static u64 win32_ticks_per_second = 0;
-    static u64 win32_counter_offset = 0;
 
     if (win32_ticks_per_second == 0)
     {
@@ -4600,6 +4603,7 @@ function void os_sleep(f64 seconds)
         timeBeginPeriod_t timeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(libwinmm, "timeBeginPeriod");
         if (timeBeginPeriod) {
             win32_sleep_is_granular = timeBeginPeriod(1) == 0 /* TIMERR_NOERROR */;
+            Unused(win32_sleep_is_granular);
         }
 
         win32_did_init_sleep = true;
@@ -5347,6 +5351,7 @@ function Semaphore os_semaphore_create(u32 max_count) {
 
 function void os_semaphore_signal(Semaphore *sem) {
     BOOL ok = ReleaseSemaphore(sem->handle, 1, 0);
+    Unused(ok);
     // assert(ok);
 }
 
