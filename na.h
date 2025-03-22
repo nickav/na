@@ -1006,15 +1006,19 @@ function b32 string_to_b32(String str);
 function void string_list_push_node(String_List *list, String_Node *n);
 function void string_list_push(Arena *arena, String_List *list, String str);
 function void string_list_concat(String_List *list, String_List *to_push);
-function String_List string_splits(Arena *arena, String string, int split_count, String *splits);
-function String_List string_split(Arena *arena, String string, String split);
-function String string_list_join(Arena *arena, String_List list, String_Join_Params join);
+function String_List string_list_splits(Arena *arena, String string, int split_count, String *splits);
+function String_List string_list_split(Arena *arena, String string, String split);
+function String string_list_joins(Arena *arena, String_List list, String_Join_Params join);
+function String string_list_join(Arena *arena, String_List list, String join);
 function String string_list_print(Arena *arena, String_List *list, char *fmt, ...);
 function String string_list_to_string(Arena *arena, String_List *list);
-function String string_join(String_List list, String join);
+function String_List string_list_from_array(Arena *arena, String_Array array);
 
 // String Arrays
 function String_Array string_array_from_list(Arena *arena, String_List list);
+function String_Array string_splits(Arena *arena, String string, int split_count, String *splits);
+function String_Array string_split(Arena *arena, String string, String split);
+function String string_join(Arena *arena, String_Array array, String join);
 
 // Misc Helpers
 function String string_concat2(Arena *arena, String a, String b);
@@ -3195,7 +3199,7 @@ function void string_concat_list(String_List *list, String_List *to_push)
     MemoryZero(to_push, sizeof(*to_push));
 }
 
-function String_List string_splits(Arena *arena, String string, int split_count, String *splits)
+function String_List string_list_splits(Arena *arena, String string, int split_count, String *splits)
 {
     String_List list = {0};
     
@@ -3240,12 +3244,12 @@ function String_List string_splits(Arena *arena, String string, int split_count,
     return list;
 }
 
-function String_List string_split(Arena *arena, String string, String split)
+function String_List string_list_split(Arena *arena, String string, String split)
 {
-    return string_splits(arena, string, 1, &split);
+    return string_list_splits(arena, string, 1, &split);
 }
 
-function String string_list_join(Arena *arena, String_List list, String_Join_Params join)
+function String string_list_joins(Arena *arena, String_List list, String_Join_Params join)
 {
     u64 sep_count = 0;
     if (list.node_count > 1)
@@ -3275,6 +3279,13 @@ function String string_list_join(Arena *arena, String_List list, String_Join_Par
     return result;
 }
 
+function String string_list_join(Arena *arena, String_List list, String join)
+{
+    String_Join_Params params = {0};
+    params.sep = join;
+    return string_list_joins(arena, list, params);
+}
+
 function String string_list_print(Arena *arena, String_List *list, char *fmt, ...)
 {
     String result = {0};
@@ -3291,14 +3302,18 @@ function String string_list_print(Arena *arena, String_List *list, char *fmt, ..
 function String string_list_to_string(Arena *arena, String_List *list)
 {
     String_Join_Params params = {0};
-    return string_list_join(arena, *list, params);
+    return string_list_joins(arena, *list, params);
 }
 
-function String string_join(String_List list, String join)
+function String_List string_list_from_array(Arena *arena, String_Array array)
 {
-    String_Join_Params params = {0};
-    params.sep = join;
-    return string_list_join(temp_arena(), list, params);
+    String_List result = {0};
+    for (i64 index = 0; index < array.count; index += 1)
+    {
+        String it = array.data[index];
+        string_list_push(arena, &result, it);
+    }
+    return result;
 }
 
 //
@@ -3321,6 +3336,28 @@ function String_Array string_array_from_list(Arena *arena, String_List list)
     }
 
     return result;
+}
+
+function String_Array string_splits(Arena *arena, String string, int split_count, String *splits)
+{
+    String_Array result = {0};
+    result = string_array_from_list(arena, string_list_splits(arena, string, split_count, splits));
+    return result;
+}
+
+function String_Array string_split(Arena *arena, String string, String split)
+{
+    String_Array result = {0};
+    result = string_array_from_list(arena, string_list_splits(arena, string, 1, &split));
+    return result;
+}
+
+function String string_join(Arena *arena, String_Array array, String join)
+{
+    String_Join_Params params = {0};
+    params.sep = join;
+    String_List list = string_list_from_array(arena, array);
+    return string_list_joins(temp_arena(), list, params);
 }
 
 //
@@ -7177,7 +7214,7 @@ function String Array_i32_to_string(Array_i32 a)
         String item = sprint("    %d", a.data[i]);
         string_list_push(temp_arena(), &list, item);
     }
-    String items = string_join(list, S(",\n"));
+    String items = string_list_join(temp_arena(), list, S(",\n"));
     return sprint("Array_i32[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
@@ -7189,7 +7226,7 @@ function String Array_i64_to_string(Array_i64 a)
         String item = sprint("    %lld", a.data[i]);
         string_list_push(temp_arena(), &list, item);
     }
-    String items = string_join(list, S(",\n"));
+    String items = string_list_join(temp_arena(), list, S(",\n"));
     return sprint("Array_i64[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
@@ -7201,7 +7238,7 @@ function String Array_f32_to_string(Array_f32 a)
         String item = sprint("    %.4f", a.data[i]);
         string_list_push(temp_arena(), &list, item);
     }
-    String items = string_join(list, S(",\n"));
+    String items = string_list_join(temp_arena(), list, S(",\n"));
     return sprint("Array_f32[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
@@ -7213,7 +7250,7 @@ function String Array_f64_to_string(Array_f64 a)
         String item = sprint("    %.8f", a.data[i]);
         string_list_push(temp_arena(), &list, item);
     }
-    String items = string_join(list, S(",\n"));
+    String items = string_list_join(temp_arena(), list, S(",\n"));
     return sprint("Array_f64[%d] {\n%.*s\n}", a.count, LIT(items));
 }
 
