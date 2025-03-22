@@ -1349,6 +1349,7 @@ function bool os_file_rename(String from, String to);
 function bool os_delete_file(String path);
 function bool os_make_directory(String path);
 function bool os_delete_directory(String path);
+function bool os_mkdirp(String path);
 
 // File Lister
 function File_Lister *os_file_iter_begin(Arena *arena, String path);
@@ -6673,6 +6674,30 @@ function File_List os_scan_entire_directory(Arena *arena, String path)
     }
 
     return result;
+}
+
+function bool os_mkdirp(String path)
+{
+    i64 index = string_find(path, S("/"), 0, 0);
+
+    while (index < path.count)
+    {
+        index = string_find(path, S("/"), index + 1, 0);
+        if (index >= path.count) break;
+
+        String part = string_slice(path, 0, index);
+        if (!os_directory_exists(part)) {
+            bool success = os_make_directory(part);
+            if (!success) return false;
+        }
+    }
+
+    if (!os_directory_exists(path)) {
+        bool success = os_make_directory(path);
+        if (!success) return false;
+    }
+
+    return true;
 }
 
 function Dense_Time dense_time_from_date_time(Date_Time in) {
