@@ -1,7 +1,7 @@
 //
 // Compile:
-// clang++ na_inliner.cpp -o na_inliner
-// cl /Od -nologo -Zo -Z7 na_inliner.cpp /link -subsystem:console -incremental:no -opt:ref -OUT:na_inliner.exe
+// clang na_inliner.c -o na_inliner
+// cl /Od -nologo -Zo -Z7 na_inliner.c /link -subsystem:console -incremental:no -opt:ref -OUT:na_inliner.exe
 //
 // Run:
 // inliner <input> (output)
@@ -12,11 +12,37 @@
 
 #include <stdio.h>
 
-static Arena *g_arena = {};
+static Arena *g_arena = {0};
+
+static b32 g_ignore_dups = true;
+static String_List g_seen_paths = {0};
+
+bool string_list_contains(String_List *list, String item)
+{
+    bool result = false;
+
+    for (String_Node *it = list->first; it != NULL; it = it->next)
+    {
+        if (string_equals(it->string, item))
+        {
+            result = true;
+            break;
+        }
+    }
+
+    return result;
+}
 
 bool na_inliner__file(String in_file, FILE *output)
 {
     if (!os_file_exists(in_file)) return false;
+
+    if (g_ignore_dups && string_list_contains(&g_seen_paths, in_file))
+    {
+        return true;
+    }
+
+    string_list_push(g_arena, &g_seen_paths, string_alloc(in_file));
 
     String content = os_read_entire_file(g_arena, in_file);
     if (!content.data)

@@ -32,7 +32,7 @@ pushd $project_root
         time clang $flags $libs -I$project_root/deps/ -D DEBUG=1 ../test/main.c -o $exe_name
         ./$exe_name
 
-        time clang++ -std=c++11 $flags $libs -I$project_root/deps/ -D DEBUG=1 ../test/na_inliner.cpp -o na_inliner
+        time clang -std=c11 $flags $libs -I$project_root/deps/ -D DEBUG=1 ../test/na_inliner.c -o na_inliner
     popd
 
 popd
