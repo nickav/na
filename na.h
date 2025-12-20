@@ -22,7 +22,6 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
-    0.10  - explicitly passing arenas to array macros; clean up arena_push
     0.09  - linux support
     0.08  - bug fixes, fix arena alignment on MacOS ARM
     0.07  - bug fixes
@@ -352,6 +351,12 @@ static const int __arch_endian_check_num = 1;
 #define MemberFromOffset(ptr, off, type) *(type *)((u8 *)(ptr) + off)
 #define Unused(name) ((void)(name))
 
+#if LANG_C
+#define AlignOf(T) _Alignof(T)
+#else
+#define AlignOf(T) alignof(T)
+#endif
+
 #define Bytes(n)      (n)
 #define Kilobytes(n)  ((n) << 10)
 #define Megabytes(n)  ((n) << 20)
@@ -387,6 +392,7 @@ static const int __arch_endian_check_num = 1;
 
 #define count_of ArrayCount
 #define offset_of OffsetOf
+#define align_of AlignOf
     
 #if LANG_CPP
     #define cast(T) (T)
@@ -723,13 +729,13 @@ function bool arena_write(Arena *arena, u8 *data, u64 size);
 function M_Temp arena_begin_temp(Arena *arena);
 function void arena_end_temp(M_Temp temp);
 
-#define PushArray(a,T,c)       (T*)arena_push((a), sizeof(T)*(c), alignof(T), true)
-#define PushArrayZero(a,T,c)   (T*)arena_push((a), sizeof(T)*(c), alignof(T), true)
-#define PushArrayNoZero(a,T,c) (T*)arena_push((a), sizeof(T)*(c), alignof(T), false)
+#define PushArray(a,T,c)       (T*)arena_push((a), sizeof(T)*(c), AlignOf(T), true)
+#define PushArrayZero(a,T,c)   (T*)arena_push((a), sizeof(T)*(c), AlignOf(T), true)
+#define PushArrayNoZero(a,T,c) (T*)arena_push((a), sizeof(T)*(c), AlignOf(T), false)
 
-#define PushStruct(a, T)       (T*)arena_push((a), sizeof(T), alignof(T), true)
-#define PushStructZero(a, T)   (T*)arena_push((a), sizeof(T), alignof(T), true)
-#define PushStructNoZero(a, T) (T*)arena_push((a), sizeof(T), alignof(T), false)
+#define PushStruct(a, T)       (T*)arena_push((a), sizeof(T), AlignOf(T), true)
+#define PushStructZero(a, T)   (T*)arena_push((a), sizeof(T), AlignOf(T), true)
+#define PushStructNoZero(a, T) (T*)arena_push((a), sizeof(T), AlignOf(T), false)
 
 #define PopArray(a, T, c0, c1) if (c1 < c0) arena_pop((a), (c0 - c1) * sizeof(T))
 
