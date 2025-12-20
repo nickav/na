@@ -22,6 +22,7 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.10  - explicitly passing arenas to array macros; clean up arena_push
     0.09  - linux support
     0.08  - bug fixes, fix arena alignment on MacOS ARM
     0.07  - bug fixes
@@ -712,29 +713,33 @@ struct M_Temp
 function Arena *arena_make_from_buffer(u8 *data, u64 size);
 function Arena *arena_alloc(u64 size);
 function void arena_free(Arena *arena);
-function void *arena_push_bytes(Arena *arena, u64 size);
 function void arena_pop_to(Arena *arena, u64 pos);
 function void arena_pop(Arena *arena, u64 size);
 function void arena_set_pos(Arena *arena, u64 pos);
 function void arena_reset(Arena *arena);
-function void arena_push_aligner(Arena *arena, u64 pow2_align);
-function void *arena_push(Arena *arena, u64 size);
-function void *arena_push_zero(Arena *arena, u64 size);
+function void *arena_push(Arena *arena, u64 size, u64 pow2_align, b32 zero);
 function bool arena_write(Arena *arena, u8 *data, u64 size);
 
 function M_Temp arena_begin_temp(Arena *arena);
 function void arena_end_temp(M_Temp temp);
 
-#define PushArray(a,T,c)     (T*)arena_push_no_zero((a), sizeof(T)*(c))
-#define PushArrayZero(a,T,c) (T*)arena_push((a), sizeof(T)*(c))
-#define PushStruct(a, T)     (T*)arena_push_no_zero((a), sizeof(T))
-#define PushStructZero(a, T) (T*)arena_push((a), sizeof(T))
+#define PushArray(a,T,c)       (T*)arena_push((a), sizeof(T)*(c), alignof(T), true)
+#define PushArrayZero(a,T,c)   (T*)arena_push((a), sizeof(T)*(c), alignof(T), true)
+#define PushArrayNoZero(a,T,c) (T*)arena_push((a), sizeof(T)*(c), alignof(T), false)
+
+#define PushStruct(a, T)       (T*)arena_push((a), sizeof(T), alignof(T), true)
+#define PushStructZero(a, T)   (T*)arena_push((a), sizeof(T), alignof(T), true)
+#define PushStructNoZero(a, T) (T*)arena_push((a), sizeof(T), alignof(T), false)
+
 #define PopArray(a, T, c0, c1) if (c1 < c0) arena_pop((a), (c0 - c1) * sizeof(T))
 
 function M_Temp arena_get_scratch(Arena **conflicts, u64 conflict_count);
 #define GetScratch(conflicts, conflict_count) arena_get_scratch(conflicts, conflict_count)
 #define ReleaseScratch(temp) arena_end_temp(temp)
 function Arena *temp_arena();
+
+function void *arena_realloc_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size);
+function void arena_free_ptr(Arena *arena, void *old_memory_pointer, u64 old_size);
 
 // Helpers
 typedef i32 Compare_Proc(void *a, void *b);
@@ -1587,14 +1592,26 @@ function void arena_free(Arena *arena)
     }
 }
 
-function void *arena_push_bytes(Arena *arena, u64 size)
+function void *arena_push(Arena *arena, u64 size, u64 align_pow2, b32 zero)
 {
     void *result = NULL;
 
-    if (arena->pos + size <= arena->size)
+    u64 align_offset = 0;
+    if (align_pow2 > 1)
     {
-        void *result_on_success = arena->data + arena->pos;
-        u64 p = arena->pos + size;
+        u64 p = arena->pos;
+        u64 p_aligned = AlignUpPow2(p, align_pow2);
+        u64 z = p_aligned - p;
+        if (z > 0)
+        {
+            align_offset = z;
+        }
+    }
+
+    if (arena->pos + size + align_offset <= arena->size)
+    {
+        void *result_on_success = arena->data + arena->pos + align_offset;
+        u64 p = arena->pos + size + align_offset;
         u64 commit_p = arena->commit_pos;
 
         if (arena_has_virtual_backing(arena))
@@ -1618,6 +1635,11 @@ function void *arena_push_bytes(Arena *arena, u64 size)
         {
             result = result_on_success;
             arena->pos = p;
+
+            if (zero)
+            {
+                MemoryZero(result, size);
+            }
         }
     }
 
@@ -1674,42 +1696,10 @@ function void arena_reset(Arena *arena)
     arena_pop_to(arena, 0);
 }
 
-function void arena_push_aligner(Arena *arena, u64 align_pow2)
-{
-    if (align_pow2 > 1)
-    {
-        u64 p = arena->pos;
-        u64 p_aligned = AlignUpPow2(p, align_pow2);
-        u64 z = p_aligned - p;
-        if (z > 0)
-        {
-            arena_push_bytes(arena, z);
-        }
-    }
-}
-
-function void *arena_push(Arena *arena, u64 size)
-{
-    arena_push_aligner(arena, ARENA_DEFAULT_ALIGNMENT);
-    void *result = arena_push_bytes(arena, size);
-    if (result != NULL)
-    {
-        MemoryZero(result, size);
-    }
-    return result;
-}
-
-function void *arena_push_no_zero(Arena *arena, u64 size)
-{
-    arena_push_aligner(arena, ARENA_DEFAULT_ALIGNMENT);
-    void *result = arena_push_bytes(arena, size);
-    return result;
-}
-
 function bool arena_write(Arena *arena, u8 *data, u64 size)
 {
     bool result = false;
-    u8 *buffer = (u8 *)arena_push_no_zero(arena, size);
+    u8 *buffer = (u8 *)arena_push(arena, size, 0, false);
     if (buffer)
     {
         MemoryCopy(buffer, data, size);
@@ -1766,7 +1756,7 @@ function Arena *temp_arena()
     return arena_get_scratch(0, 0).arena;
 }
 
-function void *arena_resize_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size)
+function void *arena_realloc_ptr(Arena *arena, u64 new_size, void *old_memory_pointer, u64 old_size)
 {
     void *result = NULL;
 
@@ -1782,7 +1772,7 @@ function void *arena_resize_ptr(Arena *arena, u64 new_size, void *old_memory_poi
 
     if (!result)
     {
-        result = arena_push_bytes(arena, new_size);
+        result = arena_push(arena, new_size, 0, false);
 
         if (result && old_memory_pointer)
         {
@@ -2065,16 +2055,13 @@ function ALLOCATOR_PROC(arena_allocator_proc)
     switch (mode) {
         case AllocatorMode_Alloc:
         {
-            arena_push_aligner(arena, alignment);
-            void *result = arena_push_bytes(arena, requested_size);
-            MemoryZero(result, requested_size);
-            return result;
+            return arena_push(arena, requested_size, alignment, true);
         } break;
 
         case AllocatorMode_Resize:
         {
-            arena_push_aligner(arena, alignment);
-            void *result = arena_resize_ptr(arena, requested_size, old_memory_pointer, old_size);
+            arena_push(arena, 0, alignment, 0);
+            void *result = arena_realloc_ptr(arena, requested_size, old_memory_pointer, old_size);
             return result;
         } break;
 
@@ -3014,7 +3001,6 @@ function String string_from_string32(Arena *arena, String32 str) {
 }
 
 function String16 string16_from_string(Arena *arena, String str) {
-    arena_push_aligner(arena, sizeof(u16));
     u16 *data = PushArray(arena, u16, str.count * 2 + 1);
 
     u16 *at = data;
@@ -4738,27 +4724,30 @@ function String os_read_entire_file(Arena *arena, String path)
         u64 size = cast(u64)file_size.QuadPart;
         if (size > 0)
         {
-            u8 *data = cast(u8 *)arena_push(arena, size);
-            result.data  = data;
-            result.count = size;
-
-            u8 *ptr = data;
-            u8 *end = data + size;
-
-            for (;;)
+            u8 *data = cast(u8 *)arena_push(arena, size, 0, 0);
+            if (data)
             {
-                u64 bytes_remaining = (u64)(end - ptr);
-                DWORD to_read = (DWORD)(ClampTop(bytes_remaining, U32_MAX));
-                DWORD bytes_read = 0;
-                if (!ReadFile(handle, ptr, to_read, &bytes_read, 0))
-                {
-                    break;
-                }
+                result.data  = data;
+                result.count = size;
 
-                ptr += bytes_read;
-                if (ptr >= end)
+                u8 *ptr = data;
+                u8 *end = data + size;
+
+                for (;;)
                 {
-                    break;
+                    u64 bytes_remaining = (u64)(end - ptr);
+                    DWORD to_read = (DWORD)(ClampTop(bytes_remaining, U32_MAX));
+                    DWORD bytes_read = 0;
+                    if (!ReadFile(handle, ptr, to_read, &bytes_read, 0))
+                    {
+                        break;
+                    }
+
+                    ptr += bytes_read;
+                    if (ptr >= end)
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -6824,46 +6813,11 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 }
 
 
+#define _ArrayHeader_ struct { i64 count; i64 capacity; }
+
 //
-// Array macros for partial functionality:
-// TODO(nick): factor these into the generic array functions below
-// :FactorArrayMacros
+// Loops
 //
-
-#define ArrayAlloc(arena, arr, T, capacity) do { \
-    (arr)->data = (T *)PushArrayZero((arena), sizeof((arr)->data[0]) * (capacity)); \
-    (arr)->count = 0; \
-    (arr)->capacity = (count); \
-} while(0)
-
-#define ArrayResize(arena, arr, T, capacity) do { \
-    if ((arr)->capacity < (capacity)) { \
-        T *data = (arr)->data; \
-        (arr)->data = (T *)PushArrayZero((arena), sizeof((arr)->data[0]) * (capacity)); \
-        (arr)->capacity = (capacity); \
-        MemoryCopy((arr)->data, data, sizeof((arr)->data[0]) * (arr)->count); \
-    } \
-} while(0)
-
-#define ArrayInit(area, arr, T, capacity) ArrayResize(arena, arr, T, capacity)
-
-#define ArrayPush(a) ((a)->count += 1, &(a)->data[(a)->count - 1])
-
-#define ArrayPop(a) ((a)->count -= 1, &(a)->data[(a)->count + 1])
-
-#define ArrayPeek(a) ((a)->count > 0 ? &(a)->data[(a)->count - 1] : NULL)
-
-#define ArrayCopy(d, s) do { \
-    assert(sizeof((d)->data[0]) == sizeof((s).data[0])); \
-    assert((d)->capacity != 0); \
-    (d)->count = Min((s).count, (d)->capacity); \
-    MemoryCopy((d)->data, (s).data, (d)->count * sizeof((s).data[0])); \
-} while(0)
-
-#define ArrayZero(a) MemoryZero((a)->data, (a)->count * sizeof((a)->data[0]));
-
-// :FactorArrayMacros
-
 
 #define ArrayEach(T, it, array) T *it = array_begin(array); it && it < array_end(array); it ++
 
@@ -6875,9 +6829,6 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #define For_Each(Type, it, index, array) \
     Type it = (array).data[0]; \
     for (i64 index = 0; index < (array).count; index += 1, (it = array.data[index]))
-
-#define For_It(it, index, array) \
-    for (i64 index = 0, (it = (array).data[0]); index < (array).count; index += 1, (it = (array).data[index]))
 
 #if LANG_C
 
@@ -6896,97 +6847,51 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #endif
 
 //
-// Array Definition Macros
+// Hopefully the compiler is smart enough to figure out what we're doing here...
 //
 
-#define DeclareArray(T) \
-typedef struct CONCAT(Array_, T) CONCAT(Array_, T); \
-struct CONCAT(Array_, T) { \
-    ArrayStructBody(T); \
+typedef struct Array_T Array_T;
+struct Array_T
+{
+    i64 *count;
+    i64 *capacity;
+    void **data;
+    u64 item_size;
 };
 
-#define DeclareSlice(T) \
-typedef struct CONCAT(Slice_, T) CONCAT(Slice_, T); \
-struct CONCAT(Slice_, T) { \
-    ArrayStructBody(T); \
+typedef struct Slice_T Slice_T;
+struct Slice_T
+{
+    i64 count;
+    i64 capacity;
+    void *data;
+    u64 item_size;
 };
 
-#define DeclareFixedArray(T) \
-typedef struct CONCAT(FixedArray_, T) CONCAT(FixedArray_, T); \
-struct CONCAT(FixedArray_, T) { \
-    StaticArrayStructBody(T); \
-};
+#define array__to_Array_T(it) \
+    StructLit(Array_T){&(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
 
-#define ArrayStructBody(T) \
-    Arena *arena; \
-    i64   capacity; \
-    i64   count; \
-    T     *data;
-
-#define SliceStructBody(T) \
-    i64   capacity; \
-    i64   count; \
-    T     *data;
-
-#define FixedArrayStructBody(T, capacity_) \
-    i64 count; \
-    static const i64 capacity = capacity_; \
-    T data[capacity_];
-
-#if LANG_CPP
-    #undef ArrayStructBody
-    #define ArrayStructBody(T) \
-        Arena *arena; \
-        i64   count; \
-        i64   capacity; \
-        T     *data; \
-        \
-        T &operator[](i64 i) \
-        { \
-            assert(i >= 0 && i < count); \
-            return data[i]; \
-        }
-
-    #undef SliceStructBody
-    #define SliceStructBody(T) \
-        i64   count; \
-        i64   capacity; \
-        T     *data; \
-        \
-        T &operator[](i64 i) \
-        { \
-            assert(i >= 0 && i < count); \
-            return data[i]; \
-        }
-
-    #undef FixedArrayStructBody
-    #define FixedArrayStructBody(T, capacity_) \
-        i64 count; \
-        static const i64 capacity = capacity_; \
-        T data[capacity_]; \
-        \
-        T &operator[](i64 i) \
-        { \
-            assert(i >= 0 && i < count); \
-            return data[i]; \
-        }
-#endif
+#define array__to_Slice_T(it) \
+    StructLit(Slice_T){(it)->count, (it)->capacity, (void *)(it)->data, sizeof((it)->data[0])}
 
 //
 // Stretchy Array functions
 //
 
-#define array_init_from_arena(it, arena_, initial_capacity) \
-    array__init_from_arena(array__to_ref(it), arena_, initial_capacity)
+#define array_alloc(arena, it, initial_capacity) \
+    array__alloc((arena), array__to_Array_T(it), initial_capacity)
 
-#define array_free(it) \
-    array__free(array__to_ref(it))
+#define array_free(arena, it) \
+    array__free((arena), array__to_Array_T(it))
 
-#define array_reserve(it, num) \
-    (array__maybe_grow(array__to_ref(it), num))
+#define array_reserve(arena, it, num) \
+    (array__grow((arena), array__to_Array_T(it), num))
 
-#define array_push(it, value) \
-    (array__maybe_grow(array__to_ref(it), 0), (it)->data[(it)->count] = value, (it)->count += 1, &(it)->data[(it)->count - 1])
+#define array_grow(arena, it, n) \
+    array__grow((arena), array__to_Array_T(it), (n))
+
+#define array_push(arena, it, value) \
+    (array_grow(arena, it, 1), (it)->data[(it)->count++] = value)
 
 //
 // Basic Array functions
@@ -7007,115 +6912,61 @@ struct CONCAT(FixedArray_, T) { \
     (assert((it)->count < (it)->capacity), ((it)->data[(it)->count] = value), ((it)->count += 1), &(it)->data[(it)->count - 1])
 
 #define array_remove_unordered(it, index) \
-    array__remove_unordered(array__to_slice_ref(it), index)
+    array__remove_unordered(array__to_Array_T(it), index)
 
 #define array_remove_ordered(it, index) \
-    array__remove_ordered(array__to_slice_ref(it), index, 1)
+    array__remove_ordered(array__to_Array_T(it), index, 1)
 
 #define array_begin(a) ((a).data ? (a).data : NULL)
 
 #define array_end(a) ((a).data ? ((a).data + (a).count) : NULL)
 
-#define array_sort(a, cmp) (array__sort(array__to_any(a), cmp))
+#define array_sort(a, cmp) (array__sort(array__to_Slice_T(a), cmp))
 
-#define array_search(a, key, cmp) (array__search(array__to_any(&(a)), key, cmp))
+#define array_search(a, key, cmp) (array__search(array__to_Slice_T(&(a)), key, cmp))
 
-#define array_find(a, key, cmp) (array__find(array__to_any(&(a)), key, cmp))
+#define array_find(a, key, cmp) (array__find(array__to_Slice_T(&(a)), key, cmp))
 
 //
-// Hopefully the compiler is smart enough to figure out what we're doing here...
+// Array Helpers
 //
 
-typedef struct Array_Ref Array_Ref;
-struct Array_Ref
+function void array__alloc(Arena *arena, Array_T it, i64 capacity)
 {
-    Arena **arena;
-    i64 *count;
-    i64 *capacity;
-    void **data;
-    u32 item_size;
-};
-
-typedef struct Slice_Ref Slice_Ref;
-struct Slice_Ref
-{
-    i64 *count;
-    i64 *capacity;
-    void **data;
-    u32 item_size;
-};
-
-typedef struct Array_Any Array_Any;
-struct Array_Any
-{
-    i64 count;
-    i64 capacity;
-    void *data;
-    u32 item_size;
-};
-
-#define array__to_ref(it) \
-    StructLit(Array_Ref){&(it)->arena, &(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
-
-#define array__to_slice_ref(it) \
-    StructLit(Slice_Ref){&(it)->count, &(it)->capacity, (void **)&(it)->data, sizeof((it)->data[0])}
-
-#define array__to_any(it) \
-    StructLit(Array_Any){(it)->count, (it)->capacity, (void *)(it)->data, sizeof((it)->data[0])}
-
-function void array__init_from_arena(Array_Ref it, Arena *arena, i32 initial_capacity)
-{
-    *it.arena = arena;
     *it.count = 0;
-    *it.capacity = Max(initial_capacity, 1);
-    arena_reset(*it.arena);
-    *it.data = PushArray(*it.arena, u8, (*it.capacity) * it.item_size);
+    *it.capacity = capacity;
+    *it.data = arena_push(arena, capacity * it.item_size, it.item_size, true);
 }
 
-function i32 array__maybe_grow(Array_Ref it, i64 num)
+function i32 array__grow(Arena *arena, Array_T it, i64 num)
 {
-    if (!(*it.data))
+    void *result = *it.data;
+    if (num > 0 && (*it.count) + num >= *(it.capacity))
     {
-        if (!(*it.arena))
+        i64 next_capacity = u64_next_power_of_two(Max(*it.capacity + 1, 8));
+        if ((*it.capacity) < next_capacity)
         {
-            *it.arena = arena_alloc(Gigabytes(1));
-        }
-
-        array__init_from_arena(it, *it.arena, 32);
-    }
-
-    if (*it.count - num >= *it.capacity)
-    {
-        assert(*it.arena != NULL);
-
-        i64 next_capacity = u64_next_power_of_two(Max(*it.capacity + 1, 16));
-        if (*it.capacity != next_capacity)
-        {
-            arena_set_pos(*it.arena, next_capacity * it.item_size);
+            result = arena_realloc_ptr(arena, it.item_size * next_capacity, result, it.item_size * (*it.capacity));
+            *it.data = result;
             *it.capacity = next_capacity;
         }
     }
-
     return 0;
 }
 
-function void array__free(Array_Ref it)
+function void array__free(Arena *arena, Array_T it)
 {
-    if (*it.data)
+    if ((*it.data))
     {
-        if (*it.arena)
-        {
-            arena_free(*it.arena);
-            *it.arena = NULL;
-        }
+        arena_free_ptr(arena, (*it.data), it.item_size * (*it.capacity));
         *it.data = NULL;
     }
 
-    *it.capacity = 0;
-    *it.count = 0;
+    (*it.capacity) = 0;
+    (*it.count) = 0;
 }
 
-function void array__remove_unordered(Slice_Ref it, i64 index)
+function void array__remove_unordered(Array_T it, i64 index)
 {
     void *data = *it.data;
     i64 count = *it.count;
@@ -7128,7 +6979,7 @@ function void array__remove_unordered(Slice_Ref it, i64 index)
     *it.count -= 1;
 }
 
-function void array__remove_ordered(Slice_Ref it, i64 index, i64 num_to_remove)
+function void array__remove_ordered(Array_T it, i64 index, i64 num_to_remove)
 {
     void *data = *it.data;
     i64 count = *it.count;
@@ -7145,12 +6996,12 @@ function void array__remove_ordered(Slice_Ref it, i64 index, i64 num_to_remove)
     *it.count -= num_to_remove;
 }
 
-function void array__sort(Array_Any it, Compare_Func cmp)
+function void array__sort(Slice_T it, Compare_Func cmp)
 {
     QuickSort(it.data, it.count, it.item_size, cmp);
 }
 
-function i64 array__search(Array_Any it, void *key, Compare_Func cmp)
+function i64 array__search(Slice_T it, void *key, Compare_Func cmp)
 {
     void *item = BinarySearch(key, it.data, it.count, it.item_size, cmp);
     i64 result = -1;
@@ -7162,7 +7013,7 @@ function i64 array__search(Array_Any it, void *key, Compare_Func cmp)
     return result;
 }
 
-function i64 array__find(Array_Any it, void *key, Compare_Func cmp)
+function i64 array__find(Slice_T it, void *key, Compare_Func cmp)
 {
     i64 result = -1;
 
@@ -7191,37 +7042,29 @@ function i64 array__find(Array_Any it, void *key, Compare_Func cmp)
 typedef struct Array_i32 Array_i32;
 struct Array_i32
 {
-    Arena *arena;
+    _ArrayHeader_;
     i32 *data;
-    i64 count;
-    i64 capacity;
 };
 
 typedef struct Array_i64 Array_i64;
 struct Array_i64
 {
-    Arena *arena;
+    _ArrayHeader_;
     i64 *data;
-    i64 count;
-    i64 capacity;
 };
 
 typedef struct Array_f32 Array_f32;
 struct Array_f32
 {
-    Arena *arena;
+    _ArrayHeader_;
     f32 *data;
-    i64 count;
-    i64 capacity;
 };
 
 typedef struct Array_f64 Array_f64;
 struct Array_f64
 {
-    Arena *arena;
+    _ArrayHeader_;
     f64 *data;
-    i64 count;
-    i64 capacity;
 };
 
 
