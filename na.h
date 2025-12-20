@@ -4273,7 +4273,7 @@ function f32 random_zero_to_one()
 
 function void random_shuffle(void *base, u64 count, u64 size)
 {
-    return random_pcg_shuffle(&g_random, base, count, size);
+    random_pcg_shuffle(&g_random, base, count, size);
 }
 
 //
