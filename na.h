@@ -484,7 +484,7 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 #define ClampTop(a, b) Min(a, b)
 #define ClampBot(a, b) Max(a, b)
 #define Sign(x) (((x) > 0) - ((x) < 0))
-#define Abs(x) (((x) < 0) ? (0u - x) : (0u + x))
+#define Abs(x) (((x) < 0) ? (0u - (x)) : (0u + (x)))
 
 #define AlignUpPow2(x, p) (((x) + (p) - 1) & ~((p) - 1))
 #define AlignDownPow2(x, p) ((x) & ~((p) - 1))
@@ -1515,6 +1515,45 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #endif
 
 #endif // OS_H
+
+#ifndef EXT_ARRAY_H
+#define EXT_ARRAY_H
+
+#define _ArrayHeader_ struct { i64 count; i64 capacity; }
+
+//
+// Built-in Array Types
+//
+
+typedef struct Array_i32 Array_i32;
+struct Array_i32
+{
+    _ArrayHeader_;
+    i32 *data;
+};
+
+typedef struct Array_i64 Array_i64;
+struct Array_i64
+{
+    _ArrayHeader_;
+    i64 *data;
+};
+
+typedef struct Array_f32 Array_f32;
+struct Array_f32
+{
+    _ArrayHeader_;
+    f32 *data;
+};
+
+typedef struct Array_f64 Array_f64;
+struct Array_f64
+{
+    _ArrayHeader_;
+    f64 *data;
+};
+
+#endif // EXT_ARRAY_H
 
 #endif // NA_H
 
@@ -5484,7 +5523,7 @@ function String os_get_system_path(Arena *arena, SystemPath path)
     {
         case SystemPath_Current:
         {
-            char *buffer = (char *)arena_push(arena, PATH_MAX);
+            char *buffer = (char *)arena_push(arena, PATH_MAX, 0, false);
             getcwd(buffer, PATH_MAX);
 
             result = string_from_cstr(buffer);
@@ -5497,13 +5536,13 @@ function String os_get_system_path(Arena *arena, SystemPath path)
             u32 length = 0;
             _NSGetExecutablePath(0, &length);
 
-            char *buffer = (char *)arena_push(arena, length);
+            char *buffer = (char *)arena_push(arena, length, 0, false);
 
             if (_NSGetExecutablePath(buffer, &length) >= 0)
             {
                 u64 alloc_size = Max(length, PATH_MAX);
 
-                char *normalized = (char *)arena_push(arena, alloc_size);
+                char *normalized = (char *)arena_push(arena, alloc_size, 0, false);
                 if (realpath(buffer, normalized) != NULL)
                 {
                     result = Str8(normalized, length);
@@ -5818,7 +5857,7 @@ function String os_get_system_path(Arena *arena, SystemPath path)
     {
         case SystemPath_Current:
         {
-            char *buffer = (char *)arena_push(arena, PATH_MAX);
+            char *buffer = (char *)arena_push(arena, PATH_MAX, 0, false);
             getcwd(buffer, PATH_MAX);
 
             result = string_from_cstr(buffer);
@@ -5828,11 +5867,11 @@ function String os_get_system_path(Arena *arena, SystemPath path)
 
         case SystemPath_Binary:
         {
-            char *buffer = (char *)arena_push(arena, PATH_MAX);
+            char *buffer = (char *)arena_push(arena, PATH_MAX, 0, false);
             size_t length = readlink("/proc/self/exe", buffer, PATH_MAX);
             if (length > 0)
             {
-                char *normalized = (char *)arena_push(arena, PATH_MAX);
+                char *normalized = (char *)arena_push(arena, PATH_MAX, 0 false);
                 if (realpath(buffer, normalized) != NULL)
                 {
                     result = Str8(normalized, length);
@@ -6333,12 +6372,13 @@ function String os_read_entire_file(Arena *arena, String path)
 
     if (f)
     {
-        result.data = cast(u8 *)arena_push(arena, size);
+        result.data = cast(u8 *)arena_push(arena, size, 0, false);
 
         size_t bytes_read = fread(result.data, sizeof(char), size, f);
         if (bytes_read != size)
         {
             print("[file] Failed to read entire file: %.*s\n", LIT(path));
+            result.count = 0;
             result.data = NULL;
         }
     }
@@ -7040,39 +7080,6 @@ function i64 array__find(Slice_T it, void *key, Compare_Func cmp)
 
     return result;
 }
-
-//
-// Built-in Array Types
-//
-
-typedef struct Array_i32 Array_i32;
-struct Array_i32
-{
-    _ArrayHeader_;
-    i32 *data;
-};
-
-typedef struct Array_i64 Array_i64;
-struct Array_i64
-{
-    _ArrayHeader_;
-    i64 *data;
-};
-
-typedef struct Array_f32 Array_f32;
-struct Array_f32
-{
-    _ArrayHeader_;
-    f32 *data;
-};
-
-typedef struct Array_f64 Array_f64;
-struct Array_f64
-{
-    _ArrayHeader_;
-    f64 *data;
-};
-
 
 //
 // String Conversions
