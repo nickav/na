@@ -1723,16 +1723,15 @@ function void arena_set_pos(Arena *arena, u64 pos)
 {
     if (pos < arena->size)
     {
-        arena->pos = pos;
-    }
-}
-
-function void arena_set_to_pointer_pos(Arena *arena, void *ptr)
-{
-    if ((u64)ptr >= (u64)arena->data && (u64)ptr < (u64)(arena->data)+arena->size)
-    {
-        u64 offset = (u64)(ptr) - ((u64)arena->data);
-        arena_set_pos(arena, offset);
+        if (pos < arena->pos)
+        {
+            arena_pop_to(arena, pos);
+        }
+        else if (pos > arena->pos)
+        {
+            u64 d = pos - arena->pos;
+            arena_push(arena, d, 0, false);
+        }
     }
 }
 
