@@ -279,7 +279,7 @@ function Socket_Address socket_make_address(String host, u16 port)
         host_cstr[host.count] = '\0';
 
         inet_pton(AF_INET, host_cstr, &result.host);
-        if (result.host == 0 || result.host == INADDR_NONE)
+        // if (result.host == 0 || result.host == INADDR_NONE)
         {
             struct hostent *hostent = gethostbyname(host_cstr);
             if (hostent)
@@ -291,6 +291,10 @@ function Socket_Address socket_make_address(String host, u16 port)
             {
                 print("[socket] Invalid host name: %.*s\n", LIT(host));
             }
+        }
+        else
+        {
+            result.port = port;
         }
 
         /*

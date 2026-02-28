@@ -76,7 +76,7 @@ VERSION HISTORY
 #define ClampTop(a, b) Min(a, b)
 #define ClampBot(a, b) Max(a, b)
 #define Sign(x) (((x) > 0) - ((x) < 0))
-#define Abs(x) (((x) < 0) ? (0u - x) : (0u + x))
+#define Abs(x) (((x) < 0) ? (0u - (x)) : (0u + (x)))
 
 #if !defined(__cplusplus) && !defined(bool)
     #define bool int
