@@ -6887,21 +6887,23 @@ struct Raw_Array
     (Raw_Array *)(&(it)->count) \
 )
 
+#define array__to_Raw_Array_T(it) array__to_Raw_Array(it), sizeof((it)->data[0])
+
 //
 // Stretchy Array functions
 //
 
 #define array_alloc(arena, it, initial_capacity) \
-    array__alloc((arena), array__to_Raw_Array(it), sizeof((it)->data[0]), initial_capacity)
+    array__init_from_arena((arena), array__to_Raw_Array_T(it), initial_capacity)
 
 #define array_free(arena, it) \
-    array__free((arena), array__to_Raw_Array(it), sizeof((it)->data[0]))
+    array__free((arena), array__to_Raw_Array_T(it))
 
 #define array_reserve(arena, it, num) \
-    array__grow((arena), array__to_Raw_Array(it), sizeof((it)->data[0]), (Max((it)->capacity, num) - (it)->capacity))
+    array__grow((arena), array__to_Raw_Array_T(it), (Max((it)->capacity, num) - (it)->capacity))
 
 #define array_grow(arena, it, n) \
-    array__grow((arena), array__to_Raw_Array(it), sizeof((it)->data[0]), (n))
+    array__grow((arena), array__to_Raw_Array_T(it), (n))
 
 #define array_push(arena, it, value) \
     (array_grow((arena), (it), 1), (it)->data[(it)->count] = value, (it)->count += 1)
@@ -6945,27 +6947,28 @@ struct Raw_Array
     (assert((it)->count < (it)->capacity), ((it)->data[(it)->count] = value), ((it)->count += 1), &(it)->data[(it)->count - 1])
 
 #define array_remove_unordered(it, index) \
-    array__remove_unordered(array__to_Raw_Array(it), sizeof((it)->data[0]), index)
+    array__remove_unordered(array__to_Raw_Array_T(it), index)
 
 #define array_remove_ordered(it, index) \
-    array__remove_ordered(array__to_Raw_Array(it), sizeof((it)->data[0]), index, 1)
+    array__remove_ordered(array__to_Raw_Array_T(it), index, 1)
 
 #define array_begin(it) ((it).data ? (it).data : NULL)
 
 #define array_end(it) ((it).data ? ((it).data + (it).count) : NULL)
 
-#define array_sort(it, cmp) (array__sort(array__to_Raw_Array(it), sizeof((it)->data[0]), cmp))
+#define array_sort(it, cmp) (array__sort(array__to_Raw_Array_T(it), cmp))
 
-#define array_search(it, key, cmp) (array__search(array__to_Raw_Array(&(it)), sizeof((it).data[0]), key, cmp))
+#define array_search(it, key, cmp) (array__search(array__to_Raw_Array_T(&(it)), key, cmp))
 
-#define array_find(it, key, cmp) (array__find(array__to_Raw_Array(&(it)), sizeof((it).data[0]), key, cmp))
+#define array_find(it, key, cmp) (array__find(array__to_Raw_Array_T(&(it)), key, cmp))
 
 //
 // Array Helpers
 //
 
-function void array__alloc(Arena *arena, Raw_Array *it, u64 item_size, i64 capacity)
+function void array__init_from_arena(Arena *arena, Raw_Array *it, u64 item_size, i64 capacity)
 {
+    assert(item_size > 0);
     it->count = 0;
     it->capacity = capacity;
     it->data = arena_push(arena, capacity * item_size, item_size, true);
@@ -6973,6 +6976,7 @@ function void array__alloc(Arena *arena, Raw_Array *it, u64 item_size, i64 capac
 
 function void array__free(Arena *arena, Raw_Array *it, u64 item_size)
 {
+    assert(item_size > 0);
     if (it->data)
     {
         arena_free_ptr(arena, it->data, item_size * it->capacity);
@@ -6985,14 +6989,14 @@ function void array__free(Arena *arena, Raw_Array *it, u64 item_size)
 
 function i32 array__grow(Arena *arena, Raw_Array *it, u64 item_size, i64 num)
 {
+    assert(item_size > 0);
+
     void *result = it->data;
     if (!result || num > 0 && it->count + num >= it->capacity)
     {
         i64 next_capacity = u64_next_power_of_two(Max(it->capacity + num, 8));
         if (it->capacity < next_capacity)
         {
-            assert(item_size > 0);
-
             void *next_data = arena_realloc_ptr(arena, item_size * next_capacity, result, item_size * it->capacity);
             if (next_data)
             {
@@ -7006,6 +7010,7 @@ function i32 array__grow(Arena *arena, Raw_Array *it, u64 item_size, i64 num)
 
 function void array__remove_unordered(Raw_Array *it, u64 item_size, i64 index)
 {
+    assert(item_size > 0);
     assert(it->data != NULL);
     assert(index >= 0 && index < it->count);
 
@@ -7015,6 +7020,7 @@ function void array__remove_unordered(Raw_Array *it, u64 item_size, i64 index)
 
 function void array__remove_ordered(Raw_Array *it, u64 item_size, i64 index, i64 num_to_remove)
 {
+    assert(item_size > 0);
     assert(it->data != NULL);
     assert(index >= 0 && index < it->count);
     assert(num_to_remove > 0);
@@ -7028,11 +7034,13 @@ function void array__remove_ordered(Raw_Array *it, u64 item_size, i64 index, i64
 
 function void array__sort(Raw_Array *it, u64 item_size, Compare_Func cmp)
 {
+    assert(item_size > 0);
     QuickSort(it->data, it->count, item_size, cmp);
 }
 
 function i64 array__search(Raw_Array *it, u64 item_size, void *key, Compare_Func cmp)
 {
+    assert(item_size > 0);
     void *item = BinarySearch(key, it->data, it->count, item_size, cmp);
     i64 result = -1;
     if (item)
@@ -7045,6 +7053,7 @@ function i64 array__search(Raw_Array *it, u64 item_size, void *key, Compare_Func
 
 function i64 array__find(Raw_Array *it, u64 item_size, void *key, Compare_Func cmp)
 {
+    assert(item_size > 0);
     i64 result = -1;
 
     u8 *at = (u8 *)it->data;
@@ -7174,85 +7183,89 @@ function String to_string(Array_f64 a) { return Array_f64_to_string(a); }
 
 
 //
+// NOTE(nick): Your table must define keys and data
+//
+// For example:
+// struct MyTable { _TableHeader_; u64 *hashes; u32 *keys; u64 *data; }
+//
+#define _TableHeader_ struct { i64 count; i64 capacity; i64 slots_filled; }
+
+//
 // Table
 //
 
-typedef struct H_Hash H_Hash;
-struct H_Hash
+typedef struct Raw_Table Raw_Table;
+struct Raw_Table
 {
-    u64 value;
+    i64 count;
+    i64 capacity;
+    i64 slots_filled;
+
+    void *hashes;
+    void *keys;
+    void *data;
 };
 
-typedef struct H_Slot H_Slot;
-struct H_Slot
-{
-    H_Hash hash;
-};
+#define table__to_Raw_Table(it) ( \
+    assert(sizeof((it)->count)        == sizeof(((Raw_Table *)0)->count)), \
+    assert(sizeof((it)->capacity)     == sizeof(((Raw_Table *)0)->capacity)), \
+    assert(sizeof((it)->slots_filled) == sizeof(((Raw_Table *)0)->slots_filled)), \
+    assert(sizeof((it)->hashes)       == sizeof(((Raw_Table *)0)->hashes)), \
+    assert(sizeof((it)->keys)         == sizeof(((Raw_Table *)0)->keys)), \
+    assert(sizeof((it)->data)         == sizeof(((Raw_Table *)0)->data)), \
+    assert(MemberOffFromPtr((it), count)        == offset_of(Raw_Table, count)), \
+    assert(MemberOffFromPtr((it), capacity)     == offset_of(Raw_Table, capacity)), \
+    assert(MemberOffFromPtr((it), slots_filled) == offset_of(Raw_Table, slots_filled)), \
+    assert(MemberOffFromPtr((it), hashes)       == offset_of(Raw_Table, hashes)), \
+    assert(MemberOffFromPtr((it), keys)         == offset_of(Raw_Table, keys)), \
+    assert(MemberOffFromPtr((it), data)         == offset_of(Raw_Table, data)), \
+    (Raw_Table *)(&(it)->count) \
+)
 
-typedef struct Table_KV Table_KV;
-struct Table_KV
-{
-    Arena *arenas[2];
-
-    i64     capacity;
-    i64     count;
-    i64     slots_filled;
-
-    H_Slot *slots;
-    u8     *keys;
-    u64    key_size;
-    u8     *data;
-    u64    item_size;
-};
-
-#define Table(K, V) Table_KV
+#define table__to_Raw_Table_T(it) \
+    table__to_Raw_Table(it), sizeof((it)->hashes[0]), sizeof((it)->keys[0]), sizeof((it)->data[0])
 
 //
 // API
 //
 
-// Table
-function void table_init_from_arena(Table_KV *it, Arena *arena0, Arena *arena1, u64 key_size, u64 item_size, u64 table_size);
-function void table_init(Table_KV *it, u64 key_size, u64 item_size);
-function void table_reset(Table_KV *it);
-function void table_free(Table_KV *it);
-function void table_rehash(Table_KV *it, u64 next_capacity);
+#define table_alloc(arena, it, initial_capacity) \
+    table__init_from_arena((arena), table__to_Raw_Table_T(it), (initial_capacity))
 
-function void *table_add(Table_KV *it, H_Hash hash, void *key, void *value);
-function void *table_set(Table_KV *it, H_Hash hash, void *key, void *value);
+#define table_reset(it) \
+    table__reset(table__to_Raw_Table_T(it))
 
-function b32 table_find(Table_KV *it, H_Hash hash, void *key, i64 *found_index);
+#define table_add(it, hash, key, value) \
+    table__insert(table__to_Raw_Table_T(it), (hash), (key), (value))
 
-function void *table_key(Table_KV *it, i64 index);
-function void *table_value(Table_KV *it, i64 index);
-function void *table_get(Table_KV *it, H_Hash hash, void *key);
+#define table_insert(arena, it, hash, key, value) \
+    table__insert_maybe_grow((arena), table__to_Raw_Table_T(it), (hash), (key), (value))
 
-function b32 table_remove(Table_KV *it, H_Hash hash, void *key);
-function b32 table_delete(Table_KV *it, i64 index);
+#define table_find(it, hash, key) \
+    table__find(table__to_Raw_Table_T(it), (hash), (key))
 
-//
-// Hash Functions
-//
+#define table_find_value(it, hash, key) \
+    table__find_value(table__to_Raw_Table_T(it), (hash), (key))
 
-function b32 table_hash_equals(H_Hash a, H_Hash b) {
-    return a.value == b.value;
-}
+#define table_set(arena, it, hash, key, value) \
+    table__set((arena), table__to_Raw_Table_T(it), (hash), (key), (value))
 
-function b32 table_hash_is_valid(H_Hash a) {
-    return a.value > 0;
-}
+#define table_get(it, hash, key) \
+    table__find_value(table__to_Raw_Table_T(&(it)), (hash), (key))
 
-function H_Hash table_hash_i64(i64 it) {
-    H_Hash result;
-    result.value = fnv64a(&it, sizeof(i64));
-    return result;
-}
+#define table_remove(it, hash, key) \
+    table__remove(table__to_Raw_Table_T(it), (hash), (key))
 
-function H_Hash table_hash_make(u64 value) {
-    H_Hash result;
-    result.value = value;
-    return result;
-}
+#define table_delete(it, index) \
+    table__delete(table__to_Raw_Table_T(it), (index))
+
+#define table_exists(it, index) \
+    table__exists(table__to_Raw_Table_T(&(it)), (index))
+
+
+#define table_get_hash(it, index)  table__hash( table__to_Raw_Table(&(it)), sizeof((it).hashes[0]), (index))
+#define table_get_key(it, index)   table__key(  table__to_Raw_Table(&(it)), sizeof((it).keys[0]), (index))
+#define table_get_value(it, index) table__value(table__to_Raw_Table(&(it)), sizeof((it).data[0]), (index))
 
 //
 // Table
@@ -7262,191 +7275,192 @@ const int TABLE_NEVER_OCCUPIED_HASH = 0;
 const int TABLE_REMOVED_HASH = 1;
 const int TABLE_FIRST_VALID_HASH = 2;
 
-const int TABLE_SIZE_MIN = 32;
+const int TABLE_SIZE_MIN = 16;
 
 //
 // TODO(nick):
 // - do some sort of quadratic probing thing
 //
 
-function void table_init_from_arena(Table_KV *it, Arena *arena0, Arena *arena1, u64 key_size, u64 item_size, u64 initial_capacity)
+function void table__init_from_arena(Arena *arena, Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, i64 initial_capacity)
 {
-    it->arenas[0] = arena0;
-    it->arenas[1] = arena1;
-
-    it->capacity = Max(u64_next_power_of_two(initial_capacity), TABLE_SIZE_MIN);
-    it->count = 0;
-    it->slots_filled = 0;
-
-    it->key_size   = key_size;
-    it->item_size  = item_size;
-
-    assert(it->arenas[0]);
-    assert(it->arenas[1]);
+    i64 next_capacity = Max(u64_next_power_of_two(initial_capacity), TABLE_SIZE_MIN);
     assert(is_power_of_two(it->capacity));
-    assert(it->item_size > 0);
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
 
-    arena_reset(arena0);
-    arena_reset(arena1);
-    it->slots = PushArrayZero(arena0, H_Slot, it->capacity);
-    it->keys  = PushArrayZero(arena0, u8,     it->capacity * it->key_size);
-    it->data  = PushArrayZero(arena0, u8,     it->capacity * it->item_size);
-}
+    u64 next_size = hash_size*next_capacity + key_size*next_capacity + item_size*next_capacity;
 
-function void table_init(Table_KV *it, u64 key_size, u64 item_size)
-{
-    table_init_from_arena(it, arena_alloc(Gigabytes(1)), arena_alloc(Gigabytes(1)), key_size, item_size, 32);
-}
+    void *data = PushArrayZero(arena, u8, next_size);
+    assert(data != NULL);
+    it->hashes = (u8 *)data;
+    it->keys   = (u8 *)it->hashes + hash_size*next_capacity;
+    it->data   = (u8 *)it->keys   + key_size*next_capacity;
 
-function void table_reset(Table_KV *it)
-{
-    it->count = 0;
-    it->slots_filled = 0;
-
-    if (it->slots) {
-        MemoryZero(it->slots, it->capacity * sizeof(H_Slot));
-    }
-}
-
-function void table_free(Table_KV *it)
-{
-    if (it->slots) {
-        if (it->arenas[0])
-        {
-            arena_free(it->arenas[0]);
-            it->arenas[0] = NULL;
-        }
-
-        if (it->arenas[1])
-        {
-            arena_free(it->arenas[1]);
-            it->arenas[1] = NULL;
-        }
-
-        it->slots = NULL;
-        it->keys = NULL;
-        it->data = NULL;
-    }
-
-    it->capacity = 0;
+    it->capacity = next_capacity;
     it->count = 0;
     it->slots_filled = 0;
 }
 
-function void table_rehash(Table_KV *it, u64 next_capacity)
+function void table__reset(Raw_Table *it, u64 hash_size)
 {
-    assert(is_power_of_two(it->capacity));
-    assert(it->item_size > 0);
-
-    u64 old_capacity  = it->capacity;
-    H_Slot *old_slots = it->slots;
-    u8     *old_keys  = it->keys;
-    u8     *old_data  = it->data;
-
-    Swap(Arena *, it->arenas[0], it->arenas[1]);
-
-    // count and slots_filled will be incremented by add.
-    it->capacity = Max(u64_next_power_of_two(next_capacity), TABLE_SIZE_MIN);
     it->count = 0;
     it->slots_filled = 0;
 
-    Arena *arena = it->arenas[0];
-    u64 next_size = sizeof(H_Slot) * it->capacity + it->capacity * it->key_size + it->capacity * it->item_size;
-    arena_set_pos(arena, next_size);
-
-    it->slots = (H_Slot *)arena->data;
-    it->keys  = (u8 *)it->slots + sizeof(H_Slot) * it->capacity;
-    it->data  = (u8 *)it->keys  + it->capacity * it->key_size;
-
-    for (u64 index = 0; index < old_capacity; index++) {
-        H_Slot *entry = &old_slots[index];
-
-        if (entry->hash.value >= TABLE_FIRST_VALID_HASH) {
-            u8 *key   = old_keys + (it->key_size  * index);
-            u8 *value = old_data + (it->item_size * index);
-
-            table_add(it, entry->hash, key, value);
-        }
-    }
-}
-
-// Sets the key-value pair, replacing it if it already exists.
-function void *table_set(Table_KV *it, H_Hash hash, void *key, void *value)
-{
-    void *result = NULL;
-
-    i64 index;
-    if (table_find(it, hash, key, &index))
+    if (it->hashes)
     {
-        void *data = table_value(it, index);
-        MemoryCopy(data, value, it->item_size);
-        result = data;
+        MemoryZero(it->hashes, it->capacity * hash_size);
     }
-    else
-    {
-        result = table_add(it, hash, key, value);
+}
+
+static inline u64 table__hash_read(void *hash, u64 hash_size)
+{
+    switch (hash_size) {
+        case 1: return (u64)(*(u8  *)hash);
+        case 2: return (u64)(*(u16 *)hash);
+        case 4: return (u64)(*(u32 *)hash);
+        case 8: return       *(u64 *)hash;
+        default: {
+            assert(!"Unsupported hash size");
+            return 0;
+        }
     }
-    
-    return result;
+}
+ 
+static inline void table__hash_write(void *dst, u64 hash_size, u64 value)
+{
+    switch (hash_size) {
+        case 1: *(u8  *)dst = (u8 )value; break;
+        case 2: *(u16 *)dst = (u16)value; break;
+        case 4: *(u32 *)dst = (u32)value; break;
+        case 8: *(u64 *)dst =      value; break;
+        default: assert(0 && "unsupported hash size");
+    }
 }
 
 // Adds the given key-value pair to the table, returns a pointer to the inserted item.
-function void *table_add(Table_KV *it, H_Hash hash, void *key, void *value)
+function void *table__insert(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, void *hash, void *key, void *value)
 {
-    assert(key);
-    assert(value);
-
-    // slots_filled / capacity >= 7 / 10 ...therefore:
-    // slots_filled * 10 >= capacity * 7
-    // The + 1 is here to handle the weird case where the table size is 1 and you add the first item
-    if ((it->slots_filled + 1) * 10 >= it->capacity * 7) {
-        u64 next_capacity = it->capacity ? it->capacity * 2 : TABLE_SIZE_MIN;
-        table_rehash(it, next_capacity);
-    }
-
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
     assert(it->slots_filled <= it->capacity);
 
-    if (hash.value < TABLE_FIRST_VALID_HASH) hash.value += TABLE_FIRST_VALID_HASH;
+    u64 hash_value = table__hash_read(hash, hash_size);
+    if (hash_value < TABLE_FIRST_VALID_HASH) hash_value += TABLE_FIRST_VALID_HASH;
 
-    u64 index = hash.value & (it->capacity - 1);
+    u64 index = hash_value & (it->capacity - 1);
 
-    while (it->slots[index].hash.value) {
+    // @Speed: is the compiler smart enough to prevent the extra multiplications?
+    while (table__hash_read((u8 *)it->hashes + hash_size*index, hash_size) != 0)
+    {
         index += 1;
         index &= (it->capacity - 1);
     }
 
-    it->slots[index].hash = hash;
-    it->count ++;
-    it->slots_filled ++;
+    MemoryCopy(((u8*)it->hashes + hash_size * index), hash, hash_size);
+    it->count += 1;
+    it->slots_filled += 1;
 
-    void *result = (it->data) + (it->item_size * index);
-
-    MemoryCopy((it->keys) + (it->key_size * index), key, it->key_size);
-    MemoryCopy(result, value, it->item_size);
+    void *result = (u8*)(it->data) + (item_size * index);
+    MemoryCopy((u8*)(it->keys) + (key_size * index), key, key_size);
+    MemoryCopy(result, value, item_size);
 
     return result;
 }
 
-function b32 table_find(Table_KV *it, H_Hash hash, void *key, i64 *found_index)
+function void table__rehash(Arena *arena, Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, i64 desired_capacity)
 {
-    assert(key);
+    assert(is_power_of_two(it->capacity));
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
 
-    if (it->slots)
+    u64 old_capacity = it->capacity;
+    void *old_base   = (void*)it->hashes;
+    u8 *old_hashes   = (u8*)it->hashes;
+    u8   *old_keys   = (u8*)it->keys;
+    u8   *old_data   = (u8*)it->data;
+    u64 old_size     = hash_size*old_capacity + key_size*old_capacity + item_size*old_capacity;
+
+    i64 next_capacity = Max(u64_next_power_of_two(desired_capacity), TABLE_SIZE_MIN);
+    u64 next_size = hash_size*next_capacity + key_size*next_capacity + item_size*next_capacity;
+
+    void *next_data = PushArrayZero(arena, u8, next_size);
+    assert(next_data != NULL);
+    it->hashes = (u8 *)next_data;
+    it->keys   = (u8 *)it->hashes + hash_size*next_capacity;
+    it->data   = (u8 *)it->keys   + key_size*next_capacity;
+
+    assert(it->hashes != NULL);
+    assert(it->keys != NULL);
+    assert(it->data != NULL);
+
+    // count and slots_filled will be incremented by add.
+    it->capacity = next_capacity;
+    it->count = 0;
+    it->slots_filled = 0;
+
+    for (u64 index = 0; index < old_capacity; index++)
     {
-        if (hash.value < TABLE_FIRST_VALID_HASH) hash.value += TABLE_FIRST_VALID_HASH;
-        u64 index = hash.value & (it->capacity - 1);
+        u8 *hash = old_hashes + (hash_size * index);
+        u64 hash_value = table__hash_read(hash, hash_size);
+        if (hash_value >= TABLE_FIRST_VALID_HASH)
+        {
+            u8 *key   = old_keys + (key_size  * index);
+            u8 *value = old_data + (item_size * index);
 
-        while (it->slots[index].hash.value) {
-            H_Slot *slot = &it->slots[index];
-            u8 *entry_key = it->keys + (it->key_size * index);
+            table__insert(it, hash_size, key_size, item_size, hash, key, value);
+        }
+    }
+}
 
-            if (table_hash_equals(slot->hash, hash) && MemoryEquals(entry_key, key, it->key_size))
+function void *table__insert_maybe_grow(Arena *arena, Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, void *hash, void *key, void *value)
+{
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
+
+    // slots_filled / capacity >= 7 / 10 ...therefore:
+    // slots_filled * 10 >= capacity * 7
+    // The + 1 is here to handle the weird case where the table size is 1 and you add the first item
+    if ((it->slots_filled + 1) * 10 >= it->capacity * 7)
+    {
+        u64 next_capacity = it->capacity ? it->capacity * 2 : TABLE_SIZE_MIN;
+        table__rehash(arena, it, hash_size, key_size, item_size, next_capacity);
+    }
+
+    return table__insert(it, hash_size, key_size, item_size, hash, key, value);
+}
+
+function i64 table__find(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, void *hash, void *key)
+{
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
+    assert(key != 0);
+
+    i64 result = -1;
+    if (it->hashes)
+    {
+        u64 hash_value = table__hash_read(hash, hash_size);
+        if (hash_value < TABLE_FIRST_VALID_HASH) hash_value += TABLE_FIRST_VALID_HASH;
+
+        i64 index = hash_value & (it->capacity - 1);
+
+        // @Speed: is the compiler smart enough to prevent the extra multiplications?
+        while (table__hash_read((u8*)(it->hashes) + hash_size*index, hash_size) != 0)
+        {
+            void *hash_key = (u8*)(it->hashes) + (hash_size*index);
+            if (MemoryEquals(hash_key, hash, hash_size))
             {
-                if (found_index)
+                u8 *entry_key = (u8*)(it->keys) + (key_size*index);
+                if (MemoryEquals(entry_key, key, key_size))
                 {
-                    *found_index = index;
+                    result = index;
+                    break;
                 }
-                return true;
             }
 
             index += 1;
@@ -7454,78 +7468,96 @@ function b32 table_find(Table_KV *it, H_Hash hash, void *key, i64 *found_index)
         }
     }
 
-    return false;
-}
-
-function void *table_key(Table_KV *it, i64 index) {
-    void *result = NULL;
-    if (index >= 0 && index < it->capacity)
-    {
-        result = it->keys + (it->key_size * index);
-    }
     return result;
 }
 
-function void *table_value(Table_KV *it, i64 index) {
-    void *result = NULL;
-    if (index >= 0 && index < it->capacity)
-    {
-        result = it->data + (it->item_size * index);
-    }
-    return result;
-}
-
-function void *table_get(Table_KV *it, H_Hash hash, void *key)
+function void *table__hash(Raw_Table *it, u64 hash_size, i64 index)
 {
-    i64 index;
-    if (table_find(it, hash, key, &index))
+    assert(hash_size > 0);
+    void *result = NULL;
+    if (index >= 0 && index < it->capacity)
     {
-        return table_value(it, index);
+        result = (u8*)(it->hashes) + (hash_size*index);
+    }
+    return result;
+}
+
+function void *table__key(Raw_Table *it, u64 key_size, i64 index)
+{
+    assert(key_size > 0);
+    void *result = NULL;
+    if (index >= 0 && index < it->capacity)
+    {
+        result = (u8*)(it->keys) + (key_size*index);
+    }
+    return result;
+}
+
+function void *table__value(Raw_Table *it, u64 item_size, i64 index)
+{
+    assert(item_size > 0);
+    void *result = NULL;
+    if (index >= 0 && index < it->capacity)
+    {
+        result = (u8*)(it->data) + (item_size * index);
+    }
+    return result;
+}
+
+// Sets the key-value pair, replacing it if it already exists.
+function void *table__set(Arena *arena, Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, void *hash, void *key, void *value)
+{
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
+    void *result = NULL;
+
+    i64 index = table__find(it, hash_size, key_size, item_size, hash, key);
+    if (index >= 0)
+    {
+        void *data = table__value(it, item_size, index);
+        MemoryCopy(data, value, item_size);
+        result = data;
+    }
+    else
+    {
+        result = table__insert_maybe_grow(arena, it, hash_size, key_size, item_size, hash, key, value);
+    }
+    
+    return result;
+}
+
+function void *table__find_value(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, void *hash, void *key)
+{
+    i64 index = table__find(it, hash_size, key_size, item_size, hash, key);
+    if (index >= 0)
+    {
+        return table__value(it, item_size, index);
     }
     return NULL;
 }
 
-function b32 table_remove(Table_KV *it, H_Hash hash, void *key)
+function b32 table__remove(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, void *hash, void *key)
 { 
+    assert(hash_size > 0);
+    assert(key_size > 0);
+    assert(item_size > 0);
     assert(key);
-    assert(it->slots); // Must be initialized!
 
-    if (hash.value < TABLE_FIRST_VALID_HASH) hash.value += TABLE_FIRST_VALID_HASH;
-    u64 index = hash.value & (it->capacity - 1);
-
-    while (it->slots[index].hash.value) {
-        H_Slot *slot = &it->slots[index];
-        u8 *entry_key = it->keys + (it->key_size * index);
-
-        if (table_hash_equals(slot->hash, hash) && MemoryEquals(entry_key, key, it->key_size)) {
-            // No valid entry will ever hash to TABLE_REMOVED_HASH.
-            it->slots[index].hash = table_hash_make(TABLE_REMOVED_HASH);
-            it->count --;
-            return true;
-        }
-
-        index += 1;
-        index &= (it->capacity - 1);
-    }
-
-    return false;
-}
-
-function b32 table_delete(Table_KV *it, i64 index)
-{
-    b32 result = false;
-    if (index >= 0 && index < it->capacity)
+    if (it->hashes)
     {
-        H_Slot *slot = &it->slots[index];
-        if (slot->hash.value >= TABLE_FIRST_VALID_HASH)
-        {
-            it->count --;
-            slot->hash.value = TABLE_REMOVED_HASH;
-            result = true;
-        }
-    }
-    return result;
-}
+        u64 hash_value = table__hash_read(hash, hash_size);
+        if (hash_value < TABLE_FIRST_VALID_HASH) hash_value += TABLE_FIRST_VALID_HASH;
 
-#endif // NA_H_IMPL
-#endif // impl
+        u64 index = hash_value & (it->capacity - 1);
+
+        // @Speed: is the compiler smart enough to prevent the extra multiplications?
+        while (table__hash_read((u8*)(it->hashes) + hash_size*index, hash_size) != 0)
+        {
+            void *hash_key = (u8*)(it->hashes) + (hash_size*index);
+            if (MemoryEquals(hash_key, hash, hash_size))
+            {
+                u8 *entry_key = (u8*)(it->keys) + (key_size*index);
+                if (MemoryEquals(entry_key, key, key_size))
+                {
+                    // No
