@@ -7560,4 +7560,48 @@ function b32 table__remove(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_
                 u8 *entry_key = (u8*)(it->keys) + (key_size*index);
                 if (MemoryEquals(entry_key, key, key_size))
                 {
-                    // No
+                    // No valid entry will ever hash to TABLE_REMOVED_HASH.
+                    table__hash_write((u8*)(it->hashes) + (hash_size*index), hash_size, TABLE_REMOVED_HASH);
+                    it->count -= 1;
+                    return true;
+                }
+            }
+
+            index += 1;
+            index &= (it->capacity - 1);
+        }
+    }
+
+    return false;
+}
+
+function b32 table__delete(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, i64 index)
+{
+    b32 result = false;
+    if (index >= 0 && index < it->capacity)
+    {
+        u64 hash_value = table__hash_read((u8*)(it->hashes) + hash_size*index, hash_size);
+        if (hash_value >= TABLE_FIRST_VALID_HASH)
+        {
+            it->count -= 1;
+            table__hash_write((u8 *)(it->hashes) + hash_size*index, hash_size, TABLE_REMOVED_HASH);
+            result = true;
+        }
+    }
+    return result;
+}
+
+function b32 table__exists(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_size, i64 index)
+{
+    b32 result = false;
+    if (index >= 0 && index < it->capacity)
+    {
+        u64 hash_value = table__hash_read((u8*)(it->hashes) + hash_size*index, hash_size);
+        if (hash_value >= TABLE_FIRST_VALID_HASH)
+        {
+            result = true;
+        }
+    }
+    return result;
+}
+
