@@ -255,8 +255,13 @@ static const int __arch_endian_check_num = 1;
 // Keywords
 //
 
+#ifndef function
 #define function       static
+#endif
+
+#ifndef local_persist
 #define local_persist  static
+#endif
 
 #ifndef export_function
 #define export_function static
@@ -330,8 +335,8 @@ static const int __arch_endian_check_num = 1;
 #define MemoryCompare(a, b, s) memcmp(a, b, s)
 #define MemoryEquals(a, b, s) (memcmp(a, b, s) == 0)
 
-#define MemoryCopyStruct(d,s) do { assert((d)!=NULL && (s)!=NULL); Assert(sizeof(*(d))==sizeof(*(s))); MemoryCopy((d),(s),sizeof(*(d))); } while(0)
-#define MemoryCopyArray(d,s) do{ assert((d)!=NULL && (s)!=NULL); Assert(sizeof(d)==sizeof(s)); MemoryCopy((d),(s),sizeof(s)); }while(0)
+#define MemoryCopyStruct(d,s) do { assert((d)!=NULL && (s)!=NULL); assert(sizeof(*(d))==sizeof(*(s))); MemoryCopy((d),(s),sizeof(*(d))); } while(0)
+#define MemoryCopyArray(d,s) do{ assert((d)!=NULL && (s)!=NULL); assert(sizeof(d)==sizeof(s)); MemoryCopy((d),(s),sizeof(s)); }while(0)
 #define MemoryCopyString(d,s) memcpy(d,(s).data,(s).count)
 
 #define MemoryZero(p,s) do { assert((p)!=NULL); MemorySet((p), 0, (s)); } while(0)
@@ -484,7 +489,7 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 #define ClampTop(a, b) Min(a, b)
 #define ClampBot(a, b) Max(a, b)
 #define Sign(x) (((x) > 0) - ((x) < 0))
-#define Abs(x) (((x) < 0) ? (0u - (x)) : (0u + (x)))
+#define Abs(x) (((x) < 0) ? (0u - x) : (0u + x))
 
 #define AlignUpPow2(x, p) (((x) + (p) - 1) & ~((p) - 1))
 #define AlignDownPow2(x, p) ((x) & ~((p) - 1))
@@ -533,12 +538,22 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 
 #if LANG_C
     #ifdef __STDC_VERSION__ // >= C99
+        #ifndef bool
         #define bool _Bool
+        #endif
     #else
+        #ifndef bool
         #define bool int
+        #endif
     #endif
+
+    #ifndef true
     #define true 1
+    #endif
+
+    #ifndef false
     #define false 0
+    #endif
 #endif
 
 
@@ -587,7 +602,7 @@ struct MemberOffset
     u64 v;
 };
 
-#define MemberOff(S, member) (MemberOffset){OffsetOf(S, m)}
+#define MemberOff(S, m) (MemberOffset){OffsetOf(S, m)}
 #define MemberFromOff(ptr, type, memoff) (*(type *)((u8 *)ptr + memoff.v))
 #define MemberOffFromPtr(ptr, member) ((usize)&(ptr)->member - (usize)(ptr))
 
@@ -601,7 +616,7 @@ struct MemberOffset
     #define Breakpoint() __builtin_trap()
 #endif
 
-int na__assert(bool cond, const char *expr, const char *file, long int line, char *msg) {
+function int na__assert(bool cond, const char *expr, const char *file, long int line, const char *msg) {
     if (!cond) {
         printf("%s(%ld): %s: ", file, line, "Assertion Failed");
         if (expr) {
@@ -624,9 +639,10 @@ int na__assert(bool cond, const char *expr, const char *file, long int line, cha
 }
 
 #undef assert
-#define assert(expr) na__assert(expr, #expr, __FILE__, __LINE__, NULL)
+#define assert(expr) na__assert(!!(expr), #expr, __FILE__, __LINE__, NULL)
 
-#define Assert(expr) na__assert(expr, #expr, __FILE__, __LINE__, NULL)
+#undef assertf
+#define assertf(expr, msg) na__assert(!!(expr), #expr, __FILE__, __LINE__, (msg))
 
 
 #if LANG_C
@@ -7605,3 +7621,5 @@ function b32 table__exists(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_
     return result;
 }
 
+#endif
+#endif
