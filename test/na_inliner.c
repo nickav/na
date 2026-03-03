@@ -54,92 +54,88 @@ bool na_inliner__file(String in_file, FILE *output)
     {
         u8 at = content.data[index];
 
-        if (index < content.count - 1)
+        if (at == '/')
         {
-            // NOTE(nick): skip comments
-            if (at == '/')
+            if (index + 1 < content.count && content.data[index + 1] == '*')
             {
-                if (content.data[index + 1] == '*')
-                {
-                    i64 start = index;
-                    index += 2;
+                i64 start = index;
+                index += 2;
 
-                    while (true)
+                while (index + 1 < content.count)
+                {
+                    if (content.data[index] == '*' && content.data[index + 1] == '/')
                     {
-                        if (content.data[index] == '*' && (index < content.count - 1 && content.data[index + 1] == '/'))
-                        {
-                            index += 2;
-                            break;
-                        }
-
-                        index += 1;
-                    }
-
-                    String comment = string_slice(content, start, index);
-                    fprintf(output, "%.*s", LIT(comment));
-                    index -= 1;
-                    continue;
-                }
-
-                if (content.data[index + 1] == '/')
-                {
-                    // NOTE(nick): hanlde special :InlinerIgnoreBegin / :InlinerIgnoreEnd blocks
-                    String substr = string_eat_whitespace(string_slice(content, index+2, content.count));
-                    if (string_starts_with(substr, S(":InlinerIgnoreBegin")))
-                    {
-                        while (!string_starts_with(substr, S(":InlinerIgnoreEnd")))
-                        {
-                            index += 1;
-                            substr = string_slice(content, index, content.count);
-                        }
-
-                        index += S(":InlinerIgnoreEnd").count;
-                        while (content.data[index] != '\n') { index += 1; }
-                        continue;
-                    }
-
-                    // NOTE(nick): print other comments normally
-                    i64 start = index;
-                    index += 2;
-
-                    while (index < content.count && content.data[index] != '\n') { index += 1; }
-
-                    String comment = string_slice(content, start, index);
-                    fprintf(output, "%.*s\n", LIT(comment));
-                    continue;
-                }
-            }
-
-            if (at == '#')
-            {
-                String substr = string_slice(content, index, content.count);
-
-                // NOTE(nick): ignore #pragma once
-                if (string_starts_with(substr, S("#pragma once")))
-                {
-                    index += S("#pragma once").count;
-                    continue;
-                }
-
-                // NOTE(nick): handle includes
-                if (string_starts_with(substr, S("#include \"")))
-                {
-                    i64 start = index + S("#include \"").count;
-
-                    index = start;
-                    while (content.data[index] != '"') index += 1;
-
-                    String file_name = string_slice(content, start, index);
-                    String include_path = path_join(path_dirname(in_file), file_name);
-                    if (!na_inliner__file(include_path, output))
-                    {
-                        fprintf(output, "#include \"%.*s\"", LIT(file_name));
-                        continue;
+                        index += 2;
+                        break;
                     }
 
                     index += 1;
+                }
+
+                String comment = string_slice(content, start, index);
+                fprintf(output, "%.*s", LIT(comment));
+                index -= 1;
+                continue;
+            }
+
+            if (index + 1 < content.count && content.data[index + 1] == '/')
+            {
+                // NOTE(nick): hanlde special :InlinerIgnoreBegin / :InlinerIgnoreEnd blocks
+                String substr = string_eat_whitespace(string_slice(content, index+2, content.count));
+                if (string_starts_with(substr, S(":InlinerIgnoreBegin")))
+                {
+                    while (!string_starts_with(substr, S(":InlinerIgnoreEnd")))
+                    {
+                        index += 1;
+                        substr = string_slice(content, index, content.count);
+                    }
+
+                    index += S(":InlinerIgnoreEnd").count;
+                    while (index < content.count && content.data[index] != '\n') { index += 1; }
                     continue;
                 }
+
+                // NOTE(nick): print other comments normally
+                i64 start = index;
+                index += 2;
+
+                while (index < content.count && content.data[index] != '\n') { index += 1; }
+
+                String comment = string_slice(content, start, index);
+                fprintf(output, "%.*s\n", LIT(comment));
+                continue;
+            }
+        }
+
+        if (at == '#')
+        {
+            String substr = string_slice(content, index, content.count);
+
+            // NOTE(nick): ignore #pragma once
+            if (string_starts_with(substr, S("#pragma once")))
+            {
+                index += S("#pragma once").count;
+                continue;
+            }
+
+            // NOTE(nick): handle includes
+            if (string_starts_with(substr, S("#include \"")))
+            {
+                i64 start = index + S("#include \"").count;
+
+                index = start;
+                while (index < content.count && content.data[index] != '"') index += 1;
+
+                String file_name = string_slice(content, start, index);
+                String include_path = path_join(path_dirname(in_file), file_name);
+                if (!na_inliner__file(include_path, output))
+                {
+                    fprintf(output, "#include \"%.*s\"", LIT(file_name));
+                    continue;
+                }
+
+                index += 1;
+                continue;
             }
         }
 

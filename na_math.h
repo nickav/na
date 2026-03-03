@@ -68,6 +68,8 @@ VERSION HISTORY
 // NOTE(nick): shared imports to make this standalone
 //
 
+#ifndef BASE_TYPES_H
+
 #define function static
 
 #define Min(a, b) (((a) < (b)) ? (a) : (b))
@@ -79,10 +81,21 @@ VERSION HISTORY
 #define Abs(x) (((x) < 0) ? (0u - (x)) : (0u + (x)))
 
 #if !defined(__cplusplus) && !defined(bool)
-    #define bool int
+    #ifdef __STDC_VERSION__ // >= C99
+        #ifndef bool
+        #define bool _Bool
+        #endif
+    #else
+        #ifndef bool
+        #define bool int
+        #endif
+    #endif
+
     #define true 1
     #define false 0
 #endif
+
+#endif // BASE_TYPES_H
 
 #ifndef U8_MAX
 

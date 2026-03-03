@@ -256,11 +256,11 @@ static const int __arch_endian_check_num = 1;
 //
 
 #ifndef function
-#define function       static
+#define function static
 #endif
 
 #ifndef local_persist
-#define local_persist  static
+#define local_persist static
 #endif
 
 #ifndef export_function
@@ -398,13 +398,7 @@ static const int __arch_endian_check_num = 1;
 #define count_of ArrayCount
 #define offset_of OffsetOf
 #define align_of AlignOf
-    
-#if LANG_CPP
-    #define cast(T) (T)
-#else
-    #define cast(T) (T)
-    // #define cast(T) static_cast<T>
-#endif
+#define cast(T) (T)
 
 #define array_of(x) {(x),count_of(x)}
 
@@ -420,16 +414,18 @@ static const int __arch_endian_check_num = 1;
     #endif
 #endif
 
-#define DefineStruct(Type) typedef struct Type Type
+#define Struct(Type) typedef struct Type Type; struct Type
 
 #if LANG_C
-    #define Struct(Type) typedef struct Type Type; struct Type
-    #define StructLit(Type) (Type)
-    // #define Enum(Type) typedef enum Type Type; enum Type
+    #define Enum(Type, Storage) typedef Storage Type; enum
 #else
-    #define Struct(Type) struct Type
+    #define Enum(Type, Storage) enum Type : Storage
+#endif
+
+#if LANG_C
+    #define StructLit(Type) (Type)
+#else
     #define StructLit(Type) Type
-    // #define Enum(Type) enum Type
 #endif
     
 //
@@ -506,7 +502,6 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
 
 #define Defer(start, end) for (int CONCAT(__i, __LINE__) = ((start), 0); !CONCAT(__i, __LINE__); CONCAT(__i, __LINE__) += 1, (end))
 
-
 #if LANG_CPP
     // Defer macro/thing.
     template<typename T>
@@ -526,7 +521,7 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
     };
 
     #define defer const auto& CONCAT(defer__, __LINE__) = ExitScopeHelp() + [&]()
-#endif // LANG_CPP
+#endif
 
 //
 // Types
@@ -536,7 +531,7 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
     #define NULL 0
 #endif
 
-#if LANG_C
+#if LANG_C && !defined(bool)
     #ifdef __STDC_VERSION__ // >= C99
         #ifndef bool
         #define bool _Bool
@@ -547,13 +542,8 @@ zchk(p) ? (zset((n)->prev), (n)->next = (f), (zchk(f) ? (0) : ((f)->prev = (n)))
         #endif
     #endif
 
-    #ifndef true
     #define true 1
-    #endif
-
-    #ifndef false
     #define false 0
-    #endif
 #endif
 
 
@@ -616,14 +606,19 @@ struct MemberOffset
     #define Breakpoint() __builtin_trap()
 #endif
 
-function int na__assert(bool cond, const char *expr, const char *file, long int line, const char *msg) {
+#include <stdarg.h>
+
+function int na__assert(bool cond, const char *expr, const char *file, long int line, const char *fmt, ...) {
     if (!cond) {
         printf("%s(%ld): %s: ", file, line, "Assertion Failed");
         if (expr) {
             printf( "`%s` ", expr);
         }
-        if (msg) {
-            printf("- %s", msg);
+        if (fmt) {
+            va_list args;
+            va_start(args, fmt);
+            vprintf(fmt, args);
+            va_end(args);
         }
         printf("\n");
         fflush(stdout);
@@ -642,7 +637,7 @@ function int na__assert(bool cond, const char *expr, const char *file, long int 
 #define assert(expr) na__assert(!!(expr), #expr, __FILE__, __LINE__, NULL)
 
 #undef assertf
-#define assertf(expr, msg) na__assert(!!(expr), #expr, __FILE__, __LINE__, (msg))
+#define assertf(expr, fmt, ...) na__assert(!!(expr), #expr, __FILE__, __LINE__, (fmt), __VA_ARGS__)
 
 
 #if LANG_C
@@ -683,19 +678,6 @@ function int na__assert(bool cond, const char *expr, const char *file, long int 
 // TODO(nick): implement these
 #define Likely(x) (x)
 #define Unlikely(x) (x)
-
-#define TestFunction(Name) bool Name()
-#define TestAssert(Cond) do { if (!(Cond)) return false; } while(0)
-#define TestAssertM(Cond, Message) do { if (!(Cond)) { print(Message); print("\n"); return false; } } while(0)
-#define TestAssertF(Cond, Message, ...) do { if (!(Cond)) { print(Message, __VA_ARGS__); print("\n"); return false; } } while(0)
-#define TestEntry(Proc) StructLit(TestFunction_Entry){Proc, #Proc}
-
-typedef struct TestFunction_Entry TestFunction_Entry;
-struct TestFunction_Entry
-{
-    bool (*fn)();
-    const char *name;
-};
 
 
 #endif // BASE_TYPES_H
@@ -1517,8 +1499,10 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #if OS_WINDOWS
     #pragma push_macro("function")
 #pragma push_macro("Free")
+#pragma push_macro("Enum")
 #undef function
 #undef Free
+#undef Enum
 #define WIN32_LEAN_AND_MEAN
 #define VC_EXTRALEAN
 #define NOMINMAX
@@ -1527,6 +1511,7 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 #include <intrin.h>
 #pragma pop_macro("function")
 #pragma pop_macro("Free")
+#pragma pop_macro("Enum")
 #elif OS_MACOS
 #elif OS_LINUX
 #else
@@ -7621,5 +7606,6 @@ function b32 table__exists(Raw_Table *it, u64 hash_size, u64 key_size, u64 item_
     return result;
 }
 
-#endif
-#endif
+
+#endif // NA_H_IMPL
+#endif // impl
