@@ -1,5 +1,5 @@
 /*
-    na.h - v0.08
+    na.h - v0.10
     Nick Aversano's C/C++ helper library
 
     This is a single header file with a bunch of useful stuff
@@ -22,6 +22,7 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.10  - simplified array and table macros
     0.09  - linux support
     0.08  - bug fixes, fix arena alignment on MacOS ARM
     0.07  - bug fixes
