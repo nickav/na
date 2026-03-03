@@ -1061,6 +1061,14 @@ function Vector2 clamp_v2(Vector2 a, Vector2 min, Vector2 max) {
 
 #if LANG_CPP
 
+function bool operator==(const Vector2 &a, const Vector2 &b) {
+    return v2_equals(a, b);
+}
+
+function bool operator!=(const Vector2 &a, const Vector2 &b) {
+    return !v2_equals(a, b);
+}
+
 function Vector2 operator+(Vector2 a, Vector2 b) {
     return v2_add(a, b);
 }
@@ -1176,6 +1184,14 @@ function Vector2i v2i_mul(Vector2i a, Vector2i b) {
 }
 
 #if LANG_CPP
+
+function bool operator==(const Vector2i &a, const Vector2i &b) {
+    return v2i_equals(a, b);
+}
+
+function bool operator!=(const Vector2i &a, const Vector2i &b) {
+    return !v2i_equals(a, b);
+}
 
 function Vector2i operator+(Vector2i a, Vector2i b) {
     return v2i_add(a, b);
@@ -1399,6 +1415,14 @@ function Vector3 ceil_v3(Vector3 a) {
 
 #if LANG_CPP
 
+function bool operator==(const Vector3 &a, const Vector3 &b) {
+    return v3_equals(a, b);
+}
+
+function bool operator!=(const Vector3 &a, const Vector3 &b) {
+    return !v3_equals(a, b);
+}
+
 function Vector3 operator+(Vector3 a, Vector3 b) {
     return v3_add(a, b);
 }
@@ -1520,7 +1544,12 @@ function Vector4 v4_from_v3f(Vector3 v, f32 w) {
     return result;
 }
 
-function Vector4 rgba(f32 r, f32 g, f32 b, f32 a) {
+function Vector4 v4_from_v4f(Vector4 v, f32 w) {
+    Vector4 result = {v.x, v.y, v.z, w};
+    return result;
+}
+
+function Vector4 v4_rgba(f32 r, f32 g, f32 b, f32 a) {
     assert(r >= 0 && r <= 255);
     assert(b >= 0 && b <= 255);
     assert(g >= 0 && g <= 255);
@@ -1530,8 +1559,8 @@ function Vector4 rgba(f32 r, f32 g, f32 b, f32 a) {
     return result;
 }
 
-function Vector4 rgb(f32 r, f32 g, f32 b) {
-    return rgba(r, g, b, 1);
+function Vector4 v4_rgb(f32 r, f32 g, f32 b) {
+    return v4_rgba(r, g, b, 1);
 }
 
 function b32 v4_equals(Vector4 a, Vector4 b) {
