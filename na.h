@@ -1098,6 +1098,75 @@ function CLI_Argument string_parse_argument(String_Array array, i64 index);
     #define Dump4(x, y, z, w)
 #endif
 
+
+#if !defined(PrintToBuffer) && defined(STB_SPRINTF_H_INCLUDE)
+
+#if OS_WINDOWS
+
+    #include "engine/os/win32/win32_main.h"
+
+    static char *win32__print_callback(const char *buf, void *user, int len) {
+        DWORD bytes_written;
+        HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        WriteFile(handle, buf, len, &bytes_written, 0);
+        return (char *)buf;
+    }
+
+    __PrintFunction(1,2)
+    static void win32__print(__FormatString const char *format, ...) {
+        char buffer[1024];
+
+        va_list args;
+        va_start(args, format);
+        stbsp_vsprintfcb(win32__print_callback, 0, buffer, format, args);
+        va_end(args);
+    }
+
+    #define PrintToBuffer stbsp_vsnprintf
+    #define print(...) win32__print(__VA_ARGS__)
+
+#endif // OS_WINDOWS
+
+#if OS_MACOS || OS_LINUX
+    static char *unix__print_callback(const char *buf, void *user, int len) {
+        fprintf(stdout, "%.*s", len, buf);
+        return (char *)buf;
+    }
+
+    __PrintFunction(1,2)
+    static void unix__print(const char *format, ...) {
+        char buffer[1024];
+
+        va_list args;
+        va_start(args, format);
+        stbsp_vsprintfcb(unix__print_callback, 0, buffer, format, args);
+        fflush(stdout);
+
+        va_end(args);
+    }
+
+    #define PrintToBuffer stbsp_vsnprintf
+    #define print unix__print
+#endif // OS_MACOS || OS_LINUX
+
+#endif // !defined(PrintToBuffer) && defined(STB_SPRINTF_H_INCLUDE)
+    
+#if !defined(PrintToBuffer)
+
+#include <stdio.h>
+#define PrintToBuffer vsnprintf
+#define print na__print
+
+static void na__print(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+    fflush(stdout);
+}
+
+#endif // PrintToBuffer
+
 #endif // BASE_STRINGS_H
 #ifndef BASE_FUNCTIONS_H
 #define BASE_FUNCTIONS_H
@@ -2101,81 +2170,6 @@ function Allocator arena_allocator(Arena *arena)
 //
 
 #include <stdarg.h>
-
-
-#if !defined(PrintToBuffer) && defined(STB_SPRINTF_H_INCLUDE)
-
-#if OS_WINDOWS
-
-    function char *win32__print_callback(const char *buf, void *user, int len) {
-        DWORD bytes_written;
-        HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        WriteFile(handle, buf, len, &bytes_written, 0);
-        return (char *)buf;
-    }
-
-    #define PrintToBuffer stbsp_vsnprintf
-
-    __PrintFunction(1,2)
-    function void win32__print(__FormatString const char *format, ...) {
-        char buffer[1024];
-
-        va_list args;
-        va_start(args, format);
-        stbsp_vsprintfcb(win32__print_callback, 0, buffer, format, args);
-        va_end(args);
-    }
-
-    #if COMPILER_MSVC
-        // NOTE(nick): force MSVC to check the arguments to this function
-        // #define print(...) (false && printf(__VA_ARGS__), win32__print(__VA_ARGS__))
-        #define print(...) win32__print(__VA_ARGS__)
-    #elif COMPILER_CLANG
-        #define print(...) win32__print(__VA_ARGS__)
-    #endif
-
-#endif // OS_WINDOWS
-
-#if OS_MACOS || OS_LINUX
-    char *unix__print_callback(const char *buf, void *user, int len) {
-        fprintf(stdout, "%.*s", len, buf);
-        return (char *)buf;
-    }
-
-    __PrintFunction(1,2)
-    void unix__print(const char *format, ...) {
-        char buffer[1024];
-
-        va_list args;
-        va_start(args, format);
-        stbsp_vsprintfcb(unix__print_callback, 0, buffer, format, args);
-        fflush(stdout);
-
-        va_end(args);
-    }
-
-    #define PrintToBuffer stbsp_vsnprintf
-    #define print unix__print
-#endif // OS_MACOS || OS_LINUX
-
-#endif // !defined(PrintToBuffer) && defined(STB_SPRINTF_H_INCLUDE)
-    
-#ifndef PrintToBuffer
-
-#include <stdio.h>
-#define PrintToBuffer vsnprintf
-#define print na__print
-
-void na__print(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-
-    fflush(stdout);
-}
-
-#endif // PrintToBuffer
 
 #if OS_WINDOWS
     #define PATH_SEP '\\'
@@ -4313,7 +4307,9 @@ function void timing_update(Timing_f64 *it, f64 current, u64 fps)
 //
 
 #if OS_WINDOWS
-    #pragma push_macro("function")
+    #ifndef NA_WINDOWS_H
+
+#pragma push_macro("function")
 #pragma push_macro("Free")
 #pragma push_macro("Enum")
 #undef function
@@ -4328,6 +4324,512 @@ function void timing_update(Timing_f64 *it, f64 current, u64 fps)
 #pragma pop_macro("function")
 #pragma pop_macro("Free")
 #pragma pop_macro("Enum")
+
+#else
+
+#ifndef WIN32_MIN_H
+#define WIN32_MIN_H
+
+#include <stdint.h>
+
+// ============================================================
+// Compiler / calling conventions
+// ============================================================
+
+#define WINAPI   __stdcall
+#define APIENTRY __stdcall
+#define CALLBACK __stdcall
+#define WINBASEAPI __declspec(dllimport)
+#define WINUSERAPI __declspec(dllimport)
+#define DECLSPEC_IMPORT __declspec(dllimport)
+
+// ============================================================
+// Primitive types
+// ============================================================
+
+typedef void                VOID;
+typedef void               *PVOID;
+typedef void               *LPVOID;
+typedef const void         *LPCVOID;
+
+typedef int                 INT;
+typedef unsigned int        UINT;
+typedef long                LONG;
+typedef unsigned long       ULONG;
+typedef unsigned long       DWORD;
+typedef short               SHORT;
+typedef unsigned short      USHORT;
+typedef unsigned short      WORD;
+typedef unsigned char       BYTE;
+typedef int                 BOOL;
+typedef long long           LONGLONG;
+typedef unsigned long long  ULONGLONG;
+
+typedef DWORD              *LPDWORD;
+typedef BOOL               *LPBOOL;
+typedef BYTE               *LPBYTE;
+typedef LONG               *LPLONG;
+
+typedef wchar_t             WCHAR;
+typedef WCHAR              *LPWSTR;
+typedef const WCHAR        *LPCWSTR;
+typedef char               *LPSTR;
+typedef const char         *LPCSTR;
+
+#if defined(_WIN64)
+  typedef unsigned __int64  SIZE_T;
+  typedef __int64           INT_PTR;
+  typedef unsigned __int64  UINT_PTR;
+  typedef unsigned __int64  ULONG_PTR;
+#else
+  typedef unsigned long     SIZE_T;
+  typedef long              INT_PTR;
+  typedef unsigned long     UINT_PTR;
+  typedef unsigned long     ULONG_PTR;
+#endif
+
+#ifndef TRUE
+  #define TRUE  1
+#endif
+#ifndef FALSE
+  #define FALSE 0
+#endif
+#ifndef NULL
+  #define NULL  0
+#endif
+
+// ============================================================
+// Handles
+// ============================================================
+
+#define DECLARE_HANDLE(name) typedef struct name##__ { int unused; } *name
+
+typedef void *HANDLE;
+DECLARE_HANDLE(HWND);
+DECLARE_HANDLE(HMODULE);
+DECLARE_HANDLE(HINSTANCE);
+DECLARE_HANDLE(HGLOBAL);
+
+typedef INT_PTR (WINAPI *FARPROC)(void);
+
+#define INVALID_HANDLE_VALUE ((HANDLE)(INT_PTR)-1)
+
+// ============================================================
+// LARGE_INTEGER
+// ============================================================
+
+typedef union _LARGE_INTEGER {
+    struct { DWORD LowPart; LONG HighPart; };
+    LONGLONG QuadPart;
+} LARGE_INTEGER;
+
+// ============================================================
+// OVERLAPPED
+// ============================================================
+
+typedef struct _OVERLAPPED {
+    ULONG_PTR Internal;
+    ULONG_PTR InternalHigh;
+    union {
+        struct { DWORD Offset; DWORD OffsetHigh; };
+        PVOID Pointer;
+    };
+    HANDLE hEvent;
+} OVERLAPPED;
+
+// ============================================================
+// SYSTEM_INFO
+// ============================================================
+
+typedef struct _SYSTEM_INFO {
+    union {
+        DWORD dwOemId;
+        struct { WORD wProcessorArchitecture; WORD wReserved; };
+    };
+    DWORD     dwPageSize;
+    PVOID     lpMinimumApplicationAddress;
+    PVOID     lpMaximumApplicationAddress;
+    ULONG_PTR dwActiveProcessorMask;
+    DWORD     dwNumberOfProcessors;
+    DWORD     dwProcessorType;
+    DWORD     dwAllocationGranularity;
+    WORD      wProcessorLevel;
+    WORD      wProcessorRevision;
+} SYSTEM_INFO;
+
+// ============================================================
+// SYSTEMTIME / FILETIME
+// ============================================================
+
+typedef struct _SYSTEMTIME {
+    WORD wYear, wMonth, wDayOfWeek, wDay;
+    WORD wHour, wMinute, wSecond, wMilliseconds;
+} SYSTEMTIME;
+
+typedef struct _FILETIME {
+    DWORD dwLowDateTime;
+    DWORD dwHighDateTime;
+} FILETIME;
+
+// ============================================================
+// File / directory structs
+// ============================================================
+
+typedef struct _WIN32_FIND_DATAW {
+    DWORD    dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
+    DWORD    nFileSizeHigh;
+    DWORD    nFileSizeLow;
+    DWORD    dwReserved0;
+    DWORD    dwReserved1;
+    WCHAR    cFileName[260];
+    WCHAR    cAlternateFileName[14];
+} WIN32_FIND_DATAW;
+
+typedef enum _GET_FILEEX_INFO_LEVELS {
+    GetFileExInfoStandard,
+    GetFileExMaxInfoLevel
+} GET_FILEEX_INFO_LEVELS;
+
+typedef struct _WIN32_FILE_ATTRIBUTE_DATA {
+    DWORD    dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
+    DWORD    nFileSizeHigh;
+    DWORD    nFileSizeLow;
+} WIN32_FILE_ATTRIBUTE_DATA;
+
+#define FILE_ATTRIBUTE_READONLY   0x00000001
+#define FILE_ATTRIBUTE_HIDDEN     0x00000002
+#define FILE_ATTRIBUTE_SYSTEM     0x00000004
+#define FILE_ATTRIBUTE_DIRECTORY  0x00000010
+
+#define GENERIC_READ              0x80000000
+#define GENERIC_WRITE             0x40000000
+#define FILE_LIST_DIRECTORY       0x00000001
+#define FILE_SHARE_READ           0x00000001
+#define FILE_SHARE_WRITE          0x00000002
+#define FILE_SHARE_DELETE         0x00000004
+#define OPEN_EXISTING             3
+#define OPEN_ALWAYS               4
+#define CREATE_ALWAYS             2
+
+#define FILE_FLAG_WRITE_THROUGH       0x80000000
+#define FILE_FLAG_OVERLAPPED          0x40000000
+#define FILE_FLAG_NO_BUFFERING        0x20000000
+#define FILE_FLAG_RANDOM_ACCESS       0x10000000
+#define FILE_FLAG_SEQUENTIAL_SCAN     0x08000000
+#define FILE_FLAG_DELETE_ON_CLOSE     0x04000000
+#define FILE_FLAG_BACKUP_SEMANTICS    0x02000000
+#define FILE_FLAG_POSIX_SEMANTICS     0x01000000
+
+// File change notification filter flags
+#define FILE_NOTIFY_CHANGE_FILE_NAME  0x00000001
+#define FILE_NOTIFY_CHANGE_DIR_NAME   0x00000002
+#define FILE_NOTIFY_CHANGE_ATTRIBUTES 0x00000004
+#define FILE_NOTIFY_CHANGE_SIZE       0x00000008
+#define FILE_NOTIFY_CHANGE_LAST_WRITE 0x00000010
+#define FILE_NOTIFY_CHANGE_LAST_ACCESS 0x00000020
+#define FILE_NOTIFY_CHANGE_CREATION   0x00000040
+#define FILE_NOTIFY_CHANGE_SECURITY   0x00000100
+
+// FILE_NOTIFY_INFORMATION action codes
+#define FILE_ACTION_ADDED             0x00000001
+#define FILE_ACTION_REMOVED           0x00000002
+#define FILE_ACTION_MODIFIED          0x00000003
+#define FILE_ACTION_RENAMED_OLD_NAME  0x00000004
+#define FILE_ACTION_RENAMED_NEW_NAME  0x00000005
+
+typedef struct _FILE_NOTIFY_INFORMATION {
+    DWORD NextEntryOffset;
+    DWORD Action;
+    DWORD FileNameLength;
+    WCHAR FileName[1];
+} FILE_NOTIFY_INFORMATION;
+
+// ============================================================
+// Memory flags
+// ============================================================
+
+#define MEM_COMMIT                0x00001000
+#define MEM_RESERVE               0x00002000
+#define MEM_DECOMMIT              0x00004000
+#define MEM_RELEASE               0x00008000
+#define PAGE_READWRITE            0x04
+
+// ============================================================
+// Synchronization
+// ============================================================
+
+// Must match RTL_SRWLOCK layout exactly (one pointer-width field).
+typedef struct _RTL_SRWLOCK { PVOID Ptr; } RTL_SRWLOCK;
+typedef RTL_SRWLOCK SRWLOCK;
+#define SRWLOCK_INIT {0}
+
+// Must match RTL_CRITICAL_SECTION layout; na.h heap-allocates this struct.
+typedef struct _RTL_CRITICAL_SECTION {
+    PVOID     DebugInfo;
+    LONG      LockCount;
+    LONG      RecursionCount;
+    HANDLE    OwningThread;
+    HANDLE    LockSemaphore;
+    ULONG_PTR SpinCount;
+} CRITICAL_SECTION, *LPCRITICAL_SECTION;
+
+#define SEMAPHORE_ALL_ACCESS 0x1F0003
+#define INFINITE             0xFFFFFFFF
+#define WAIT_FAILED          0xFFFFFFFF
+#define WAIT_OBJECT_0        0x00000000
+
+// ============================================================
+// Security attributes
+// ============================================================
+
+typedef struct _SECURITY_ATTRIBUTES {
+    DWORD  nLength;
+    LPVOID lpSecurityDescriptor;
+    BOOL   bInheritHandle;
+} SECURITY_ATTRIBUTES, *LPSECURITY_ATTRIBUTES;
+
+// ============================================================
+// Thread / process
+// ============================================================
+
+typedef DWORD (WINAPI *LPTHREAD_START_ROUTINE)(LPVOID lpThreadParameter);
+
+typedef struct _STARTUPINFOA {
+    DWORD  cb;
+    LPSTR  lpReserved, lpDesktop, lpTitle;
+    DWORD  dwX, dwY, dwXSize, dwYSize;
+    DWORD  dwXCountChars, dwYCountChars;
+    DWORD  dwFillAttribute, dwFlags;
+    WORD   wShowWindow, cbReserved2;
+    LPBYTE lpReserved2;
+    HANDLE hStdInput, hStdOutput, hStdError;
+} STARTUPINFOA;
+
+typedef struct _PROCESS_INFORMATION {
+    HANDLE hProcess, hThread;
+    DWORD  dwProcessId, dwThreadId;
+} PROCESS_INFORMATION;
+
+#define HIGH_PRIORITY_CLASS           0x00000080
+#define NORMAL_PRIORITY_CLASS         0x00000020
+#define THREAD_PRIORITY_TIME_CRITICAL 15
+#define THREAD_PRIORITY_NORMAL        0
+#define DETACHED_PROCESS              0x00000008
+#define ATTACH_PARENT_PROCESS         ((DWORD)-1)
+
+// ============================================================
+// Console / clipboard / shell constants
+// ============================================================
+
+#define STD_OUTPUT_HANDLE  ((DWORD)-11)
+#define CF_UNICODETEXT     13
+#define GMEM_MOVEABLE      0x0002
+#define SW_SHOW            5
+#define SW_HIDE            0
+#define CP_UTF8            65001
+#define CSIDL_APPDATA      0x001a
+#define SUCCEEDED(hr)      ((LONG)(hr) >= 0)
+
+// ============================================================
+// MSVC intrinsics
+// ============================================================
+
+unsigned int  __cdecl _rotl(unsigned int value, int shift);
+unsigned int  __cdecl _rotr(unsigned int value, int shift);
+long          __cdecl _InterlockedCompareExchange(long volatile *dest, long exchange, long comparand);
+__int64       __cdecl _InterlockedExchange64(__int64 volatile *dest, __int64 value);
+__int64       __cdecl _InterlockedExchangeAdd64(__int64 volatile *dest, __int64 value);
+unsigned __int64 __cdecl __readgsqword(unsigned long offset);
+unsigned __int64 __cdecl __rdtsc(void);
+
+// ============================================================
+// Kernel32 — memory
+// ============================================================
+
+WINBASEAPI PVOID  WINAPI VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+WINBASEAPI BOOL   WINAPI VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
+WINBASEAPI VOID   WINAPI GetSystemInfo(SYSTEM_INFO *lpSystemInfo);
+
+// ============================================================
+// Kernel32 — timing / sleep
+// ============================================================
+
+WINBASEAPI BOOL   WINAPI QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency);
+WINBASEAPI BOOL   WINAPI QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount);
+WINBASEAPI HANDLE WINAPI CreateWaitableTimerW(LPSECURITY_ATTRIBUTES lpTimerAttributes, BOOL bManualReset, LPCWSTR lpTimerName);
+WINBASEAPI BOOL   WINAPI SetWaitableTimer(HANDLE hTimer, const LARGE_INTEGER *lpDueTime, LONG lPeriod, PVOID pfnCompletionRoutine, PVOID lpArgToCompletionRoutine, BOOL fResume);
+WINBASEAPI DWORD  WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+WINBASEAPI VOID   WINAPI Sleep(DWORD dwMilliseconds);
+
+// ============================================================
+// Kernel32 — files
+// ============================================================
+
+WINBASEAPI HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+WINBASEAPI HANDLE WINAPI CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+WINBASEAPI BOOL   WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, OVERLAPPED *lpOverlapped);
+WINBASEAPI BOOL   WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, OVERLAPPED *lpOverlapped);
+WINBASEAPI BOOL   WINAPI GetFileSizeEx(HANDLE hFile, LARGE_INTEGER *lpFileSize);
+WINBASEAPI BOOL   WINAPI CloseHandle(HANDLE hObject);
+WINBASEAPI BOOL   WINAPI GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, PVOID lpFileInformation);
+WINBASEAPI BOOL   WINAPI FileTimeToSystemTime(const FILETIME *lpFileTime, SYSTEMTIME *lpSystemTime);
+WINBASEAPI BOOL   WINAPI DeleteFileW(LPCWSTR lpFileName);
+WINBASEAPI BOOL   WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
+WINBASEAPI BOOL   WINAPI CopyFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, BOOL bFailIfExists);
+WINBASEAPI BOOL   WINAPI CreateDirectoryW(LPCWSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
+WINBASEAPI BOOL   WINAPI RemoveDirectoryW(LPCWSTR lpPathName);
+WINBASEAPI HANDLE WINAPI FindFirstFileW(LPCWSTR lpFileName, WIN32_FIND_DATAW *lpFindFileData);
+WINBASEAPI BOOL   WINAPI FindNextFileW(HANDLE hFindFile, WIN32_FIND_DATAW *lpFindFileData);
+WINBASEAPI BOOL   WINAPI FindClose(HANDLE hFindFile);
+WINBASEAPI DWORD  WINAPI GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer);
+WINBASEAPI DWORD  WINAPI GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize);
+
+// ============================================================
+// Kernel32 — process / thread
+// ============================================================
+
+WINBASEAPI VOID   WINAPI ExitProcess(UINT uExitCode);
+WINBASEAPI BOOL   WINAPI SetPriorityClass(HANDLE hProcess, DWORD dwPriorityClass);
+WINBASEAPI BOOL   WINAPI SetThreadPriority(HANDLE hThread, INT nPriority);
+WINBASEAPI HANDLE WINAPI GetCurrentProcess(VOID);
+WINBASEAPI HANDLE WINAPI GetCurrentThread(VOID);
+WINBASEAPI DWORD  WINAPI GetCurrentProcessId(VOID);
+WINBASEAPI HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId);
+WINBASEAPI DWORD  WINAPI SuspendThread(HANDLE hThread);
+WINBASEAPI DWORD  WINAPI ResumeThread(HANDLE hThread);
+WINBASEAPI BOOL   WINAPI GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode);
+WINBASEAPI BOOL   WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags, LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, STARTUPINFOA *lpStartupInfo, PROCESS_INFORMATION *lpProcessInformation);
+WINBASEAPI BOOL   WINAPI AttachConsole(DWORD dwProcessId);
+WINBASEAPI HANDLE WINAPI GetStdHandle(DWORD nStdHandle);
+
+// ============================================================
+// Kernel32 — library
+// ============================================================
+
+WINBASEAPI HMODULE WINAPI LoadLibraryA(LPCSTR lpLibFileName);
+WINBASEAPI HMODULE WINAPI LoadLibraryW(LPCWSTR lpLibFileName);
+WINBASEAPI BOOL    WINAPI FreeLibrary(HMODULE hLibModule);
+WINBASEAPI FARPROC WINAPI GetProcAddress(HMODULE hModule, LPCSTR lpProcName);
+
+// ============================================================
+// Kernel32 — synchronization
+// ============================================================
+
+WINBASEAPI HANDLE WINAPI CreateSemaphoreExA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount, LPCSTR lpName, DWORD dwFlags, DWORD dwDesiredAccess);
+WINBASEAPI BOOL   WINAPI ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, LPLONG lpPreviousCount);
+WINBASEAPI VOID   WINAPI AcquireSRWLockExclusive(SRWLOCK *SRWLock);
+WINBASEAPI VOID   WINAPI ReleaseSRWLockExclusive(SRWLOCK *SRWLock);
+WINBASEAPI VOID   WINAPI InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+WINBASEAPI DWORD  WINAPI SetCriticalSectionSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount);
+WINBASEAPI VOID   WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+WINBASEAPI BOOL   WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+WINBASEAPI VOID   WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+WINBASEAPI VOID   WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+
+// ============================================================
+// Kernel32 — global heap
+// ============================================================
+
+WINBASEAPI HGLOBAL WINAPI GlobalAlloc(UINT uFlags, SIZE_T dwBytes);
+WINBASEAPI LPVOID  WINAPI GlobalLock(HGLOBAL hMem);
+WINBASEAPI BOOL    WINAPI GlobalUnlock(HGLOBAL hMem);
+WINBASEAPI HGLOBAL WINAPI GlobalFree(HGLOBAL hMem);
+
+// ============================================================
+// Kernel32 — string / time
+// ============================================================
+
+WINBASEAPI INT  WINAPI MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr, INT cbMultiByte, LPWSTR lpWideCharStr, INT cchWideChar);
+WINBASEAPI VOID WINAPI GetSystemTime(SYSTEMTIME *lpSystemTime);
+WINBASEAPI VOID WINAPI GetLocalTime(SYSTEMTIME *lpSystemTime);
+
+// ============================================================
+// User32 — clipboard / caret
+// ============================================================
+
+WINUSERAPI BOOL   WINAPI OpenClipboard(HWND hWndNewOwner);
+WINUSERAPI BOOL   WINAPI CloseClipboard(VOID);
+WINUSERAPI HANDLE WINAPI GetClipboardData(UINT uFormat);
+WINUSERAPI HANDLE WINAPI SetClipboardData(UINT uFormat, HANDLE hMem);
+WINUSERAPI BOOL   WINAPI EmptyClipboard(VOID);
+WINUSERAPI UINT   WINAPI GetCaretBlinkTime(VOID);
+WINUSERAPI UINT   WINAPI GetDoubleClickTime(VOID);
+
+// ============================================================
+// Shell32
+// ============================================================
+
+__declspec(dllimport) LONG __stdcall SHGetFolderPathW(HWND hwnd, INT csidl, HANDLE hToken, DWORD dwFlags, LPWSTR pszPath);
+
+// Loaded dynamically via GetProcAddress in na.h — typedef only.
+typedef HINSTANCE (WINAPI *ShellExecuteW_t)(HWND hwnd, LPCWSTR lpOperation, LPCWSTR lpFile, LPCWSTR lpParameters, LPCWSTR lpDirectory, INT nShowCmd);
+
+// RtlGenRandom (Advapi32) is also loaded dynamically — no import needed.
+
+// ============================================================
+// User32 — POINT, HRESULT
+// ============================================================
+
+typedef struct tagPOINT { LONG x, y; } POINT;
+typedef LONG HRESULT;
+
+// ============================================================
+// WinMain entry point signature
+// ============================================================
+
+// Ensures `int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)` compiles.
+// The linker entry point is provided by the CRT; no extra declaration needed.
+// HINSTANCE is already declared above.
+
+// ============================================================
+// Kernel32 — events and multi-object wait
+// ============================================================
+
+WINBASEAPI HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCWSTR lpName);
+WINBASEAPI HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName);
+WINBASEAPI BOOL   WINAPI SetEvent(HANDLE hEvent);
+WINBASEAPI BOOL   WINAPI ResetEvent(HANDLE hEvent);
+WINBASEAPI DWORD  WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds);
+
+// ============================================================
+// Kernel32 — I/O completion ports
+// ============================================================
+
+WINBASEAPI HANDLE WINAPI CreateIoCompletionPort(HANDLE FileHandle, HANDLE ExistingCompletionPort, ULONG_PTR CompletionKey, DWORD NumberOfConcurrentThreads);
+WINBASEAPI BOOL   WINAPI GetQueuedCompletionStatus(HANDLE CompletionPort, LPDWORD lpNumberOfBytesTransferred, ULONG_PTR *lpCompletionKey, OVERLAPPED **lpOverlapped, DWORD dwMilliseconds);
+WINBASEAPI BOOL   WINAPI PostQueuedCompletionStatus(HANDLE CompletionPort, DWORD dwNumberOfBytesTransferred, ULONG_PTR dwCompletionKey, OVERLAPPED *lpOverlapped);
+
+// ============================================================
+// Kernel32 — directory change notifications
+// ============================================================
+
+WINBASEAPI HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCWSTR lpName);
+WINBASEAPI HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName);
+#define CreateEvent CreateEventA
+
+WINBASEAPI BOOL   WINAPI SetEvent(HANDLE hEvent);
+WINBASEAPI BOOL   WINAPI ResetEvent(HANDLE hEvent);
+
+WINBASEAPI BOOL WINAPI ReadDirectoryChangesW(
+    HANDLE hDirectory,
+    LPVOID lpBuffer,
+    DWORD nBufferLength,
+    BOOL bWatchSubtree,
+    DWORD dwNotifyFilter,
+    LPDWORD lpBytesReturned,
+    OVERLAPPED *lpOverlapped,
+    PVOID lpCompletionRoutine);
+
+#endif // WIN32_MIN_H
+
+
+#endif // NA_WINDOWS_H
     #pragma comment(lib, "user32")
 #pragma comment(lib, "shell32")
 
