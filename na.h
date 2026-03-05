@@ -1360,6 +1360,7 @@ function void os_file_append_string(File *file, String data);
 function void os_file_print(File *file, char *fmt, ...);
 
 function bool os_file_rename(String from, String to);
+function bool os_copy_file(String src, String dst);
 function bool os_delete_file(String path);
 function bool os_make_directory(String path);
 function bool os_delete_directory(String path);
@@ -4954,6 +4955,16 @@ function bool os_file_rename(String from, String to) {
     return result;
 }
 
+function bool os_copy_file(String src, String dst)
+{
+    M_Temp scratch = GetScratch(0, 0);
+    String16 src16 = string16_from_string(scratch.arena, src);
+    String16 dst16 = string16_from_string(scratch.arena, dst);
+    BOOL result = CopyFileW((WCHAR *)src16.data, (WCHAR *)dst16.data, FALSE);
+    ReleaseScratch(scratch);
+    return result != 0;
+}
+
 function bool os_delete_file(String path) {
     M_Temp scratch = GetScratch(0, 0);
     String16 str = string16_from_string(scratch.arena, path);
@@ -5467,6 +5478,8 @@ function void os_mutex_destroy(Mutex *mutex) {
 #include <pthread.h>
 #include <stdlib.h>
 
+#include <copyfile.h>
+
 #ifndef PATH_MAX
 #define PATH_MAX 2048
 #endif
@@ -5540,6 +5553,17 @@ function String os_get_system_path(Arena *arena, SystemPath path)
     }
 
     return result;
+}
+
+function bool os_copy_file(String src, String dst)
+{
+    M_Temp scratch = GetScratch(0, 0);
+    char *src_cstr = string_to_cstr(scratch.arena, src);
+    char *dst_cstr = string_to_cstr(scratch.arena, dst);
+    // COPYFILE_ALL | COPYFILE_CLONE attempts a reflink first, falls back to copy
+    int result = copyfile(src_cstr, dst_cstr, NULL, COPYFILE_ALL | COPYFILE_CLONE);
+    ReleaseScratch(scratch);
+    return result == 0;
 }
 
 //
@@ -5809,6 +5833,10 @@ function void os_mutex_destroy(Mutex *mutex) {
 #include <stdlib.h>
 #include <linux/limits.h>
 
+#include <fcntl.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
+
 function bool os_init()
 {
     // NOTE(nick): calling these functions initializes their state
@@ -5870,6 +5898,35 @@ function String os_get_system_path(Arena *arena, SystemPath path)
    
     return result;
 }
+
+function bool os_copy_file(String src, String dst)
+{
+    M_Temp scratch = GetScratch(0, 0);
+    char *src_cstr = string_to_cstr(scratch.arena, src);
+    char *dst_cstr = string_to_cstr(scratch.arena, dst);
+    ReleaseScratch(scratch);
+
+    bool result = false;
+
+    int src_fd = open(src_cstr, O_RDONLY);
+    if (src_fd < 0) return false;
+
+    struct stat st;
+    fstat(src_fd, &st);
+
+    int dst_fd = open(dst_cstr, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode);
+    if (dst_fd >= 0)
+    {
+        off_t offset = 0;
+        ssize_t bytes = sendfile(dst_fd, src_fd, &offset, st.st_size);
+        result = bytes == st.st_size;
+        close(dst_fd);
+    }
+
+    close(src_fd);
+    return result;
+}
+
 
 function f64 os_time()
 {
