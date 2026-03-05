@@ -1,6 +1,6 @@
 /*
     na_math.h - v0.04
-    Nick Aversano's C++ math helper library
+    Nick Aversano's C/C++ math helper library
 
     This is a single header file with a bunch of useful math functions.
 ===========================================================================
