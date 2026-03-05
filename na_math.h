@@ -70,7 +70,9 @@ VERSION HISTORY
 
 #ifndef BASE_TYPES_H
 
+#ifndef function
 #define function static
+#endif
 
 #define Min(a, b) (((a) < (b)) ? (a) : (b))
 #define Max(a, b) (((a) > (b)) ? (a) : (b))
@@ -98,6 +100,8 @@ VERSION HISTORY
 #endif // BASE_TYPES_H
 
 #ifndef U8_MAX
+
+#include <stdint.h>
 
 typedef int8_t    i8;
 typedef int16_t   i16;
@@ -133,6 +137,10 @@ typedef void VoidFunction(void);
 #define F64_MAX 1.7976931348623157e+308
 
 #endif // U8_MAX
+
+#ifndef assert
+#include <assert.h>
+#endif // assert
 
 //
 // Types

@@ -1,5 +1,5 @@
 /*
-    na.h - v0.08
+    na.h - v0.10
     Nick Aversano's C/C++ helper library
 
     This is a single header file with a bunch of useful stuff
@@ -22,6 +22,7 @@ CREDITS
     Credits are much appreciated but not required.
 
 VERSION HISTORY
+    0.10  - simplified array and table macros
     0.09  - linux support
     0.08  - bug fixes, fix arena alignment on MacOS ARM
     0.07  - bug fixes
@@ -608,7 +609,8 @@ struct MemberOffset
 
 #include <stdarg.h>
 
-function int na__assert(bool cond, const char *expr, const char *file, long int line, const char *fmt, ...) {
+static int na__assert(bool cond, const char *expr, const char *file, long int line, const char *fmt, ...)
+{
     if (!cond) {
         printf("%s(%ld): %s: ", file, line, "Assertion Failed");
         if (expr) {
@@ -6901,7 +6903,7 @@ struct Raw_Array
     array__free((arena), array__to_Raw_Array_T(it))
 
 #define array_reserve(arena, it, num) \
-    array__grow((arena), array__to_Raw_Array_T(it), (Max((it)->capacity, num) - (it)->capacity))
+    array__grow((arena), array__to_Raw_Array_T(it), (Max((it)->capacity, (num)) - (it)->capacity))
 
 #define array_grow(arena, it, n) \
     array__grow((arena), array__to_Raw_Array_T(it), (n))
