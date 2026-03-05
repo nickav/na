@@ -248,6 +248,7 @@ static const int __arch_endian_check_num = 1;
 #define BASE_TYPES_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -5560,8 +5561,8 @@ function bool os_copy_file(String src, String dst)
     M_Temp scratch = GetScratch(0, 0);
     char *src_cstr = string_to_cstr(scratch.arena, src);
     char *dst_cstr = string_to_cstr(scratch.arena, dst);
-    // COPYFILE_ALL | COPYFILE_CLONE attempts a reflink first, falls back to copy
-    int result = copyfile(src_cstr, dst_cstr, NULL, COPYFILE_ALL | COPYFILE_CLONE);
+    unlink(dst_cstr);
+    int result = copyfile(src_cstr, dst_cstr, NULL, COPYFILE_ALL);
     ReleaseScratch(scratch);
     return result == 0;
 }
@@ -6494,6 +6495,31 @@ function bool os_delete_directory(String path) {
     int result = rmdir(string_to_cstr(scratch.arena, path));
     ReleaseScratch(scratch);
     return result == 0;
+}
+
+//
+// Shell
+//
+
+function bool os_shell_execute(String cmd, String arguments, bool _admin)
+{
+    M_Temp scratch = GetScratch(0, 0);
+
+    char *cmd_cstr  = string_to_cstr(scratch.arena, cmd);
+    char *args_cstr = string_to_cstr(scratch.arena, arguments);
+    String full_cmd = string_print(scratch.arena, "%s %s", cmd_cstr, args_cstr);
+
+    signal(SIGCHLD, SIG_IGN);
+
+    pid_t pid = fork();
+    if (pid < 0) { ReleaseScratch(scratch); return false; }
+    if (pid == 0) {
+        execl("/bin/sh", "sh", "-c", (char *)full_cmd.data, NULL);
+        _exit(1);
+    }
+
+    ReleaseScratch(scratch);
+    return true;
 }
 
 //
