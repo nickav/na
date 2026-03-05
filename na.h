@@ -1499,21 +1499,6 @@ function void work_queue_add_entry(Work_Queue *queue, Worker_Proc *callback, voi
 //
 
 #if OS_WINDOWS
-    #pragma push_macro("function")
-#pragma push_macro("Free")
-#pragma push_macro("Enum")
-#undef function
-#undef Free
-#undef Enum
-#define WIN32_LEAN_AND_MEAN
-#define VC_EXTRALEAN
-#define NOMINMAX
-#include <windows.h>
-#include <Shlobj.h>
-#include <intrin.h>
-#pragma pop_macro("function")
-#pragma pop_macro("Free")
-#pragma pop_macro("Enum")
 #elif OS_MACOS
 #elif OS_LINUX
 #else
@@ -4326,6 +4311,21 @@ function void timing_update(Timing_f64 *it, f64 current, u64 fps)
 //
 
 #if OS_WINDOWS
+    #pragma push_macro("function")
+#pragma push_macro("Free")
+#pragma push_macro("Enum")
+#undef function
+#undef Free
+#undef Enum
+#define WIN32_LEAN_AND_MEAN
+#define VC_EXTRALEAN
+#define NOMINMAX
+#include <windows.h>
+#include <Shlobj.h>
+#include <intrin.h>
+#pragma pop_macro("function")
+#pragma pop_macro("Free")
+#pragma pop_macro("Enum")
     #pragma comment(lib, "user32")
 #pragma comment(lib, "shell32")
 
