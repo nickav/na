@@ -593,3 +593,4 @@ function Hot_Change *hotloader_find_change(Hot_Change_Array events, Hotloader_Fi
 }
 
 #endif // impl
+#endif // NA_HOTLOADER_H
