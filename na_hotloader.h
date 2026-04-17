@@ -191,7 +191,7 @@ function Hot_Change_Array hotloader_get_events(Arena *arena, Hotloader *hot)
                 {
                     change.type      = HotChange_Renamed;
                     change.prev_name = change.name;
-                    change.name      = (String){0};
+                    change.name      = StructLit(String){0};
 
                     if (event->NextEntryOffset)
                     {

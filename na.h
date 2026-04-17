@@ -977,6 +977,8 @@ function i64 string_char_index(String str, u8 search, i64 start_index);
 function i64 string_last_index(String str, String search);
 function b32 string_contains(String str, String search);
 function b32 string_in_bounds(String str, i64 at);
+function String string_split_iter(String text, String search, i64 *index);
+function void string_advance(String str, i64 count);
 
 // Allocation
 function String string_push(Arena *arena, String str);
@@ -2998,6 +3000,12 @@ function String string_split_iter(String text, String search, i64 *index)
     String result = string_slice(text, *index, next_index);
     *index = next_index;
     return result;
+}
+
+function void string_advance(String str, i64 count)
+{
+    str.count -= count;
+    str.data += count;
 }
 
 
