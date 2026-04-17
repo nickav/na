@@ -977,7 +977,7 @@ function i64 string_char_index(String str, u8 search, i64 start_index);
 function i64 string_last_index(String str, String search);
 function b32 string_contains(String str, String search);
 function b32 string_in_bounds(String str, i64 at);
-function void string_advance(String str, i64 count);
+function void string_advance(String *str, i64 count);
 function String string_split_iter(String *text, String search);
 
 // Allocation
@@ -8078,6 +8078,8 @@ struct Raw_Array
 #define array_search(it, key, cmp) (array__search(array__to_Raw_Array_T(&(it)), key, cmp))
 
 #define array_find(it, key, cmp) (array__find(array__to_Raw_Array_T(&(it)), key, cmp))
+    
+#define array_slice(T, arr, s, e) StructLit(T){ (e)-(s), (e)-(s), (arr).data+(s) }
 
 //
 // Array Helpers
