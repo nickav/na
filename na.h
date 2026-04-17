@@ -977,8 +977,8 @@ function i64 string_char_index(String str, u8 search, i64 start_index);
 function i64 string_last_index(String str, String search);
 function b32 string_contains(String str, String search);
 function b32 string_in_bounds(String str, i64 at);
-function String string_split_iter(String text, String search, i64 *index);
 function void string_advance(String str, i64 count);
+function String string_split_iter(String *text, String search);
 
 // Allocation
 function String string_push(Arena *arena, String str);
@@ -2987,25 +2987,24 @@ function b32 string_in_bounds(String str, i64 at) {
     return at < str.count;
 }
 
-function String string_split_iter(String text, String search, i64 *index)
+function void string_advance(String *str, i64 count)
 {
-    i64 next_index = *index+1;
-    while (next_index < text.count-search.count+1)
-    {
-        // @Speed: directly comparing the memory is _much_ faster than using string_slice and string_equals
-        if (MemoryEquals(text.data+next_index, search.data, search.count)) break;
-        next_index += 1;
-    }
-
-    String result = string_slice(text, *index, next_index);
-    *index = next_index;
-    return result;
+    str->count -= count;
+    str->data += count;
 }
 
-function void string_advance(String str, i64 count)
+function String string_split_iter(String *text, String search)
 {
-    str.count -= count;
-    str.data += count;
+    i64 i = 0;
+    while (i < text->count - search.count + 1)
+    {
+        if (MemoryEquals(text->data + i, search.data, search.count)) break;
+        i += 1;
+    }
+
+    String result = string_slice(*text, 0, i);
+    *text = string_slice(*text, i + search.count, text->count);
+    return result;
 }
 
 
