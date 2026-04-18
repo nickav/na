@@ -6802,10 +6802,8 @@ function bool os_shell_open(String path)
 
     // [NSString stringWithUTF8String: str];
     id string = objc_method(id, id, SEL, const char *)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), str);
-    // NSURL *fileURL = [NSURL fileURLWithPath:@"/path/to/user/"];
-    id fileURL = objc_method(id, id, SEL, id)(cast(id)objc_getClass("NSURL"), sel_registerName("fileURLWithPath:"), string);
-
-    BOOL result = objc_method(BOOL, id, SEL, id)(workspace, sel_registerName("openURL:"), fileURL);
+    id url = objc_method(id, id, SEL, id)(cast(id)objc_getClass("NSURL"), sel_registerName("URLWithString:"), string);
+    BOOL result = objc_method(BOOL, id, SEL, id)(workspace, sel_registerName("openURL:"), url);
 
     ReleaseScratch(scratch);
     return result == YES;
