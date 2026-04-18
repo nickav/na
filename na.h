@@ -881,6 +881,12 @@ struct String_List
     u64 total_size;
 };
 
+typedef struct String_Builder String_Builder;
+struct String_Builder
+{
+    String_List list;
+};
+
 typedef struct String_Join_Params String_Join_Params;
 struct String_Join_Params
 {
@@ -1061,6 +1067,12 @@ function void string_to_lower(String *str);
 function void string_to_upper(String *str);
 function String string_lower(Arena *arena, String str);
 function String string_upper(Arena *arena, String str);
+
+// String Builder
+function void sb_push(Arena *arena, String_Builder *builder, String str);
+function void sb_print(Arena *arena, String_Builder *builder, const char *fmt, ...);
+function String sb_to_string(Arena *arena, String_Builder builder);
+function void sb_reset(String_Builder *sb);
 
 // Path Helpers
 function String path_filename(String path);
@@ -4076,6 +4088,34 @@ function String string_upper(Arena *arena, String str)
     String result = string_push(arena, str);
     string_to_upper(&result);
     return result;
+}
+
+//
+// String Builder
+//
+
+function void sb_push(Arena *arena, String_Builder *sb, String str)
+{
+    string_list_push(arena, &sb->list, str);
+}
+
+function void sb_print(Arena *arena, String_Builder *sb, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    String str = string_printv(arena, fmt, args);
+    va_end(args);
+    string_list_push(arena, &sb->list, str);
+}
+
+function String sb_to_string(Arena *arena, String_Builder sb)
+{
+    return string_list_to_string(arena, &sb.list);
+}
+
+function void sb_reset(String_Builder *sb)
+{
+    sb->list = StructLit(String_List){0};
 }
 
 //
