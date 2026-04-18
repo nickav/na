@@ -1638,7 +1638,6 @@ WINBASEAPI BOOL WINAPI ReadDirectoryChangesW(
 
 #endif // WIN32_MIN_H
 
-
 #endif // NA_WINDOWS_H
 
     static char *win32__print_callback(const char *buf, void *user, int len) {
@@ -1970,7 +1969,9 @@ function bool os_copy_file(String src, String dst);
 function bool os_delete_file(String path);
 function bool os_make_directory(String path);
 function bool os_delete_directory(String path);
-function bool os_mkdirp(String path);
+function bool os_make_directory_recursive(String path);
+#define os_mkdir os_make_directory
+#define os_mkdirp os_make_directory_recursive
 
 // File Lister
 function File_Lister *os_file_iter_begin(Arena *arena, String path);
@@ -5397,7 +5398,6 @@ WINBASEAPI BOOL WINAPI ReadDirectoryChangesW(
 
 #endif // WIN32_MIN_H
 
-
 #endif // NA_WINDOWS_H
     #pragma comment(lib, "user32")
 #pragma comment(lib, "shell32")
@@ -7838,25 +7838,29 @@ function File_List os_scan_entire_directory(Arena *arena, String path)
     return result;
 }
 
-function bool os_mkdirp(String path)
+function bool os_make_directory_recursive(String path)
 {
-    i64 index = string_find(path, S("/"), 0, 0);
-
-    while (index < path.count)
+    for (i64 i = 1; i < path.count; i += 1)
     {
-        index = string_find(path, S("/"), index + 1, 0);
-        if (index >= path.count) break;
-
-        String part = string_slice(path, 0, index);
-        if (!os_directory_exists(part)) {
-            bool success = os_make_directory(part);
-            if (!success) return false;
+        if (char_is_slash(path.data[i]))
+        {
+            String s = string_slice(path, 0, i);
+            if (!os_file_exists(s))
+            {
+                if (!os_make_directory(s))
+                {
+                    return false;
+                }
+            }
         }
     }
 
-    if (!os_directory_exists(path)) {
-        bool success = os_make_directory(path);
-        if (!success) return false;
+    if (!os_file_exists(path))
+    {
+        if (!os_make_directory(path))
+        {
+            return false;
+        }
     }
 
     return true;
