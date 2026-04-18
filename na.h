@@ -3789,21 +3789,23 @@ function String string_list_joins(Arena *arena, String_List list, String_Join_Pa
                    sep_count*join.sep.count + join.post.count);
     result.data = PushArray(arena, u8, result.count);
     
-    u8 *ptr = result.data;
-    MemoryCopy(ptr, join.pre.data, join.pre.count);
-    ptr += join.pre.count;
-    for (String_Node *node = list.first; node; node = node->next)
+    if (result.data)
     {
-        MemoryCopy(ptr, node->string.data, node->string.count);
-        ptr += node->string.count;
-        if (node != list.last) {
-            MemoryCopy(ptr, join.sep.data, join.sep.count);
-            ptr += join.sep.count;
+        u8 *ptr = result.data;
+        MemoryCopy(ptr, join.pre.data, join.pre.count);
+        ptr += join.pre.count;
+        for (String_Node *node = list.first; node; node = node->next)
+        {
+            MemoryCopy(ptr, node->string.data, node->string.count);
+            ptr += node->string.count;
+            if (node != list.last) {
+                MemoryCopy(ptr, join.sep.data, join.sep.count);
+                ptr += join.sep.count;
+            }
         }
+        MemoryCopy(ptr, join.post.data, join.post.count);
+        ptr += join.post.count;
     }
-    MemoryCopy(ptr, join.pre.data, join.pre.count);
-    ptr += join.pre.count;
-    
     return result;
 }
 
