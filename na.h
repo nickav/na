@@ -3598,8 +3598,10 @@ function String string_from_string16(Arena *arena, String16 str) {
 // Conversions
 //
 
-function u64 string_to_u64(String string, u32 radix)
+function u64 string_to_u64(String str, u32 radix)
 {
+    str = string_trim_whitespace(str);
+
     assert(2 <= radix && radix <= 16);
     local_persist u8 char_to_value[] =
     {
@@ -3609,15 +3611,18 @@ function u64 string_to_u64(String string, u32 radix)
         0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
     };
     u64 value = 0;
-    for (i64 i = 0; i < string.count; i += 1) {
+    for (i64 i = 0; i < str.count; i += 1) {
         value *= radix;
-        u8 c = string.data[i];
+        u8 c = str.data[i];
         value += char_to_value[(c - 0x30)&0x1F];
     }
     return value;
 }
 
-function i64 string_to_i64(String str, u32 base) {
+function i64 string_to_i64(String str, u32 base)
+{
+    str = string_trim_whitespace(str);
+
     u64 p = 0;
     
     // consume sign
@@ -3671,7 +3676,10 @@ function i64 string_to_i64(String str, u32 base) {
     return result;
 }
 
-function f64 string_to_f64(String string) {
+function f64 string_to_f64(String string)
+{
+    string = string_trim_whitespace(string);
+
     char str[64];
     u64 count = string.count;
     if (count > sizeof(str) - 1)
@@ -3683,7 +3691,10 @@ function f64 string_to_f64(String string) {
     return (atof(str));
 }
 
-function b32 string_to_b32(String str) {
+function b32 string_to_b32(String str)
+{
+    str = string_trim_whitespace(str);
+
     return (
         string_match(str, S("true"), MatchFlag_IgnoreCase) ||
         string_match(str, S("yes"), MatchFlag_IgnoreCase) ||
