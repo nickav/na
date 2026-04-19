@@ -1638,6 +1638,7 @@ WINBASEAPI BOOL WINAPI ReadDirectoryChangesW(
 
 #endif // WIN32_MIN_H
 
+
 #endif // NA_WINDOWS_H
 
     static char *win32__print_callback(const char *buf, void *user, int len) {
@@ -5400,6 +5401,7 @@ WINBASEAPI BOOL WINAPI ReadDirectoryChangesW(
 
 #endif // WIN32_MIN_H
 
+
 #endif // NA_WINDOWS_H
     #pragma comment(lib, "user32")
 #pragma comment(lib, "shell32")
@@ -8123,7 +8125,7 @@ struct Raw_Array
 
 #define array_find(it, key, cmp) (array__find(array__to_Raw_Array_T(&(it)), key, cmp))
     
-#define array_slice(T, arr, s, e) StructLit(T){ (e)-(s), (e)-(s), (arr).data+(s) }
+#define array_slice(T, arr, s, e) StructLit(T){ Min((e)-(s), (arr).count), Min((e)-(s), (arr).count), (arr).data+(s) }
 
 //
 // Array Helpers
