@@ -8136,7 +8136,7 @@ struct Raw_Array
 
 #define array_find(it, key, cmp) (array__find(array__to_Raw_Array_T(&(it)), key, cmp))
     
-#define array_slice(T, arr, s, e) StructLit(T){ Min((e)-(s), (arr).count), Min((e)-(s), (arr).count), (arr).data+(s) }
+#define array_slice(T, arr, s, e) StructLit(T){ Min((e), (arr).count)-(s), Min((e), (arr).count)-(s), (arr).data+(s) }
 
 //
 // Array Helpers
