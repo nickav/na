@@ -2,12 +2,13 @@
 
 single-file public domain libraries for C/C++
 
-library                                 | latest version | category     | description
-----------------------------------------|----------------|--------------|-------------
-[**na.h**](./na.h)                      | 0.11           | base         | Cross-platform helpers
-[**na_math.h**](./na_math.h)            | 0.04           | math         | Math functions
-[**na_net.h**](./na_net.h)              | 0.02           | networking   | Networking library for TCP/UDP and HTTP
-[**na_hotloader.h**](./na_hotloader.h)  | 0.01           | utilities    | File-watcher
+library                                 | latest version | category       | description
+----------------------------------------|----------------|----------------|-------------
+[**na.h**](./na.h)                      | 0.11           | base           | Cross-platform helpers
+[**na_math.h**](./na_math.h)            | 0.04           | math           | Math functions
+[**na_net.h**](./na_net.h)              | 0.02           | networking     | Networking library for TCP/UDP and HTTP
+[**na_hotloader.h**](./na_hotloader.h)  | 0.01           | utilities      | File-watcher
+[**na_window.h**](./na_window.h)        | 0.01           | platform-layer | Cross-platform windowing library
 
 ## Usage
 
