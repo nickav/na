@@ -1079,6 +1079,7 @@ function String path_filename(String path);
 function String path_dirname(String path);
 function String path_extension(String path);
 function String path_strip_extension(String path);
+function String path_sanitize(Arena *arena, String path);
 
 function String path_join2(Arena *arena, String a, String b);
 function String path_join3(Arena *arena, String a, String b, String c);
@@ -1099,12 +1100,16 @@ function CLI_Argument string_parse_argument(String_Array array, i64 index);
 #if DEBUG
     #define Dump(...) ArgSelectHelper4((__VA_ARGS__, Dump4, Dump3, Dump2, Dump1))(__VA_ARGS__)
 
+    #define SDump(x) print("%s = %.*s\n", (#x), (x))
+
     #define Dump1(x) print("%s = %s\n", #x, CStr(to_string(x)))
     #define Dump2(x, y) print("%s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)))
     #define Dump3(x, y, z) print("%s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)))
     #define Dump4(x, y, z, w) print("%s = %s, %s = %s, %s = %s, %s = %s\n", #x, CStr(to_string(x)), #y, CStr(to_string(y)), #z, CStr(to_string(z)), #w, CStr(to_string(w)))
 #else
     #define Dump(...)
+
+    #define SDump(x)
 
     #define Dump1(x)
     #define Dump2(x, y)
@@ -1799,6 +1804,10 @@ function void timing_add_value(Timing_f64 *it, f64 current);
 function void timing_reset(Timing_f64 *it, f64 current);
 function void timing_update(Timing_f64 *it, f64 current, u64 fps);
 
+// Base64
+function String base64_encode(Arena *arena, String input, bool url_safe);
+function String base64_decode(Arena *arena, String input);
+
 #endif // BASE_FUNCTIONS_H
 #ifndef OS_H
 #define OS_H
@@ -1986,6 +1995,13 @@ function bool os_set_clipboard_text(String str);
 // Dates
 function Date_Time os_get_current_time_in_utc();
 function Date_Time os_get_local_time();
+function Dense_Time dense_time_from_date_time(Date_Time in);
+function Date_Time date_time_from_dense_time(Dense_Time in);
+function i32 date_days_in_month(i32 month, i32 year);
+function void date_time_local_to_utc(Date_Time *date, i32 utc_offset_mins);
+function void date_time_utc_to_local(Date_Time *date, i32 utc_offset_mins);
+function String date_time_to_sql_date(Date_Time date);
+function String time_ago(f64 now_secs, f64 then_secs);
 
 // Library
 function OS_Library os_library_load(String path);
@@ -1996,12 +2012,6 @@ function bool os_library_is_loaded(OS_Library lib);
 // Shell
 function bool os_shell_open(String path);
 function bool os_shell_execute(String cmd, String arguments, bool admin);
-
-// Dates
-function Date_Time os_get_current_time_in_utc();
-function Date_Time os_get_local_time();
-function Dense_Time dense_time_from_date_time(Date_Time in);
-function Date_Time date_time_from_dense_time(Dense_Time in);
 
 // Misc.
 function void os_get_entropy(void *data, u64 size);
@@ -4203,6 +4213,28 @@ function String path_strip_extension(String path)
     return result;
 }
 
+function String path_sanitize(Arena *arena, String path)
+{
+    path = string_trim_whitespace(path);
+
+    String result = string_push(arena, path);
+
+    for (i64 i = 0; i < result.count; i++)
+    {
+        u8 c = result.data[i];
+        if (
+            c == '/' || c == '\\' || c == ':' || c == '*' ||
+            c == '?' || c == '"'  || c == '<' || c == '>' ||
+            c == '|' || c == '\0' || c < 32
+        )
+        {
+            result.data[i] = '_';
+        }
+    }
+
+    return result;
+}
+
 function String path_join2(Arena *arena, String a, String b)
 {
     return string_print(arena, "%.*s%c%.*s", LIT(a), PATH_SEP, LIT(b));
@@ -4883,6 +4915,98 @@ function void timing_update(Timing_f64 *it, f64 current, u64 fps)
     }
     
     timing_add_value(it, current);
+}
+
+//
+// Base64
+//
+
+// Unified decode table: accepts both standard (+/) and url-safe (-_)
+// Only change from original: index 45 ('-') is now 62 instead of 64
+static const u8 base64__pr2six[256] = {
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,62,64,62,64,63,
+    52,53,54,55,56,57,58,59,60,61,64,64,64,64,64,64,
+    64, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+    15,16,17,18,19,20,21,22,23,24,25,64,64,64,64,63,
+    64,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+    41,42,43,44,45,46,47,48,49,50,51,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+    64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,
+};
+
+static const char base64__std_mapping[]  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char base64__url_mapping[]  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+String base64_encode(Arena *arena, String input, bool url_safe)
+{
+    const char *map = url_safe ? base64__url_mapping : base64__std_mapping;
+
+    // url-safe omits padding; standard adds '=' to reach multiple of 4
+    i64 raw_len = (input.count + 2) / 3 * 4;
+    i64 out_len = raw_len + 1;
+    u8 *out = PushArray(arena, u8, out_len);
+    u8 *p = out;
+
+    const u8 *s = input.data;
+    i64 len = input.count;
+    i64 i = 0;
+
+    for (; i < len - 2; i += 3) {
+        *p++ = map[(s[i] >> 2) & 0x3F];
+        *p++ = map[((s[i] & 0x3) << 4) | ((s[i+1] & 0xF0) >> 4)];
+        *p++ = map[((s[i+1] & 0xF) << 2) | ((s[i+2] & 0xC0) >> 6)];
+        *p++ = map[s[i+2] & 0x3F];
+    }
+
+    if (i < len) {
+        *p++ = map[(s[i] >> 2) & 0x3F];
+        if (i == len - 1) {
+            *p++ = map[(s[i] & 0x3) << 4];
+            if (!url_safe) { *p++ = '='; *p++ = '='; }
+        } else {
+            *p++ = map[((s[i] & 0x3) << 4) | ((s[i+1] & 0xF0) >> 4)];
+            *p++ = map[(s[i+1] & 0xF) << 2];
+            if (!url_safe) { *p++ = '='; }
+        }
+    }
+
+    *p = '\0';
+    return string_make(out, p - out);
+}
+
+String base64_decode(Arena *arena, String input)
+{
+    const u8 *bufin = input.data;
+    while (base64__pr2six[*bufin] <= 63) bufin++;
+    i64 nprbytes = bufin - input.data;
+
+    i64 out_len = ((nprbytes + 3) / 4) * 3 + 1;
+    u8 *out = PushArray(arena, u8, out_len);
+    u8 *p = out;
+
+    bufin = input.data;
+    while (nprbytes > 4) {
+        *p++ = (base64__pr2six[bufin[0]] << 2) | (base64__pr2six[bufin[1]] >> 4);
+        *p++ = (base64__pr2six[bufin[1]] << 4) | (base64__pr2six[bufin[2]] >> 2);
+        *p++ = (base64__pr2six[bufin[2]] << 6) |  base64__pr2six[bufin[3]];
+        bufin += 4;
+        nprbytes -= 4;
+    }
+
+    if (nprbytes > 1) *p++ = (base64__pr2six[bufin[0]] << 2) | (base64__pr2six[bufin[1]] >> 4);
+    if (nprbytes > 2) *p++ = (base64__pr2six[bufin[1]] << 4) | (base64__pr2six[bufin[2]] >> 2);
+    if (nprbytes > 3) *p++ = (base64__pr2six[bufin[2]] << 6) |  base64__pr2six[bufin[3]];
+
+    *p = '\0';
+    return string_make(out, p - out);
 }
 
 
@@ -7920,6 +8044,78 @@ function Date_Time date_time_from_dense_time(Dense_Time in) {
     result.year = (i16)(year_encoded - 0x8000);
 
     return result;
+}
+
+function i32 date_days_in_month(i32 mon, i32 year)
+{
+    static const i32 d[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+    if (mon == 2)
+    {
+        int leap = (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0);
+        return 28 + leap;
+    }
+    return d[mon];
+}
+
+function void date_time_shift_minutes(Date_Time *dt, int offset_mins)
+{
+    int total_mins = dt->hour * 60 + dt->min + offset_mins;
+
+    int day_delta = 0;
+    if      (total_mins <    0) { total_mins += 1440; day_delta = -1; }
+    else if (total_mins >= 1440) { total_mins -= 1440; day_delta = +1; }
+
+    dt->hour = total_mins / 60;
+    dt->min  = total_mins % 60;
+
+    int day = dt->day + day_delta;
+    int mon = dt->mon;
+    int year = dt->year;
+
+    if (day < 1)
+    {
+        if (--mon < 1) { mon = 12; year--; }
+        day = date_days_in_month(mon, year);
+    }
+    else if (day > date_days_in_month(mon, year))
+    {
+        day = 1;
+        if (++mon > 12) { mon = 1; year++; }
+    }
+
+    dt->day  = day;
+    dt->mon  = mon;
+    dt->year = year;
+}
+
+function void date_time_local_to_utc(Date_Time *date, i32 utc_offset_mins)
+{
+    date_time_shift_minutes(date, -utc_offset_mins);
+}
+
+function void date_time_utc_to_local(Date_Time *date, i32 utc_offset_mins)
+{
+    date_time_shift_minutes(date, utc_offset_mins);
+}
+
+function String date_time_to_sql_date(Date_Time date)
+{
+    return sprint("%04d-%02d-%02d", date.year, date.mon, date.day);
+}
+
+function String time_ago(f64 now_secs, f64 then_secs)
+{
+    f64 diff = now_secs - then_secs;
+
+    if (diff < 5) return S("just now");
+    if (diff < 60) return sprint("%d seconds ago", (i32)diff);
+    if (diff < 120) return S("1 minute ago");
+    if (diff < 3600) return sprint("%d minutes ago", (i32)(diff / 60));
+    if (diff < 7200) return S("1 hour ago");
+    if (diff < 86400) return sprint("%d hours ago", (i32)(diff / 3600));
+    if (diff < 172800) return S("yesterday");
+
+    return sprint("%d days ago", (i32)(diff / 86400));
 }
 
 function b32 os__do_next_work_queue_entry(Work_Queue *queue)
