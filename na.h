@@ -1987,6 +1987,8 @@ function bool os_make_directory_recursive(String path);
 function File_Lister *os_file_iter_begin(Arena *arena, String path);
 function bool os_file_iter_next(Arena *arena, File_Lister *iter, File_Info *info);
 function void os_file_iter_end(File_Lister *iter);
+function File_List os_scan_directory(Arena *arena, String path);
+function File_List os_scan_entire_directory(Arena *arena, String path);
 
 // Clipboard
 function String os_get_clipboard_text();
@@ -7923,6 +7925,27 @@ function void os_file_print(File *file, char *fmt, ...)
     os_file_append_string(file, result);
 
     ReleaseScratch(scratch);
+}
+
+function File_List os_scan_directory(Arena *arena, String path)
+{
+    File_List result = {0};
+
+    File_Lister *it = os_file_iter_begin(arena, path);
+    File_Info *info = PushArrayZero(arena, File_Info, 1);
+    while (os_file_iter_next(arena, it, info))
+    {
+        if (string_equals(info->name, S(".")) || string_equals(info->name, S(".."))) continue;
+
+        info->path = string_concat3(arena, path, PATH_SEPARATOR, info->name);
+        DLLPushBack(result.first, result.last, info);
+        result.count += 1;
+
+        info = PushArrayZero(arena, File_Info, 1);
+    }
+    os_file_iter_end(it);
+
+    return result;
 }
 
 function File_List os_scan_entire_directory(Arena *arena, String path)

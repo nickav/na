@@ -656,25 +656,43 @@ function bool window_init()
     win32_platform_initted = true;
 
     // NOTE(nick): Set DPI Awareness
-    HMODULE user32 = LoadLibraryA("user32.dll");
+    {
+        HMODULE user32 = LoadLibraryA("user32.dll");
 
-    typedef BOOL Win32_SetProcessDpiAwarenessContext(HANDLE);
-    typedef BOOL Win32_SetProcessDpiAwareness(int);
+        typedef BOOL Win32_SetProcessDpiAwarenessContext(HANDLE);
+        typedef BOOL Win32_SetProcessDpiAwareness(int);
 
-    Win32_SetProcessDpiAwarenessContext *SetProcessDpiAwarenessContext =
-        (Win32_SetProcessDpiAwarenessContext *) GetProcAddress(user32, "SetProcessDpiAwarenessContext");
-    Win32_SetProcessDpiAwareness *SetProcessDpiAwareness =
-        (Win32_SetProcessDpiAwareness *) GetProcAddress(user32, "SetProcessDpiAwareness");
+        Win32_SetProcessDpiAwarenessContext *SetProcessDpiAwarenessContext =
+            (Win32_SetProcessDpiAwarenessContext *) GetProcAddress(user32, "SetProcessDpiAwarenessContext");
+        Win32_SetProcessDpiAwareness *SetProcessDpiAwareness =
+            (Win32_SetProcessDpiAwareness *) GetProcAddress(user32, "SetProcessDpiAwareness");
 
-    if (SetProcessDpiAwarenessContext) {
-        SetProcessDpiAwarenessContext(((HANDLE) -4) /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */);
-    } else if (SetProcessDpiAwareness) {
-        SetProcessDpiAwareness(1 /* PROCESS_SYSTEM_DPI_AWARE */);
-    } else {
-        SetProcessDPIAware();
+        if (SetProcessDpiAwarenessContext) {
+            SetProcessDpiAwarenessContext(((HANDLE) -4) /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */);
+        } else if (SetProcessDpiAwareness) {
+            SetProcessDpiAwareness(1 /* PROCESS_SYSTEM_DPI_AWARE */);
+        } else {
+            SetProcessDPIAware();
+        }
+
+        // NOTE(nick): not freeing user32.dll here because we use it later
     }
 
-    // NOTE(nick): not freeing user32.dll here because we use it later
+    #if 0
+    // NOTE(nick): Set Dark Mode Awareness
+    {
+        typedef DWORD WINAPI Win32_SetPreferredAppMode(DWORD);
+        HMODULE uxtheme = LoadLibraryExA("uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (uxtheme)
+        {
+            Win32_SetPreferredAppMode *SetPreferredAppMode = (Win32_SetPreferredAppMode *)GetProcAddress(uxtheme, MAKEINTRESOURCEA(135));
+            if (SetPreferredAppMode)
+            {
+                SetPreferredAppMode(1);
+            }
+        }
+    }
+    #endif
 
     // NOTE(nick): set up global window class
     HINSTANCE instance = GetModuleHandleW(0);
